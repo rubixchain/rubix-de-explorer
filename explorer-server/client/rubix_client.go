@@ -83,3 +83,24 @@ func (c *RubixClient) GetFTTokenchain(tokenID string) (map[string]interface{}, e
 	}
 	return data, nil
 }
+
+func (c *RubixClient) GetRBTTokenchain(tokenID string) (*model.GetRBTTokenChainResponse, error) {
+	client := &http.Client{Timeout: c.Timeout}
+	url := fmt.Sprintf("%s/api/de-exp/get-rbt-token-chain?tokenID=%s", c.BaseURL, tokenID)
+
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call Rubix Node (RBT Tokenchain): %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status from Rubix Node: %d", resp.StatusCode)
+	}
+
+	var data model.GetRBTTokenChainResponse
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, fmt.Errorf("failed to decode RBT tokenchain response: %w", err)
+	}
+	return &data, nil
+}
