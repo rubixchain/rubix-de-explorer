@@ -1,6 +1,6 @@
 package config
 
 const (
-	ExplorerPort = ":8081"
+	ExplorerPort = "8082"
 	RubixNodeURL = "http://localhost:20010"
 )

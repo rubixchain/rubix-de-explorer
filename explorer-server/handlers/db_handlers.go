@@ -59,6 +59,20 @@ func DatabaseTokensHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+func DatabaseAllAssetCountHandler(w http.ResponseWriter, r *http.Request) {
+	counts, err := database.GetAllAssetCounts()
+	if err != nil {
+		http.Error(w, "Failed to retrieve asset counts", http.StatusInternalServerError)
+		return
+	}
+	response := map[string]interface{}{
+		"status": "success",
+		"data":   counts,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
 // DatabaseBlocksHandler handles requests for blocks from database
 func DatabaseBlocksHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse query parameters
@@ -170,10 +184,10 @@ func DatabaseTokenChainHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := map[string]interface{}{
-		"status":    "success",
-		"token_id":  tokenID,
-		"count":     len(chainWithBlocks),
-		"chain":     chainWithBlocks,
+		"status":   "success",
+		"token_id": tokenID,
+		"count":    len(chainWithBlocks),
+		"chain":    chainWithBlocks,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -247,9 +261,9 @@ func DatabaseDIDHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := map[string]interface{}{
-		"status": "success",
-		"data":   did,
-		"tokens": tokens,
+		"status":              "success",
+		"data":                did,
+		"tokens":              tokens,
 		"recent_transactions": blocks,
 	}
 
@@ -265,13 +279,11 @@ func DatabaseAnalyticsHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to retrieve token statistics", http.StatusInternalServerError)
 		return
 	}
-
 	// Get recent transaction analytics (last 24 hours)
 	recentTxns, err := database.GetRecentTransactionStats(24)
 	if err != nil {
 		recentTxns = &database.TxnAnalytics{} // Empty if error
 	}
-
 	// Get recent blocks
 	db := database.GetDB()
 	blockQueries := database.NewBlockQueries(db)
@@ -283,9 +295,9 @@ func DatabaseAnalyticsHandler(w http.ResponseWriter, r *http.Request) {
 	response := map[string]interface{}{
 		"status": "success",
 		"analytics": map[string]interface{}{
-			"token_statistics":     tokenStats,
-			"recent_transactions":  recentTxns,
-			"latest_blocks":        recentBlocks,
+			"token_statistics":    tokenStats,
+			"recent_transactions": recentTxns,
+			"latest_blocks":       recentBlocks,
 		},
 	}
 
@@ -304,9 +316,9 @@ func DatabaseSearchHandler(w http.ResponseWriter, r *http.Request) {
 	searchType := r.URL.Query().Get("type") // token, block, did, or all
 
 	results := map[string]interface{}{
-		"status": "success",
-		"query":  query,
-		"type":   searchType,
+		"status":  "success",
+		"query":   query,
+		"type":    searchType,
 		"results": map[string]interface{}{},
 	}
 
@@ -329,7 +341,7 @@ func DatabaseSearchHandler(w http.ResponseWriter, r *http.Request) {
 		// Try exact match first
 		if block, err := blockQueries.GetBlock(query); err == nil {
 			results["results"].(map[string]interface{})["block"] = block
-		} else if block, err := blockQueries.GetBlockByHash(query); err == nil {
+		} else if block, err := blockQueries.GetBlockByHash(query); err == nil { //@check cannot get blockByHash
 			results["results"].(map[string]interface{})["block"] = block
 		}
 	}
@@ -355,9 +367,9 @@ func DatabaseInterfaceHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Get counts from all tables
 	interface_data := map[string]interface{}{
-		"status": "success",
+		"status":        "success",
 		"database_info": map[string]interface{}{},
-		"tables": map[string]interface{}{},
+		"tables":        map[string]interface{}{},
 	}
 
 	// Get table counts
@@ -393,11 +405,11 @@ func DatabaseInterfaceHandler(w http.ResponseWriter, r *http.Request) {
 			err := tokenRows.Scan(&tokenID, &tokenType, &currentOwner, &state, &createdAt)
 			if err == nil {
 				tokenSamples = append(tokenSamples, map[string]interface{}{
-					"token_id": tokenID,
-					"token_type": tokenType,
+					"token_id":      tokenID,
+					"token_type":    tokenType,
 					"current_owner": currentOwner,
-					"state": state,
-					"created_at": createdAt,
+					"state":         state,
+					"created_at":    createdAt,
 				})
 			}
 		}
@@ -416,10 +428,10 @@ func DatabaseInterfaceHandler(w http.ResponseWriter, r *http.Request) {
 			err := didRows.Scan(&didID, &totalBalance, &pledgedAmount, &lastActive)
 			if err == nil {
 				didSamples = append(didSamples, map[string]interface{}{
-					"did_id": didID,
-					"total_balance": totalBalance,
+					"did_id":         didID,
+					"total_balance":  totalBalance,
 					"pledged_amount": pledgedAmount,
-					"last_active": lastActive,
+					"last_active":    lastActive,
 				})
 			}
 		}
@@ -438,11 +450,11 @@ func DatabaseInterfaceHandler(w http.ResponseWriter, r *http.Request) {
 			err := statsRows.Scan(&tokenType, &totalTokens, &activeTokens, &pledgedTokens, &lastUpdated)
 			if err == nil {
 				statsSamples = append(statsSamples, map[string]interface{}{
-					"token_type": tokenType,
-					"total_tokens": totalTokens,
-					"active_tokens": activeTokens,
+					"token_type":     tokenType,
+					"total_tokens":   totalTokens,
+					"active_tokens":  activeTokens,
 					"pledged_tokens": pledgedTokens,
-					"last_updated": lastUpdated,
+					"last_updated":   lastUpdated,
 				})
 			}
 		}
@@ -457,4 +469,39 @@ func DatabaseInterfaceHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(interface_data)
+}
+
+func DatabaseAllDIDCountHandler(w http.ResponseWriter, r *http.Request) {
+	count, err := database.GetAllDIDCount()
+	if err != nil {
+		http.Error(w, "Failed to retrieve DID count", http.StatusInternalServerError)
+		return
+	}
+
+	response := map[string]interface{}{
+		"status": "success",
+		"data":   map[string]int{"did_count": count},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+
+}
+
+func DatabaseDidWithMostRBTsHandler(w http.ResponseWriter, r *http.Request) {
+	dids, err := database.GetTopDIDsWithMostRBTs()
+	if err != nil {
+		http.Error(w, "Failed to retrieve DIDs with most RBTs", http.StatusInternalServerError)
+		return
+	}
+
+	response := map[string]interface{}{
+		"status": "success",
+		"data":   dids, // directly return the list of DIDs with their counts
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
 }

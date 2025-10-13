@@ -45,7 +45,7 @@ func (tq *TokenQueries) CreateToken(token *Token) error {
 		INSERT INTO tokens (token_id, token_type, current_owner, state)
 		VALUES ($1, $2, $3, $4)
 	`
-	_, err := tq.db.Exec(query, token.TokenID, token.TokenType, token.CurrentOwner, token.State)
+	_, err := tq.db.Exec(query, token.TokenID, token.TokenType, token.CurrentOwner, token.State) // if the token is smart contract then there would't be any owner
 	if err != nil {
 		log.Printf("Error creating token: %v", err)
 		return err
@@ -186,7 +186,7 @@ func (bq *BlockQueries) CreateBlock(block *Block) error {
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`
 	_, err := bq.db.Exec(query,
-		block.BlockID, block.BlockHash, block.PrevBlockHash,
+		block.BlockID, block.PrevBlockID,
 		block.SenderDID, block.ReceiverDID, block.TxnType,
 		block.Amount, block.TxnTime, block.Epoch, block.TimeTakenMs,
 	)
@@ -206,9 +206,10 @@ func (bq *BlockQueries) GetBlock(blockID string) (*Block, error) {
 	`
 	var block Block
 	err := bq.db.QueryRow(query, blockID).Scan(
-		&block.BlockID, &block.BlockHash, &block.PrevBlockHash,
+		&block.BlockID,&block.PrevBlockID,
 		&block.SenderDID, &block.ReceiverDID, &block.TxnType,
-		&block.Amount, &block.TxnTime, &block.Epoch, &block.TimeTakenMs,
+		&block.Amount, &block.TxnTime, &block.Epoch, &block.TimeTakenMs, &block.Tokens, 
+		&block.
 	)
 	if err != nil {
 		return nil, err
@@ -216,29 +217,11 @@ func (bq *BlockQueries) GetBlock(blockID string) (*Block, error) {
 	return &block, nil
 }
 
-// GetBlockByHash retrieves a block by hash
-func (bq *BlockQueries) GetBlockByHash(blockHash string) (*Block, error) {
-	query := `
-		SELECT block_id, block_hash, prev_block_hash, sender_did, receiver_did, txn_type, amount, txn_time, epoch, time_taken_ms
-		FROM blocks
-		WHERE block_hash = $1
-	`
-	var block Block
-	err := bq.db.QueryRow(query, blockHash).Scan(
-		&block.BlockID, &block.BlockHash, &block.PrevBlockHash,
-		&block.SenderDID, &block.ReceiverDID, &block.TxnType,
-		&block.Amount, &block.TxnTime, &block.Epoch, &block.TimeTakenMs,
-	)
-	if err != nil {
-		return nil, err
-	}
-	return &block, nil
-}
 
 // GetLatestBlocks retrieves the latest blocks
 func (bq *BlockQueries) GetLatestBlocks(limit int) ([]*Block, error) {
 	query := `
-		SELECT block_id, block_hash, prev_block_hash, sender_did, receiver_did, txn_type, amount, txn_time, epoch, time_taken_ms
+		SELECT block_id, block_hash, prev_block_id, sender_did, receiver_did, txn_type, amount, txn_time, epoch, time_taken_ms, tokens, validator_pledge_map, txn_id
 		FROM blocks
 		ORDER BY txn_time DESC
 		LIMIT $1
@@ -253,9 +236,10 @@ func (bq *BlockQueries) GetLatestBlocks(limit int) ([]*Block, error) {
 	for rows.Next() {
 		var block Block
 		err := rows.Scan(
-			&block.BlockID, &block.BlockHash, &block.PrevBlockHash,
+			&block.BlockID, &block.BlockID, &block.PrevBlockID,
 			&block.SenderDID, &block.ReceiverDID, &block.TxnType,
 			&block.Amount, &block.TxnTime, &block.Epoch, &block.TimeTakenMs,
+			&block.Tokens, &block.ValidatorPledgeMap, &block.TxnID,
 		)
 		if err != nil {
 			return nil, err
@@ -690,4 +674,69 @@ func SearchBlocks(senderDID, receiverDID, txnType string, limit, offset int) ([]
 		blocks = append(blocks, &block)
 	}
 	return blocks, nil
+}
+
+// get all asset counts
+func GetAllAssetCounts() (int, error) {
+	query := `
+		SELECT COUNT(*) FROM tokens
+	`
+	var count int
+	err := DB.QueryRow(query).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// get all did count
+func GetAllDIDCount() (int, error) {
+	var count int
+	err := DB.QueryRow("SELECT COUNT(*) FROM dids").Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get DID count: %v", err)
+	}
+	return count, nil
+}
+
+// get the did with most rbts
+func GetTopDIDsWithMostRBTs() ([]struct {
+	DIDID    string
+	RBTCount int
+}, error) {
+	query := `
+		SELECT current_owner, COUNT(*) as rbt_count
+		FROM tokens
+		WHERE token_type = 'RBT'
+		GROUP BY current_owner
+		ORDER BY rbt_count DESC
+		LIMIT $10
+	`
+	rows, err := DB.Query(query, 10)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query top DIDs: %v", err)
+	}
+	defer rows.Close()
+	var results []struct {
+		DIDID    string
+		RBTCount int
+	}
+	for rows.Next() {
+		var didID string
+		var rbtCount int
+		if err := rows.Scan(&didID, &rbtCount); err != nil {
+			return nil, fmt.Errorf("failed to scan row: %v", err)
+		}
+		results = append(results, struct {
+			DIDID    string
+			RBTCount int
+		}{
+			DIDID:    didID,
+			RBTCount: rbtCount,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("row iteration error: %v", err)
+	}
+	return results, nil
 }

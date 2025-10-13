@@ -84,7 +84,7 @@ func (c *DatabaseConfig) GetPostgresExecutable() string {
 	if runtime.GOOS == "windows" {
 		return filepath.Join(c.BinDir, "postgres.exe")
 	}
-	return filepath.Join(c.BinDir, "postgres")
+	return `/opt/homebrew/bin/postgres`
 }
 
 // GetPgCtlExecutable returns the path to pg_ctl executable
@@ -92,7 +92,7 @@ func (c *DatabaseConfig) GetPgCtlExecutable() string {
 	if runtime.GOOS == "windows" {
 		return filepath.Join(c.BinDir, "pg_ctl.exe")
 	}
-	return filepath.Join(c.BinDir, "pg_ctl")
+	return `/opt/homebrew/bin/pg_ctl`
 }
 
 // GetInitDBExecutable returns the path to initdb executable
@@ -100,7 +100,7 @@ func (c *DatabaseConfig) GetInitDBExecutable() string {
 	if runtime.GOOS == "windows" {
 		return filepath.Join(c.BinDir, "initdb.exe")
 	}
-	return filepath.Join(c.BinDir, "initdb")
+	return `/opt/homebrew/bin/initdb`
 }
 
 // GetCreateDBExecutable returns the path to createdb executable
@@ -108,7 +108,7 @@ func (c *DatabaseConfig) GetCreateDBExecutable() string {
 	if runtime.GOOS == "windows" {
 		return filepath.Join(c.BinDir, "createdb.exe")
 	}
-	return filepath.Join(c.BinDir, "createdb")
+	return `/opt/homebrew/bin/createdb`
 }
 
 // GetPsqlExecutable returns the path to psql executable
@@ -116,7 +116,7 @@ func (c *DatabaseConfig) GetPsqlExecutable() string {
 	if runtime.GOOS == "windows" {
 		return filepath.Join(c.BinDir, "psql.exe")
 	}
-	return filepath.Join(c.BinDir, "psql")
+	return `/opt/homebrew/bin/psql`
 }
 
 // getProjectRoot finds the project root directory by looking for go.mod file

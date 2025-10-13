@@ -119,7 +119,7 @@ func initializeDatabase() error {
 	}
 
 	// Create password file for Windows compatibility
-	pwFile := filepath.Join(config.DataDir, "..","pgpass.tmp")
+	pwFile := filepath.Join(config.DataDir, "..", "pgpass.tmp")
 	if err := ioutil.WriteFile(pwFile, []byte(config.Password), 0600); err != nil {
 		return fmt.Errorf("failed to create password file: %v", err)
 	}
@@ -201,7 +201,7 @@ func updatePostgreSQLConfig() error {
 		"wal_buffers":                      "'16MB'",
 		"default_statistics_target":        "100",
 		"random_page_cost":                 "1.1",
-		"effective_io_concurrency":         "200",
+		"effective_io_concurrency":         "0", //setting up to 0 to let postgres decide based on system
 		"work_mem":                         "'4MB'",
 		"min_wal_size":                     "'1GB'",
 		"max_wal_size":                     "'4GB'",
@@ -238,45 +238,48 @@ func updatePostgreSQLConfig() error {
 }
 
 // startPostgreSQLServer starts the PostgreSQL server
-func startPostgreSQLServer() error {
-	if isPostgreSQLRunning() {
-		log.Println("🟢 PostgreSQL server is already running")
-		return nil
-	}
+// func startPostgreSQLServer() error {
+// 	if isPostgreSQLRunning() {
+// 		log.Println("🟢 PostgreSQL server is already running")
+// 		return nil
+// 	}
 
-	log.Println("🚀 Starting PostgreSQL server...")
+// 	log.Println("🚀 Starting PostgreSQL server...")
 
-	cmd := exec.Command(config.GetPgCtlExecutable(),
-		"-D", config.DataDir,
-		"-l", filepath.Join(config.DataDir, "postgres.log"),
-		"start",
-	)
+// 	cmd := exec.Command(config.GetPgCtlExecutable(),
+// 		"-D", config.DataDir,
+// 		"-l", filepath.Join(config.DataDir, "postgres.log"),
+// 		"start",
+// 	)
+// 		fmt.Print("Starting command:")
 
-	// Set environment variables
-	env := os.Environ()
-	if runtime.GOOS == "windows" {
-		env = append(env, fmt.Sprintf("PATH=%s;%s", config.BinDir, os.Getenv("PATH")))
-	} else {
-		env = append(env, fmt.Sprintf("PATH=%s:%s", config.BinDir, os.Getenv("PATH")))
-	}
-	cmd.Env = env
+// 	// Set environment variables
+// 	env := os.Environ()
+// 		fmt.Print("Starting command:")
 
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to start PostgreSQL: %v", err)
-	}
+// 	if runtime.GOOS == "windows" {
+// 		env = append(env, fmt.Sprintf("PATH=%s;%s", config.BinDir, os.Getenv("PATH")))
+// 	} else {
+// 		env = append(env, fmt.Sprintf("PATH=%s:%s", config.BinDir, os.Getenv("PATH")))
+// 	}
+// 	cmd.Env = env
+// 	fmt.Print("Starting command:")
+// 	if err := cmd.Run(); err != nil {
+// 		return fmt.Errorf("failed to start PostgreSQL: %v", err)
+// 	}
 
-	// Wait for server to be ready
-	log.Println("⏳ Waiting for PostgreSQL server to be ready...")
-	for i := 0; i < 30; i++ {
-		if isPostgreSQLRunning() {
-			log.Println("✅ PostgreSQL server started successfully")
-			return nil
-		}
-		time.Sleep(1 * time.Second)
-	}
+// 	// Wait for server to be ready
+// 	log.Println("⏳ Waiting for PostgreSQL server to be ready...")
+// 	for i := 0; i < 30; i++ {
+// 		if isPostgreSQLRunning() {
+// 			log.Println("✅ PostgreSQL server started successfully")
+// 			return nil
+// 		}
+// 		time.Sleep(1 * time.Second)
+// 	}
 
-	return fmt.Errorf("PostgreSQL server failed to start within 30 seconds")
-}
+// 	return fmt.Errorf("PostgreSQL server failed to start within 30 seconds")
+// }
 
 // isPostgreSQLRunning checks if PostgreSQL server is running
 func isPostgreSQLRunning() bool {
@@ -395,11 +398,11 @@ func runSchemaMigrations() error {
 
 		// Skip statements that are only comments (check if contains SQL commands)
 		hasSQL := strings.Contains(strings.ToUpper(statement), "CREATE") ||
-				  strings.Contains(strings.ToUpper(statement), "INSERT") ||
-				  strings.Contains(strings.ToUpper(statement), "UPDATE") ||
-				  strings.Contains(strings.ToUpper(statement), "DELETE") ||
-				  strings.Contains(strings.ToUpper(statement), "DROP") ||
-				  strings.Contains(strings.ToUpper(statement), "ALTER")
+			strings.Contains(strings.ToUpper(statement), "INSERT") ||
+			strings.Contains(strings.ToUpper(statement), "UPDATE") ||
+			strings.Contains(strings.ToUpper(statement), "DELETE") ||
+			strings.Contains(strings.ToUpper(statement), "DROP") ||
+			strings.Contains(strings.ToUpper(statement), "ALTER")
 
 		if !hasSQL {
 			log.Printf("⏭️ Skipping statement %d (no SQL commands)", i+1)
@@ -480,3 +483,134 @@ func IsHealthy() bool {
 	err := DB.Ping()
 	return err == nil
 }
+
+// checkMacOSPrerequisites checks for common macOS issues
+func checkMacOSPrerequisites() error {
+	log.Println("🔍 Checking macOS prerequisites...")
+
+	// Check if binaries have execute permissions
+	binaries := []string{
+		config.GetPostgresExecutable(),
+		config.GetPgCtlExecutable(),
+		config.GetInitDBExecutable(),
+		config.GetCreateDBExecutable(),
+		config.GetPsqlExecutable(),
+	}
+
+	for _, binary := range binaries {
+		info, err := os.Stat(binary)
+		if err != nil {
+			return fmt.Errorf("binary not found: %s", binary)
+		}
+
+		mode := info.Mode()
+		if mode&0111 == 0 {
+			log.Printf("⚠️ Binary %s is not executable, attempting to fix...", binary)
+			if err := os.Chmod(binary, 0755); err != nil {
+				return fmt.Errorf("failed to make %s executable: %v", binary, err)
+			}
+			log.Printf("✅ Made %s executable", binary)
+		}
+	}
+
+	// Check if lib directory exists and contains required libraries
+	libDir := filepath.Join(filepath.Dir(config.BinDir), "lib")
+	if _, err := os.Stat(libDir); os.IsNotExist(err) {
+		log.Printf("⚠️ Library directory not found: %s", libDir)
+	} else {
+		log.Printf("✅ Library directory found: %s", libDir)
+	}
+
+	// Check data directory permissions
+	if info, err := os.Stat(config.DataDir); err == nil {
+		mode := info.Mode()
+		if mode&0700 != 0700 {
+			log.Printf("⚠️ Data directory permissions may be insufficient: %o", mode.Perm())
+		}
+	}
+
+	log.Println("✅ macOS prerequisites check completed")
+	return nil
+}
+
+// startPostgreSQLServer starts the PostgreSQL server
+func startPostgreSQLServer() error {
+	if isPostgreSQLRunning() {
+		log.Println("🟢 PostgreSQL server is already running")
+		return nil
+	}
+
+	log.Println("🚀 Starting PostgreSQL server...")
+
+	// macOS specific: Check for common issues before starting
+	if runtime.GOOS == "darwin" {
+		if err := checkMacOSPrerequisites(); err != nil {
+			return fmt.Errorf("macOS prerequisites check failed: %v", err)
+		}
+	}
+
+	cmd := exec.Command(config.GetPgCtlExecutable(),
+		"-D", config.DataDir,
+		"-l", filepath.Join(config.DataDir, "postgres.log"),
+		"start",
+	)
+
+	// Set environment variables
+	env := os.Environ()
+	if runtime.GOOS == "windows" {
+		env = append(env, fmt.Sprintf("PATH=%s;%s", config.BinDir, os.Getenv("PATH")))
+	} else {
+		env = append(env, fmt.Sprintf("PATH=%s:%s", config.BinDir, os.Getenv("PATH")))
+		// macOS specific: Add library path
+		if runtime.GOOS == "darwin" {
+			libDir := filepath.Join(filepath.Dir(config.BinDir), "lib")
+			env = append(env, fmt.Sprintf("DYLD_LIBRARY_PATH=%s:%s", libDir, os.Getenv("DYLD_LIBRARY_PATH")))
+			log.Printf("🔧 macOS: Setting DYLD_LIBRARY_PATH=%s", libDir)
+		} else {
+			// Linux specific: Add library path
+			libDir := filepath.Join(filepath.Dir(config.BinDir), "lib")
+			env = append(env, fmt.Sprintf("LD_LIBRARY_PATH=%s:%s", libDir, os.Getenv("LD_LIBRARY_PATH")))
+		}
+	}
+	cmd.Env = env
+
+	log.Printf("🔧 Command: %s", cmd.String())
+	log.Printf("🔧 Data directory: %s", config.DataDir)
+	log.Printf("🔧 Bin directory: %s", config.BinDir)
+
+	// Capture both stdout and stderr for better debugging
+	output, err := cmd.CombinedOutput()
+	log.Printf("📄 pg_ctl output: %s", string(output))
+
+	if err != nil {
+		// Try to read the PostgreSQL log for more details
+		logFile := filepath.Join(config.DataDir, "postgres.log")
+		if logData, readErr := ioutil.ReadFile(logFile); readErr == nil {
+			log.Printf("❌ PostgreSQL log output:\n%s", string(logData))
+		} else {
+			log.Printf("⚠️ Could not read PostgreSQL log file: %v", readErr)
+		}
+		log.Printf("❌ pg_ctl command failed with: %v", err)
+		return fmt.Errorf("failed to start PostgreSQL: %v", err)
+	}
+
+	// Wait for server to be ready
+	log.Println("⏳ Waiting for PostgreSQL server to be ready...")
+	for i := 0; i < 30; i++ {
+		if isPostgreSQLRunning() {
+			log.Println("✅ PostgreSQL server started successfully")
+			return nil
+		}
+		log.Printf("⏳ Attempt %d/30: Server not ready yet...", i+1)
+		time.Sleep(1 * time.Second)
+	}
+
+	// If we reach here, server didn't start - read the log one more time
+	logFile := filepath.Join(config.DataDir, "postgres.log")
+	if logData, readErr := ioutil.ReadFile(logFile); readErr == nil {
+		log.Printf("❌ Final PostgreSQL log output:\n%s", string(logData))
+	}
+
+	return fmt.Errorf("PostgreSQL server failed to start within 30 seconds")
+}
+

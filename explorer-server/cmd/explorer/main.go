@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -24,7 +25,7 @@ func main() {
 	// Initialize PostgreSQL database
 	log.Println("📦 Initializing database...")
 	if err := database.Initialize(); err != nil {
-		log.Fatalf("❌ Failed to initialize database: %v", err)
+		log.Fatalf("❌ failed to start PostgreSQL server %v", err)
 	}
 
 	// Initialize Rubix client for data synchronization
@@ -40,10 +41,6 @@ func main() {
 	syncService.StartPeriodicSync(syncInterval)
 	log.Printf("⏰ Periodic sync started (every %v)", syncInterval)
 
-	// Set sync service for handlers
-	log.Println("🔧 Configuring handlers...")
-	// We'll need to update the router to pass the sync service
-
 	// Set up graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -52,11 +49,9 @@ func main() {
 		<-sigChan
 		log.Println("🛑 Received shutdown signal...")
 
-		// Stop sync service
 		log.Println("🔄 Stopping sync service...")
 		syncService.StopPeriodicSync()
 
-		// Close database connections and stop PostgreSQL
 		if err := database.Close(); err != nil {
 			log.Printf("❌ Error during database shutdown: %v", err)
 		}
@@ -65,10 +60,10 @@ func main() {
 		os.Exit(0)
 	}()
 
-	// Use the mux router from router.go
+	// Setup router
 	r := router.NewRouter()
 
-	// Add sync monitoring routes
+	// Add sync monitoring route
 	r.HandleFunc("/api/sync/status", func(w http.ResponseWriter, req *http.Request) {
 		stats, err := syncService.GetSyncStats()
 		if err != nil {
@@ -88,7 +83,14 @@ func main() {
 	// Wrap with CORS
 	handler := cors.Default().Handler(r)
 
-	log.Println("✅ Explorer server running on :8081 with CORS enabled")
+	// ✅ Use port from config instead of hardcoded value
+	port := config.ExplorerPort
+	if port == "" {
+		port = "8081" // fallback if not provided
+	}
+
+	log.Printf("✅ Explorer server running on :%s with CORS enabled", port)
 	log.Println("📊 Database ready for connections")
-	log.Fatal(http.ListenAndServe(":8081", handler))
+
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", port), handler))
 }

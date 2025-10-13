@@ -4,6 +4,8 @@
 explorer-server
 explorer.exe
 
+.env
+
 # Database runtime files - DO NOT COMMIT
 database/postgres-bin/*/data/
 database/postgres-bin/windows/data/
