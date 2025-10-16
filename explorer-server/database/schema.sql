@@ -37,7 +37,6 @@ CREATE TABLE IF NOT EXISTS smart_contracts (
     contract_id TEXT PRIMARY KEY,
     creator_did TEXT NOT NULL,
     deployer_did TEXT NOT NULL,
-    executor_did TEXT,
     created_at TIMESTAMP NOT NULL,
     last_executed_at TIMESTAMP
 );

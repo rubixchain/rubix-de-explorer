@@ -53,7 +53,6 @@ func (s *SyncService) StartPeriodicSync(interval time.Duration) {
 		log.Println("🔄 Sync service is already running")
 		return
 	}
-
 	s.isRunning = true
 	log.Printf("🚀 Starting periodic sync every %v", interval)
 
@@ -100,18 +99,15 @@ func (s *SyncService) performFullSync() {
 	if err := s.syncTokenChains(); err != nil {
 		log.Printf("❌ Error syncing token chains: %v", err)
 	}
-
 	// Sync blocks/transactions
 	if err := s.syncBlocks(); err != nil {
 		log.Printf("❌ Error syncing blocks: %v", err)
 	}
-
 	// Run server-side processing pipeline
 	log.Println("🔄 Starting server-side data processing...")
 	if err := s.processingService.ProcessAll(); err != nil {
 		log.Printf("❌ Error in processing pipeline: %v", err)
 	}
-
 	// Update sync statistics
 	duration := time.Since(startTime)
 	log.Printf("✅ Full sync completed in %v", duration)

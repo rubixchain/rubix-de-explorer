@@ -206,17 +206,15 @@ func (bq *BlockQueries) GetBlock(blockID string) (*Block, error) {
 	`
 	var block Block
 	err := bq.db.QueryRow(query, blockID).Scan(
-		&block.BlockID,&block.PrevBlockID,
+		&block.BlockID, &block.PrevBlockID,
 		&block.SenderDID, &block.ReceiverDID, &block.TxnType,
-		&block.Amount, &block.TxnTime, &block.Epoch, &block.TimeTakenMs, &block.Tokens, 
-		&block.
+		&block.Amount, &block.TxnTime, &block.Epoch, &block.TimeTakenMs, &block.Tokens,
 	)
 	if err != nil {
 		return nil, err
 	}
 	return &block, nil
 }
-
 
 // GetLatestBlocks retrieves the latest blocks
 func (bq *BlockQueries) GetLatestBlocks(limit int) ([]*Block, error) {
@@ -279,8 +277,7 @@ func (bq *BlockQueries) GetBlocksByDID(didID string) ([]*Block, error) {
 	return blocks, nil
 }
 
-// DID Operations
-
+// DID
 // CreateDID creates a new DID
 func (dq *DIDQueries) CreateDID(did *DID) error {
 	query := `
