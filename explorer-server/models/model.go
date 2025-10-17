@@ -128,15 +128,19 @@ type DatabaseHealth struct {
 	Message     string `json:"message"`
 }
 
-
-type RBTsResponse struct {
-	TokenId    string `json:"token_id"`
-	OwnerDID   string `json:"owner_did"`
+type Token struct {
+	TokenId    string  `json:"token_id"`
+	OwnerDID   string  `json:"owner_did"`
 	TokenValue float64 `json:"token_value"`
 }
-type HolderResponse struct{
-	OwnerDID   string  `json:"owner_did"`
-	TokenCount int64   `json:"token_count"`
+
+type TokenResponse struct {
+	Tokens []Token `json:"tokens"`
+}
+
+type HolderResponse struct {
+	OwnerDID   string `json:"owner_did"`
+	TokenCount int64  `json:"token_count"`
 	// TotalTransactions int64 `json:"total_transactions"`
 }
 
@@ -145,10 +149,10 @@ type HoldersResponse struct {
 }
 
 type TransactionResponse struct {
-	TxnHash  string `json:"txn_hash"`
-	TxnType  string `json:"txn_type"`
-	Amount   float64 `json:"amount"`
-	Epoch  time.Time `json:"txn_time"`
+	TxnHash string    `json:"txn_hash"`
+	TxnType string    `json:"txn_type"`
+	Amount  float64   `json:"amount"`
+	Epoch   time.Time `json:"txn_time"`
 }
 
 type TransactionsResponse struct {
@@ -170,25 +174,24 @@ type TransactionsResponse struct {
 // 	DIDs                   []DIDs         `json:"dids"`
 // }
 
-
-//-----Token explorer response 
+// -----Token explorer response
 type RbtResponse struct {
-	RBT RBT `json:"rbt"`
+	RBT    RBT   `json:"rbt"`
 	Blocks Block `json:"block"`
 }
 
 type Block struct {
-  TxnHash   string    `json:"txn_hash"`
-  BlockType int64     `json:"block_type"`
-  Epoch     time.Time `json:"epoch"`
+	TxnHash   string    `json:"txn_hash"`
+	BlockType int64     `json:"block_type"`
+	Epoch     time.Time `json:"epoch"`
 }
 
 type TokenChainResponse struct {
-	Blocks     []Block `json:"blocks"`
+	Blocks []Block `json:"blocks"`
 }
 
 type DIDResponse struct {
-	DID  DID `json:"did"`
+	DID  DID   `json:"did"`
 	RBTs []RBT `json:"rbts"`
-	// Trasactions []TransactionResponse `json:"transactions"` 
+	// Trasactions []TransactionResponse `json:"transactions"`
 }

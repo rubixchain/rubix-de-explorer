@@ -7,7 +7,8 @@ package handlers
 // 	"explorer-server/services"
 // )
 
-// func GetFTCountHandler(service *services.FTService) http.HandlerFunc {
+// // return did_count as response
+// func GetDIDCountHandler(service *services.FTService) http.HandlerFunc {
 // 	return func(w http.ResponseWriter, r *http.Request) {
 // 		result, err := service.GetFTTokens()
 // 		if err != nil {
@@ -20,7 +21,8 @@ package handlers
 // 	}
 // }
 
-// func GetFTInfoFromFTIDHandler(service *services.FTService) http.HandlerFunc {
+// // there will be DID param send in the rquest query
+// func GetDIDInfoFromDIDHandler(service *services.FTService) http.HandlerFunc {
 // 	return func(w http.ResponseWriter, r *http.Request) {
 // 		result, err := service.GetFTTokens()
 // 		if err != nil {
@@ -31,4 +33,10 @@ package handlers
 // 		w.Header().Set("Content-Type", "application/json")
 // 		json.NewEncoder(w).Encode(result)
 // 	}
+// }
+
+
+// // there will be limit and page params send in the rquest query
+// func GetDIDListHavingHighTokenCountHandler(service *services.FTService) http.HandlerFunc {
+
 // }

@@ -1,18 +1,24 @@
 package services
 
 import (
-	"explorer-server/client"
-	"explorer-server/model"
+	"explorer-server/database"
+	"explorer-server/database/models"
 )
 
-type RBTService struct {
-	client *client.RubixClient
+// GetRBTCount returns the total number of RBTs in the database
+func GetRBTCount() (int64, error) {
+	var count int64
+	if err := database.DB.Model(&models.RBT{}).Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
-func NewRBTService(c *client.RubixClient) *RBTService {
-	return &RBTService{client: c}
-}
-
-func (s *RBTService) FetchFreeRBTs() (*model.GetFreeRBTResponse, error) {
-	return s.client.GetFreeRBTs()
-}
+// // GetRBTInfoFromRBTID fetches a single RBT by its ID
+// func GetRBTInfoFromRBTID(rbtID string) (*models.RBT, error) {
+// 	var rbt models.RBT
+// 	if err := database.DB.First(&rbt, "rbt_id = ?", rbtID).Error; err != nil {
+// 		return nil, err
+// 	}
+// 	return &rbt, nil
+// }

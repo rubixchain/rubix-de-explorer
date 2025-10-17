@@ -7,28 +7,32 @@ package handlers
 // 	"explorer-server/services"
 // )
 
-// func GetFTCountHandler(service *services.FTService) http.HandlerFunc {
+// func GetNFTCountHandler(service *services.RBTService) http.HandlerFunc {
 // 	return func(w http.ResponseWriter, r *http.Request) {
-// 		result, err := service.GetFTTokens()
+// 		data, err := service.FetchFreeRBTs()
 // 		if err != nil {
 // 			http.Error(w, err.Error(), http.StatusInternalServerError)
 // 			return
 // 		}
 
 // 		w.Header().Set("Content-Type", "application/json")
-// 		json.NewEncoder(w).Encode(result)
+// 		if err := json.NewEncoder(w).Encode(data); err != nil {
+// 			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+// 		}
 // 	}
 // }
 
-// func GetFTInfoFromFTIDHandler(service *services.FTService) http.HandlerFunc {
+// func GetNFTInfoFromNFTIDHandler(service *services.RBTService) http.HandlerFunc {
 // 	return func(w http.ResponseWriter, r *http.Request) {
-// 		result, err := service.GetFTTokens()
+// 		data, err := service.FetchFreeRBTs()
 // 		if err != nil {
 // 			http.Error(w, err.Error(), http.StatusInternalServerError)
 // 			return
 // 		}
 
 // 		w.Header().Set("Content-Type", "application/json")
-// 		json.NewEncoder(w).Encode(result)
+// 		if err := json.NewEncoder(w).Encode(data); err != nil {
+// 			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+// 		}
 // 	}
 // }

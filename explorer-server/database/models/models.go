@@ -1,8 +1,26 @@
-package database
+package models
+
 
 import (
 	"time"
+	"gorm.io/datatypes"
 )
+
+type TransferBlocks struct {
+	BlockHash          string         `json:"block_hash" gorm:"primaryKey"`
+	PrevBlockID        *string        `json:"prev_block_id"`
+	SenderDID          *string        `json:"sender_did"`
+	ReceiverDID        *string        `json:"receiver_did"`
+	TxnType            *string        `json:"txn_type"`
+	Amount             *float64       `json:"amount"`
+	TxnTime            time.Time      `json:"txn_time"`
+	Epoch              *int64         `json:"epoch"`
+	TimeTakenMs        *int64         `json:"time_taken_ms"`
+	Tokens             datatypes.JSON `json:"tokens" gorm:"type:jsonb"`               // store []string as JSONB
+	ValidatorPledgeMap datatypes.JSON `json:"validator_pledge_map" gorm:"type:jsonb"` // store map[string][]string as JSONB
+	TxnID              *string        `json:"txn_id"`
+}
+
 
 // Token represents a token in the system
 type TokenType struct {
@@ -18,20 +36,20 @@ type AllBlocks struct {
 	TxnID     string    `json:"txn_id" db:"txn_id"`
 }
 
-type TransferBlocks struct {
-	BlockHash          string               `json:"block_hash" db:"block_hash"`
-	PrevBlockID        *string              `json:"prev_block_id" db:"prev_block_id"`
-	SenderDID          *string              `json:"sender_did" db:"sender_did"`
-	ReceiverDID        *string              `json:"receiver_did" db:"receiver_did"`
-	TxnType            *string              `json:"txn_type" db:"txn_type"`
-	Amount             *float64             `json:"amount" db:"amount"`
-	TxnTime            time.Time            `json:"txn_time" db:"txn_time"`
-	Epoch              *int64               `json:"epoch" db:"epoch"`
-	TimeTakenMs        *int64               `json:"time_taken_ms" db:"time_taken_ms"`
-	Tokens             []string             `json:"tokens" db:"tokens"`
-	ValidatorPledgeMap *map[string][]string `json:"validator_pledge_map" db:"validator_pledge_map"`
-	TxnID              *string              `json:"txn_id" db:"txn_id"`
-}
+// type TransferBlocks struct {
+// 	BlockHash          string               `json:"block_hash" db:"block_hash"`
+// 	PrevBlockID        *string              `json:"prev_block_id" db:"prev_block_id"`
+// 	SenderDID          *string              `json:"sender_did" db:"sender_did"`
+// 	ReceiverDID        *string              `json:"receiver_did" db:"receiver_did"`
+// 	TxnType            *string              `json:"txn_type" db:"txn_type"`
+// 	Amount             *float64             `json:"amount" db:"amount"`
+// 	TxnTime            time.Time            `json:"txn_time" db:"txn_time"`
+// 	Epoch              *int64               `json:"epoch" db:"epoch"`
+// 	TimeTakenMs        *int64               `json:"time_taken_ms" db:"time_taken_ms"`
+// 	Tokens             []string             `json:"tokens" db:"tokens"`
+// 	ValidatorPledgeMap *map[string][]string `json:"validator_pledge_map" db:"validator_pledge_map"`
+// 	TxnID              *string              `json:"txn_id" db:"txn_id"`
+// }
 
 // // Block represents a block/transaction in the system
 // type PledgeBlocks struct {
@@ -88,7 +106,7 @@ type RBT struct {
 }
 
 type FT struct {
-	TokenID     string  `json:"ft_id" db:"ft_id"`
+	FtID     string  `json:"ft_id" db:"ft_id"`
 	TokenValue  float64 `json:"token_value" db:"token_value"`
 	FTName      string  `json:"ft_name" db:"ft_name"`
 	OwnerDID    string  `json:"owner_did" db:"owner_did"`
