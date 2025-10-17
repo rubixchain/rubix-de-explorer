@@ -13,9 +13,7 @@ type TransferBlocks struct {
 	ReceiverDID        *string        `json:"receiver_did"`
 	TxnType            *string        `json:"txn_type"`
 	Amount             *float64       `json:"amount"`
-	TxnTime            time.Time      `json:"txn_time"`
 	Epoch              *int64         `json:"epoch"`
-	TimeTakenMs        *int64         `json:"time_taken_ms"`
 	Tokens             datatypes.JSON `json:"tokens" gorm:"type:jsonb"`               // store []string as JSONB
 	ValidatorPledgeMap datatypes.JSON `json:"validator_pledge_map" gorm:"type:jsonb"` // store map[string][]string as JSONB
 	TxnID              *string        `json:"txn_id"`
@@ -91,10 +89,9 @@ type AllBlocks struct {
 // smart contract table
 type SmartContract struct {
 	ContractID     string     `json:"contract_id" db:"contract_id"`
-	CreatorDID     string     `json:"creator_did" db:"creator_did"`
+    BlockHash	  string     `json:"block_hash" db:"block_hash"`
 	DeployerDID    string     `json:"deployer_did" db:"deployer_did"`
-	CreatedAt      time.Time  `json:"created_at" db:"created_at"`
-	LastExecutedAt *time.Time `json:"last_executed_at" db:"last_executed_at"`
+	TxnId 	   string     `json:"txn_id" db:"txn_id"`
 }
 
 type RBT struct {
@@ -113,13 +110,15 @@ type FT struct {
 	CreatorDID  string  `json:"creator_did" db:"creator_did"`
 	BlockHeight string  `json:"block_height" db:"block_height"`
 	BlockID     string  `json:"block_id" db:"block_id"`
+	Txn_ID    string  `json:"txn_id" db:"txn_id"`
 }
 
 type NFT struct {
 	TokenID    string `json:"nft_id" db:"nft_id"`
-	CreatorDID string `json:"creator_did" db:"creator_did"`
+	TokenValue string `json:"token_value" db:"token_value"`
 	OwnerDID   string `json:"owner_did" db:"owner_did"`
-	BlockID    string `json:"block_id" db:"block_id"`
+	BlockHash    string `json:"block_hash" db:"block_hash"`
+	Txn_ID    string  `json:"txn_id" db:"txn_id"`
 }
 
 // DID represents a Decentralized Identifier
