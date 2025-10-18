@@ -1,57 +1,86 @@
 package handlers
 
-// import (
-// 	"encoding/json"
-// 	"net/http"
+import (
+	"encoding/json"
+	"net/http"
+	"strconv"
 
-// 	"explorer-server/services"
-// )
+	"explorer-server/services"
+)
 
-// func GetAllTxnCountHandler() http.HandlerFunc {
-// 	return func(w http.ResponseWriter, r *http.Request) {
-// 		data, err := service.FetchFreeRBTs()
-// 		if err != nil {
-// 			http.Error(w, err.Error(), http.StatusInternalServerError)
-// 			return
-// 		}
+func GetTxnsCountHandler(w http.ResponseWriter, r *http.Request) {
+	count, err := services.GetTxnsCount()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-// 		w.Header().Set("Content-Type", "application/json")
-// 		if err := json.NewEncoder(w).Encode(data); err != nil {
-// 			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-// 		}
-// 	}
-// }
+	response := map[string]int64{"all_block_count": count}
 
-// func GetTxnInfoFromTxnHash(service *services.RBTService) http.HandlerFunc {
-// 	return func(w http.ResponseWriter, r *http.Request) {
-// 		data, err := service.FetchFreeRBTs()
-// 		if err != nil {
-// 			http.Error(w, err.Error(), http.StatusInternalServerError)
-// 			return
-// 		}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
+}
 
-// 		w.Header().Set("Content-Type", "application/json")
-// 		if err := json.NewEncoder(w).Encode(data); err != nil {
-// 			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-// 		}
-// 	}
-// }
+func GetTransferBlockListHandler(w http.ResponseWriter, r *http.Request) {
+	// Parse pagination params
+	limitStr := r.URL.Query().Get("limit")
+	pageStr := r.URL.Query().Get("page")
 
-// func GetTxnInfoFromBlockHash(service *services.RBTService) http.HandlerFunc {
-// 	return func(w http.ResponseWriter, r *http.Request) {
-// 		data, err := service.FetchFreeRBTs()
-// 		if err != nil {
-// 			http.Error(w, err.Error(), http.StatusInternalServerError)
-// 			return
-// 		}
+	limit := 10
+	page := 1
+	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+		limit = l
+	}
+	if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+		page = p
+	}
 
-// 		w.Header().Set("Content-Type", "application/json")
-// 		if err := json.NewEncoder(w).Encode(data); err != nil {
-// 			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-// 		}
-// 	}
-// }
+	// Fetch data
+	response, err := services.GetTransferBlocksList(limit, page)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-// func GetTxnListHandler(service *services.RBTService) http.HandlerFunc {
-	
-// }
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
+}
+
+func GetBlockInfoFromTxnHash(w http.ResponseWriter, r *http.Request) {
+	// Parse pagination params
+	txnHash := r.URL.Query().Get("hash")
+
+	// Fetch data
+	response, err := services.GetTransferBlockInfoFromTxnID(txnHash)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
+}
+
+func GetBlockInfoFromBlockHash(w http.ResponseWriter, r *http.Request) {
+	// Parse pagination params
+	blockHash := r.URL.Query().Get("hash")
+
+	// Fetch data
+	response, err := services.GetTransferBlockInfoFromBlockHash(blockHash)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
+}
+

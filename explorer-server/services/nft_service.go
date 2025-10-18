@@ -6,20 +6,20 @@ import (
 )
 
 // GetRBTCount returns the total number of RBTs in the database
-func GetFTCount() (int64, error) {
+func GetNFTCount() (int64, error) {
 	var count int64
-	if err := database.DB.Model(&models.FT{}).Count(&count).Error; err != nil {
+	if err := database.DB.Model(&models.NFT{}).Count(&count).Error; err != nil {
 		return 0, err
 	}
 	return count, nil
 }
 
-func GetFTInfoFromFTID(ftID string) (*models.FT, error) {
-	var ftInfo models.FT
-	if err := database.DB.First(&ftInfo, "ft_id = ?", ftID).Error; err != nil {
+func GetNFTInfoFromNFTID(nftID string) (*models.NFT, error) {
+	var nftInfo models.NFT
+	if err := database.DB.First(&nftInfo, "token_id = ?", nftID).Error; err != nil {
 		return nil, err
 	}
-	return &ftInfo, nil
+	return &nftInfo, nil
 }
 
 // // GetRBTInfoFromRBTID fetches a single RBT by its ID

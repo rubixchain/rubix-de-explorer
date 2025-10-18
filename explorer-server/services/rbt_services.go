@@ -14,6 +14,31 @@ func GetRBTCount() (int64, error) {
 	return count, nil
 }
 
+func GetRBTInfoFromRBTID(rbtID string) (*models.RBT, error) {
+	var rbt models.RBT
+	if err := database.DB.First(&rbt, "rbt_id = ?", rbtID).Error; err != nil {
+		return nil, err
+	}
+	return &rbt, nil
+}
+
+func GetRBTList(limit, page int) ([]models.RBT, error) {
+	var rbts []models.RBT
+
+	offset := (page - 1) * limit
+
+	if err := database.DB.
+		Limit(limit).
+		Offset(offset).
+		Order("block_height ASC"). // optional ordering
+		Find(&rbts).Error; err != nil {
+		return nil, err
+	}
+
+	return rbts, nil
+}
+
+
 // // GetRBTInfoFromRBTID fetches a single RBT by its ID
 // func GetRBTInfoFromRBTID(rbtID string) (*models.RBT, error) {
 // 	var rbt models.RBT

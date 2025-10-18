@@ -1,4 +1,3 @@
-// database/database.go
 package database
 
 import (
@@ -7,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"explorer-server/database/models" // updated import for models
+	"explorer-server/database/models"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -17,8 +16,7 @@ import (
 var DB *gorm.DB
 
 // ConnectAndMigrate initializes PostgreSQL with GORM and auto-migrates tables
-
-func ConnectAndMigrate() {
+func ConnectAndMigrate(drop bool) {
 	// Build DSN
 	dsn := fmt.Sprintf(
 		"host=%s user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=UTC",
@@ -50,6 +48,13 @@ func ConnectAndMigrate() {
 
 	log.Println("✅ Connected to PostgreSQL successfully")
 
+	// Drop tables if requested
+	if drop {
+		log.Println("⚠️ Dropping existing tables...")
+		dropTables()
+		log.Println("✅ Tables dropped successfully")
+	}
+
 	// Auto-migrate tables
 	err = DB.AutoMigrate(
 		&models.RBT{},
@@ -59,7 +64,7 @@ func ConnectAndMigrate() {
 		&models.DIDs{},
 		&models.TokenType{},
 		&models.AllBlocks{},
-		&models.TransferBlocks{}, // <-- updated model with JSON fields
+		&models.TransferBlocks{},
 		&models.TxnAnalytics{},
 	)
 	if err != nil {
@@ -67,6 +72,15 @@ func ConnectAndMigrate() {
 	}
 
 	log.Println("✅ Tables auto-migrated successfully")
+}
+
+// dropTables drops only the TransferBlocks table
+func dropTables() {
+	if DB.Migrator().HasTable(&models.TransferBlocks{}) {
+		if err := DB.Migrator().DropTable(&models.TransferBlocks{}); err != nil {
+			log.Fatalf("❌ Failed to drop TransferBlocks table: %v", err)
+		}
+	}
 }
 
 // getEnv fetches environment variable or returns fallback
@@ -77,6 +91,7 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
+// CloseDB closes PostgreSQL connection
 func CloseDB() {
 	if DB != nil {
 		sqlDB, err := DB.DB()

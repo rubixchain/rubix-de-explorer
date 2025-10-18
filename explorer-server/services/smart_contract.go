@@ -6,20 +6,20 @@ import (
 )
 
 // GetRBTCount returns the total number of RBTs in the database
-func GetFTCount() (int64, error) {
+func GetSCCount() (int64, error) {
 	var count int64
-	if err := database.DB.Model(&models.FT{}).Count(&count).Error; err != nil {
+	if err := database.DB.Model(&models.SmartContract{}).Count(&count).Error; err != nil {
 		return 0, err
 	}
 	return count, nil
 }
 
-func GetFTInfoFromFTID(ftID string) (*models.FT, error) {
-	var ftInfo models.FT
-	if err := database.DB.First(&ftInfo, "ft_id = ?", ftID).Error; err != nil {
+func GetSCInfoFromSCID(scID string) (*models.SmartContract, error) {
+	var scInfo models.SmartContract
+	if err := database.DB.First(&scInfo, "contract_id = ?", scID).Error; err != nil {
 		return nil, err
 	}
-	return &ftInfo, nil
+	return &scInfo, nil
 }
 
 // // GetRBTInfoFromRBTID fetches a single RBT by its ID

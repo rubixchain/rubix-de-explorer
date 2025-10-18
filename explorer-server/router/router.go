@@ -16,26 +16,25 @@ func NewRouter() *mux.Router {
 
 	// Database-powered API routes (primary endpoints)
 	r.HandleFunc("/api/allrbtcount", handlers.GetRBTCountHandler).Methods(http.MethodGet)
-	// r.HandleFunc("/api/allftcount", handlers.DatabaseAllFTtCountHandler).Methods(http.MethodGet)
-	// r.HandleFunc("/api/alldidcount", handlers.DatabaseAllDIDCountHandler).Methods(http.MethodGet)
-	// r.HandleFunc("/api/alltransactionscount", handlers.DatabaseAllTXNCountHandler).Methods(http.MethodGet)
-	// r.HandleFunc("/api/allsmartcontractscount", handlers.DatabaseAllSmartContractsCountHandler).Methods(http.MethodGet)
-	// r.HandleFunc("/api/allnftcount", handlers.DatabaseAllNFTCountHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/allftcount", handlers.GetFTCountHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/alldidcount", handlers.GetDIDCountHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/alltransactionscount", handlers.GetTxnsCountHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/allsmartcontractscount", handlers.GetSCsCountHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/allnftcount", handlers.GetNFTsCountHandler).Methods(http.MethodGet)
 
 	// // route to get the did with most rbts
-	// r.HandleFunc("/api/getdidinfo", handlers.DatabaseDIDHandler).Methods(http.MethodGet)
-	// r.HandleFunc("/api/didwithmostrbts", handlers.DatabaseDidWithMostRBTsHandler).Methods(http.MethodGet)
-	// r.HandleFunc("/api/txnblocks", handlers.DatabaseBlockByIDHandler).Methods(http.MethodGet)
-
-	// r.HandleFunc("/api/txnhash", handlers.DatabaseBlocksHandler).Methods(http.MethodGet)
-	// r.HandleFunc("/api/blockhash", handlers.DatabaseBlocksHandler).Methods(http.MethodGet)
-	// r.HandleFunc("/api/smartcontract", handlers.DatabaseSmartContractHandler).Methods(http.MethodGet)
-	// r.HandleFunc("/api/nft", handlers.DatabaseNFTHandler).Methods(http.MethodGet)
-	// r.HandleFunc("/api/rbt", handlers.DatabaseRBTsHandler).Methods(http.MethodGet)
-	// r.HandleFunc("/api/ft", handlers.DatabaseFTHandler).Methods(http.MethodGet)
+    r.HandleFunc("/api/didwithmostrbts", handlers.GetDIDHoldersListHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/txnblocks", handlers.GetTransferBlockListHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/getdidinfo", handlers.GetDIDInfoHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/txnhash", handlers.GetBlockInfoFromTxnHash).Methods(http.MethodGet)
+	r.HandleFunc("/api/blockhash", handlers.GetBlockInfoFromBlockHash).Methods(http.MethodGet)
+	r.HandleFunc("/api/smartcontract", handlers.GetSmartContractInfoFromSCID).Methods(http.MethodGet)
+	r.HandleFunc("/api/nft", handlers.GetNFTInfoFromNFTID).Methods(http.MethodGet) //done 
+	r.HandleFunc("/api/rbt", handlers.GetRBTInfoFromRBTID).Methods(http.MethodGet) //done 
+	r.HandleFunc("/api/ft", handlers.GetFTInfoFromFTID).Methods(http.MethodGet) //done
+    r.HandleFunc("/api/getrbtlist", handlers.GetRBTListHandler).Methods(http.MethodGet) 
 
 	// r.HandleFunc("/api/search", handlers.DatabaseMultiSearchHandler).Methods(http.MethodGet)
-	// r.HandleFunc("/api/getrbtlist", handlers.DatabaseRBTsListHandler).Methods(http.MethodGet)
 	// r.HandleFunc("/api/token-chain", handlers.DatabaseTokenChainHandler).Methods(http.MethodGet)
 
 	// r.HandleFunc("/api/analytics", handlers.DatabaseAnalyticsHandler).Methods(http.MethodGet)

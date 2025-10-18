@@ -1,12 +1,14 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"explorer-server/database"
 	"explorer-server/database/models"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/rs/cors"
+	"gorm.io/datatypes"
 )
 
 func main() {
@@ -24,24 +27,16 @@ func main() {
 		log.Println("⚠️  No .env file found, using default values")
 	}
 
-	// Initialize PostgreSQL and auto-migrate tables
-	log.Println("📦 Connecting to PostgreSQL and running migrations...")
-	database.ConnectAndMigrate()
+	// Initialize PostgreSQL and drop & recreate tables
+	log.Println("📦 Connecting to PostgreSQL...")
+	database.ConnectAndMigrate(false) // pass true to drop tables
 
-	// Insert dummy RBT data (if not exists)
-	dummyRBT := models.RBT{
-		TokenID:     "rbt-001",
-		TokenValue:  100.5,
-		OwnerDID:    "did:example:123",
-		BlockID:     "block-001",
-		BlockHeight: "1",
-	}
-
-	if err := database.DB.FirstOrCreate(&dummyRBT, models.RBT{TokenID: dummyRBT.TokenID}).Error; err != nil {
-		log.Printf("⚠️ Failed to insert dummy RBT: %v", err)
-	} else {
-		log.Println("✅ Dummy RBT inserted")
-	}
+	// Insert dummy RBT data
+	insertDummyRBTs()
+	insertDummyTransferBlocks()
+	insertDummyNFTs()
+	insertDummySmartContracts()
+	insertDummyFTs()
 
 	// Setup router
 	r := router.NewRouter()
@@ -70,4 +65,139 @@ func main() {
 	// Start server
 	log.Printf("✅ Explorer server running on port :%s", port)
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", port), handler))
+}
+
+// Insert dummy RBTs
+func insertDummyRBTs() {
+	dummyRBTs := []models.RBT{
+		{TokenID: "rbt-001", TokenValue: 100.5, OwnerDID: "did:example:123", BlockID: "block-001", BlockHeight: "1"},
+		{TokenID: "rbt-002", TokenValue: 250.0, OwnerDID: "did:example:456", BlockID: "block-002", BlockHeight: "2"},
+	}
+
+	for _, rbt := range dummyRBTs {
+		if err := database.DB.FirstOrCreate(&rbt, models.RBT{TokenID: rbt.TokenID}).Error; err != nil {
+			log.Printf("⚠️ Failed to insert dummy RBT %s: %v", rbt.TokenID, err)
+		} else {
+			log.Printf("✅ Dummy RBT inserted or exists: %s", rbt.TokenID)
+		}
+	}
+}
+
+// Insert dummy TransferBlocks
+func insertDummyTransferBlocks() {
+	now := time.Now().Unix() // epoch as int64
+
+	dummyBlocks := []models.TransferBlocks{
+		newDummyBlock("block-hash-007", "did:example:sender001", "did:example:receiver001", 150.25, "txn-001",
+			[]string{"token1", "token2", "token3"},
+			map[string][]string{"validator1": {"pledgeA", "pledgeB"}, "validator2": {"pledgeC"}},
+			&now,
+		),
+		newDummyBlock("block-hash-008", "did:example:sender002", "did:example:receiver002", 320.75, "txn-002",
+			[]string{"tokenX", "tokenY"},
+			map[string][]string{"validator3": {"pledgeD", "pledgeE"}},
+			&now,
+		),
+		newDummyBlock("block-hash-009", "did:example:sender003", "did:example:receiver003", 890.10, "txn-003",
+			[]string{"tokenAlpha", "tokenBeta"},
+			map[string][]string{"validator4": {"pledgeF"}, "validator5": {"pledgeG", "pledgeH"}},
+			&now,
+		),
+	}
+
+	for _, block := range dummyBlocks {
+		if err := database.DB.Create(&block).Error; err != nil {
+			log.Printf("⚠️ Failed to insert dummy block %s: %v", block.BlockHash, err)
+		} else {
+			log.Printf("✅ Dummy transfer block inserted: %s", block.BlockHash)
+		}
+	}
+}
+
+// Helper to create a dummy TransferBlock with JSON fields marshaled correctly
+func newDummyBlock(
+	blockHash, sender, receiver string,
+	amount float64,
+	txnID string,
+	tokens []string,
+	validatorMap map[string][]string,
+	epoch *int64,
+) models.TransferBlocks {
+	// Marshal slice/map to JSON
+	tokensJSON, _ := json.Marshal(tokens)
+	validatorJSON, _ := json.Marshal(validatorMap)
+
+	return models.TransferBlocks{
+		BlockHash:          blockHash,
+		SenderDID:          ptr(sender),
+		ReceiverDID:        ptr(receiver),
+		TxnType:            ptr("transfer"),
+		Amount:             ptrFloat(amount),
+		Epoch:              epoch,
+		TxnID:              ptr(txnID),
+		Tokens:             datatypes.JSON(tokensJSON), // JSON marshaled
+		ValidatorPledgeMap: datatypes.JSON(validatorJSON),
+	}
+}
+
+// Insert dummy NFTs
+func insertDummyNFTs() {
+	dummyNFTs := []models.NFT{
+		{TokenID: "nft-001", OwnerDID: "did:example:owner001", TokenValue:"1.2", BlockHash: "block-010", Txn_ID: "10asfsadf"},
+		{TokenID: "nft-002", OwnerDID: "did:example:owner001", TokenValue:"1.2", BlockHash: "block-010", Txn_ID: "10asfsadf"},
+	}
+
+	for _, nft := range dummyNFTs {
+		if err := database.DB.FirstOrCreate(&nft, models.NFT{TokenID: nft.TokenID}).Error; err != nil {
+			log.Printf("⚠️ Failed to insert dummy NFT %s: %v", nft.TokenID, err)
+		} else {
+			log.Printf("✅ Dummy NFT inserted or exists: %s", nft.TokenID)
+		}
+	}
+}
+
+// Insert dummy SmartContracts
+func insertDummySmartContracts() {
+	dummyContracts := []models.SmartContract{
+		{
+			ContractID: "sc-addr-001",
+			DeployerDID:  "did:example:dev001",
+			TxnId:       "hash001",
+			BlockHash:    "block-020",
+		},
+	}
+
+	for _, sc := range dummyContracts {
+		if err := database.DB.FirstOrCreate(&sc, models.SmartContract{ContractID: sc.ContractID}).Error; err != nil {
+			log.Printf("⚠️ Failed to insert dummy SmartContract %s: %v", sc.ContractID, err)
+		} else {
+			log.Printf("✅ Dummy SmartContract inserted or exists: %s", sc.ContractID)
+		}
+	}
+}
+
+// Insert dummy Fungible Tokens (FTs)
+func insertDummyFTs() {
+	dummyFTs := []models.FT{
+		{ FtID: "qem-0101-asf", FTName: "USD Synthetic", TokenValue: 0.6, OwnerDID: "did:example:issuer001", CreatorDID: "did:example:issuer002", BlockID: "block-030", BlockHeight: "30"},
+		{ FtID: "qem-01023-asf", FTName: "USD Synthetic", TokenValue: 0.6, OwnerDID: "did:example:issuer001", CreatorDID: "did:example:issuer002", BlockID: "block-030", BlockHeight: "30"},
+	}
+
+	for _, ft := range dummyFTs {
+		if err := database.DB.FirstOrCreate(&ft, models.FT{FtID: ft.FtID}).Error; err != nil {
+			log.Printf("⚠️ Failed to insert dummy FT %s: %v", ft.FtID, err)
+		} else {
+			log.Printf("✅ Dummy FT inserted or exists: %s", ft.FtID)
+		}
+	}
+}
+
+
+// Generic helpers
+func ptr[T any](v T) *T {
+	return &v
+}
+
+func ptrFloat(v float64) *float64 {
+	return &v
 }

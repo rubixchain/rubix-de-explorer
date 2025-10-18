@@ -1,4 +1,4 @@
-package database
+package model
 
 import (
 	"time"
@@ -140,7 +140,7 @@ type TokenResponse struct {
 
 type HolderResponse struct {
 	OwnerDID   string `json:"owner_did"`
-	TokenCount int64  `json:"token_count"`
+	TokenCount float64  `json:"token_count"`
 	// TotalTransactions int64 `json:"total_transactions"`
 }
 
@@ -153,6 +153,8 @@ type TransactionResponse struct {
 	TxnType string    `json:"txn_type"`
 	Amount  float64   `json:"amount"`
 	Epoch   time.Time `json:"txn_time"`
+	SenderDID   string    `json:"sender_did"`
+	ReceiverDID string    `json:"receiver_did"`
 }
 
 type TransactionsResponse struct {
