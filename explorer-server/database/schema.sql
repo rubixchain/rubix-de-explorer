@@ -68,3 +68,16 @@ CREATE TABLE IF NOT EXISTS txn_analytics (
     total_value DOUBLE PRECISION,
     token_type TEXT
 );
+
+CREATE TABLE IF NOT EXISTS token_types (
+    token_id VARCHAR(255) PRIMARY KEY,
+    token_type VARCHAR(100),
+    last_updated TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS all_blocks (
+    block_hash VARCHAR(255) PRIMARY KEY,
+    block_type BIGINT,
+    epoch TIMESTAMP NOT NULL,
+    txn_id VARCHAR(255)
+);
