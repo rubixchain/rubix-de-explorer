@@ -113,11 +113,11 @@ type FT struct {
 }
 
 type NFT struct {
-	TokenID    string `json:"nft_id" db:"nft_id"`
-	TokenValue string `json:"token_value" db:"token_value"`
-	OwnerDID   string `json:"owner_did" db:"owner_did"`
-	BlockHash  string `json:"block_hash" db:"block_hash"`
-	Txn_ID     string `json:"txn_id" db:"txn_id"`
+	TokenID    string  `json:"nft_id" db:"nft_id"`
+	TokenValue float64 `json:"token_value" db:"token_value"`
+	OwnerDID   string  `json:"owner_did" db:"owner_did"`
+	BlockHash  string  `json:"block_hash" db:"block_hash"`
+	Txn_ID     string  `json:"txn_id" db:"txn_id"`
 }
 
 // DID represents a Decentralized Identifier

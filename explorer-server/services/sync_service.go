@@ -42,6 +42,15 @@ type FT struct {
 	SyncStatus    int     `gorm:"column:sync_status"`
 }
 
+type NFT struct {
+	TokenID       string  `gorm:"column:token_id;primaryKey" json:"token_id"`
+	TokenValue    float64 `gorm:"column:token_value;" json:"token_value"`
+	OwnerDID      string  `gorm:"column:owner_did"`
+	TransactionID string  `gorm:"column:transaction_id"`
+	BlockHash     string  `gorm:"column:block_hash"`
+	SyncStatus    int     `gorm:"column:sync_status"`
+}
+
 // GetRBTListResponse represents the structure of the API response
 type GetRBTListResponse struct {
 	Status  bool   `json:"status"`
@@ -53,6 +62,12 @@ type GetFTListResponse struct {
 	Status  bool   `json:"status"`
 	Message string `json:"message"`
 	Result  []FT   `json:"result"`
+}
+
+type GetNFTListResponse struct {
+	Status  bool   `json:"status"`
+	Message string `json:"message"`
+	Result  []NFT  `json:"result"`
 }
 
 // FetchAndStoreAllRBTsFromFullNodeDB fetches RBTs from full node API and stores them
@@ -130,6 +145,43 @@ func FetchAndStoreAllFTsFromFullNodeDB() error {
 	return nil
 }
 
+func FetchAndStoreAllNFTsFromFullNodeDB() error {
+	apiURL := config.RubixNodeURL + "/api/de-exp/get-nft-list"
+
+	log.Println("📡 Fetching NFT list from:", apiURL)
+
+	resp, err := http.Get(apiURL)
+	if err != nil {
+		return fmt.Errorf("failed to call get-nft-list API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("API returned non-200 status: %d", resp.StatusCode)
+	}
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	var apiResp GetNFTListResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return fmt.Errorf("failed to parse API response: %w", err)
+	}
+
+	if !apiResp.Status {
+		return fmt.Errorf("API error: %s", apiResp.Message)
+	}
+
+	if err := StoreNFTInfoInDB(apiResp.Result); err != nil {
+		return fmt.Errorf("failed to store NFTs: %w", err)
+	}
+
+	log.Printf("✅ Successfully fetched and stored %d NFTs\n", len(apiResp.Result))
+	return nil
+}
+
 // StoreRBTInfoInDB inserts RBTs into DB and ensures a corresponding token_type entry exists
 func StoreRBTInfoInDB(RBTs []RBT) error {
 	for _, rbt := range RBTs {
@@ -193,6 +245,38 @@ func StoreFTInfoInDB(FTs []FT) error {
 			log.Printf("⚠️ Failed to insert token_type for %s: %v", ft.TokenID, err)
 		} else {
 			log.Printf("✅ TokenType inserted or exists: %s (%s)", ft.TokenID, FTType)
+		}
+	}
+	return nil
+}
+
+func StoreNFTInfoInDB(NFTs []NFT) error {
+	for _, nft := range NFTs {
+		nftmodel := models.NFT{
+			TokenID:    nft.TokenID,
+			TokenValue: nft.TokenValue,
+			OwnerDID:   nft.OwnerDID,
+			BlockHash:  nft.BlockHash,
+			Txn_ID:     nft.TransactionID,
+			// BlockHeight: fmt.Sprintf("%d", ft.BlockHeight),
+		}
+
+		if err := database.DB.FirstOrCreate(&nftmodel, models.NFT{TokenID: nft.TokenID}).Error; err != nil {
+			log.Printf("⚠️ Failed to insert NFT %s: %v", nft.TokenID, err)
+			continue
+		}
+		log.Printf("✅ NFT inserted or exists: %s", nft.TokenID)
+
+		tokenType := models.TokenType{
+			TokenID:     nft.TokenID,
+			TokenType:   NFTType,
+			LastUpdated: time.Now(),
+		}
+
+		if err := database.DB.FirstOrCreate(&tokenType, models.TokenType{TokenID: nft.TokenID}).Error; err != nil {
+			log.Printf("⚠️ Failed to insert token_type for %s: %v", nft.TokenID, err)
+		} else {
+			log.Printf("✅ TokenType inserted or exists: %s (%s)", nft.TokenID, NFTType)
 		}
 	}
 	return nil
