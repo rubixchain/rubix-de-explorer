@@ -37,6 +37,7 @@ func main() {
 	insertDummyNFTs()
 	insertDummySmartContracts()
 	insertDummyFTs()
+	insertDummyAssetTypes() // 👈 Add this line
 
 	// Setup router
 	r := router.NewRouter()
@@ -70,7 +71,7 @@ func main() {
 // Insert dummy RBTs
 func insertDummyRBTs() {
 	dummyRBTs := []models.RBT{
-		{TokenID: "rbt-001", TokenValue: 100.5, OwnerDID: "did:example:123", BlockID: "block-001", BlockHeight: "1"},
+		{TokenID: "qemrbt-001", TokenValue: 100.5, OwnerDID: "did:example:123", BlockID: "block-001", BlockHeight: "1"},
 		{TokenID: "rbt-002", TokenValue: 250.0, OwnerDID: "did:example:456", BlockID: "block-002", BlockHeight: "2"},
 	}
 
@@ -143,8 +144,8 @@ func newDummyBlock(
 // Insert dummy NFTs
 func insertDummyNFTs() {
 	dummyNFTs := []models.NFT{
-		{TokenID: "nft-001", OwnerDID: "did:example:owner001", TokenValue:"1.2", BlockHash: "block-010", Txn_ID: "10asfsadf"},
-		{TokenID: "nft-002", OwnerDID: "did:example:owner001", TokenValue:"1.2", BlockHash: "block-010", Txn_ID: "10asfsadf"},
+		{TokenID: "nft-001", OwnerDID: "did:example:owner001", TokenValue: "1.2", BlockHash: "block-010", Txn_ID: "10asfsadf"},
+		{TokenID: "nft-002", OwnerDID: "did:example:owner001", TokenValue: "1.2", BlockHash: "block-010", Txn_ID: "10asfsadf"},
 	}
 
 	for _, nft := range dummyNFTs {
@@ -160,10 +161,10 @@ func insertDummyNFTs() {
 func insertDummySmartContracts() {
 	dummyContracts := []models.SmartContract{
 		{
-			ContractID: "sc-addr-001",
-			DeployerDID:  "did:example:dev001",
+			ContractID:  "sc-addr-001",
+			DeployerDID: "did:example:dev001",
 			TxnId:       "hash001",
-			BlockHash:    "block-020",
+			BlockHash:   "block-020",
 		},
 	}
 
@@ -179,8 +180,8 @@ func insertDummySmartContracts() {
 // Insert dummy Fungible Tokens (FTs)
 func insertDummyFTs() {
 	dummyFTs := []models.FT{
-		{ FtID: "qem-0101-asf", FTName: "USD Synthetic", TokenValue: 0.6, OwnerDID: "did:example:issuer001", CreatorDID: "did:example:issuer002", BlockID: "block-030", BlockHeight: "30"},
-		{ FtID: "qem-01023-asf", FTName: "USD Synthetic", TokenValue: 0.6, OwnerDID: "did:example:issuer001", CreatorDID: "did:example:issuer002", BlockID: "block-030", BlockHeight: "30"},
+		{FtID: "qem-0101-asf", FTName: "USD Synthetic", TokenValue: 0.6, OwnerDID: "did:example:issuer001", CreatorDID: "did:example:issuer002", BlockID: "block-030", BlockHeight: "30"},
+		{FtID: "qem-01023-asf", FTName: "USD Synthetic", TokenValue: 0.6, OwnerDID: "did:example:issuer001", CreatorDID: "did:example:issuer002", BlockID: "block-030", BlockHeight: "30"},
 	}
 
 	for _, ft := range dummyFTs {
@@ -192,7 +193,6 @@ func insertDummyFTs() {
 	}
 }
 
-
 // Generic helpers
 func ptr[T any](v T) *T {
 	return &v
@@ -200,4 +200,20 @@ func ptr[T any](v T) *T {
 
 func ptrFloat(v float64) *float64 {
 	return &v
+}
+
+func insertDummyAssetTypes() {
+	dummyAssetTypes := []models.TokenType{
+		{TokenID: "qemrbt-001", TokenType: "RBT", LastUpdated: time.Now()},
+		{TokenID: "rbt-002", TokenType: "NFT", LastUpdated: time.Now()},
+		{TokenID: "nft-001", TokenType: "SmartContract", LastUpdated: time.Now()},
+	}
+
+	for _, asset := range dummyAssetTypes {
+		if err := database.DB.FirstOrCreate(&asset, models.TokenType{TokenID: asset.TokenID}).Error; err != nil {
+			log.Printf("⚠️ Failed to insert dummy asset type %s: %v", asset.TokenID, err)
+		} else {
+			log.Printf("✅ Dummy asset type inserted or exists: %s → %s", asset.TokenID, asset.TokenType)
+		}
+	}
 }
