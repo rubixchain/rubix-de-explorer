@@ -1,8 +1,8 @@
 package models
 
-
 import (
 	"time"
+
 	"gorm.io/datatypes"
 )
 
@@ -18,7 +18,6 @@ type TransferBlocks struct {
 	ValidatorPledgeMap datatypes.JSON `json:"validator_pledge_map" gorm:"type:jsonb"` // store map[string][]string as JSONB
 	TxnID              *string        `json:"txn_id"`
 }
-
 
 // Token represents a token in the system
 type TokenType struct {
@@ -88,10 +87,10 @@ type AllBlocks struct {
 
 // smart contract table
 type SmartContract struct {
-	ContractID     string     `json:"contract_id" db:"contract_id"`
-    BlockHash	  string     `json:"block_hash" db:"block_hash"`
-	DeployerDID    string     `json:"deployer_did" db:"deployer_did"`
-	TxnId 	   string     `json:"txn_id" db:"txn_id"`
+	ContractID  string `json:"contract_id" db:"contract_id"`
+	BlockHash   string `json:"block_hash" db:"block_hash"`
+	DeployerDID string `json:"deployer_did" db:"deployer_did"`
+	TxnId       string `json:"txn_id" db:"txn_id"`
 }
 
 type RBT struct {
@@ -103,22 +102,22 @@ type RBT struct {
 }
 
 type FT struct {
-	FtID     string  `json:"ft_id" db:"ft_id"`
+	FtID        string  `json:"ft_id" db:"ft_id"`
 	TokenValue  float64 `json:"token_value" db:"token_value"`
 	FTName      string  `json:"ft_name" db:"ft_name"`
 	OwnerDID    string  `json:"owner_did" db:"owner_did"`
 	CreatorDID  string  `json:"creator_did" db:"creator_did"`
 	BlockHeight string  `json:"block_height" db:"block_height"`
 	BlockID     string  `json:"block_id" db:"block_id"`
-	Txn_ID    string  `json:"txn_id" db:"txn_id"`
+	Txn_ID      string  `json:"txn_id" db:"txn_id"`
 }
 
 type NFT struct {
 	TokenID    string `json:"nft_id" db:"nft_id"`
 	TokenValue string `json:"token_value" db:"token_value"`
 	OwnerDID   string `json:"owner_did" db:"owner_did"`
-	BlockHash    string `json:"block_hash" db:"block_hash"`
-	Txn_ID    string  `json:"txn_id" db:"txn_id"`
+	BlockHash  string `json:"block_hash" db:"block_hash"`
+	Txn_ID     string `json:"txn_id" db:"txn_id"`
 }
 
 // DID represents a Decentralized Identifier

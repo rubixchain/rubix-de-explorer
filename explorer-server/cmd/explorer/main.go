@@ -40,9 +40,14 @@ func main() {
 	insertDummyFTs()
 	insertDummyAssetTypes() // 👈 Add this line
 
-	fetchErr := services.FetchAndStoreAllRBTsFromFullNodeDB()
-	if fetchErr != nil {
-		log.Printf("Failed to call `FetchAndStoreAllRBTsFromFullNodeDB`, err: %v", fetchErr)
+	RBTfetchErr := services.FetchAndStoreAllRBTsFromFullNodeDB()
+	if RBTfetchErr != nil {
+		log.Printf("Failed to call `FetchAndStoreAllRBTsFromFullNodeDB`, err: %v", RBTfetchErr)
+	}
+
+	FTfetchErr := services.FetchAndStoreAllFTsFromFullNodeDB()
+	if FTfetchErr != nil {
+		log.Printf("Failed to call `FetchAndStoreAllRBTsFromFullNodeDB`, err: %v", FTfetchErr)
 	}
 
 	// Setup router
