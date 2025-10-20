@@ -13,6 +13,7 @@ import (
 	"explorer-server/database"
 	"explorer-server/database/models"
 	"explorer-server/router"
+	"explorer-server/services"
 
 	"github.com/joho/godotenv"
 	"github.com/rs/cors"
@@ -38,6 +39,11 @@ func main() {
 	insertDummySmartContracts()
 	insertDummyFTs()
 	insertDummyAssetTypes() // 👈 Add this line
+
+	fetchErr := services.FetchAndStoreAllRBTsFromFullNodeDB()
+	if fetchErr != nil {
+		log.Printf("Failed to call `FetchAndStoreAllRBTsFromFullNodeDB`, err: %v", fetchErr)
+	}
 
 	// Setup router
 	r := router.NewRouter()
