@@ -3,9 +3,13 @@ package services
 import (
 	"encoding/json"
 	"explorer-server/config"
+	"explorer-server/database"
+	"explorer-server/database/models"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
+	"time"
 )
 
 const (
@@ -38,7 +42,8 @@ type GetRBTListResponse struct {
 func FetchAndStoreAllRBTsFromFullNodeDB() error {
 	apiURL := config.RubixNodeURL + "/api/de-exp/get-rbt-list"
 
-	// Make GET request
+	log.Println("📡 Fetching RBT list from:", apiURL)
+
 	resp, err := http.Get(apiURL)
 	if err != nil {
 		return fmt.Errorf("failed to call get-rbt-list API: %w", err)
@@ -54,7 +59,6 @@ func FetchAndStoreAllRBTsFromFullNodeDB() error {
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	// Parse JSON response
 	var apiResp GetRBTListResponse
 	if err := json.Unmarshal(body, &apiResp); err != nil {
 		return fmt.Errorf("failed to parse API response: %w", err)
@@ -64,20 +68,46 @@ func FetchAndStoreAllRBTsFromFullNodeDB() error {
 		return fmt.Errorf("API error: %s", apiResp.Message)
 	}
 
-	storeRBTErr := StoreRBTInfoInDB(apiResp.Result)
-	if storeRBTErr != nil {
-		return fmt.Errorf("failed to store RBTs")
+	if err := StoreRBTInfoInDB(apiResp.Result); err != nil {
+		return fmt.Errorf("failed to store RBTs: %w", err)
 	}
 
-	fmt.Printf("Successfully fetched and stored %d RBTs\n", len(apiResp.Result))
+	log.Printf("✅ Successfully fetched and stored %d RBTs\n", len(apiResp.Result))
 	return nil
 }
 
+// StoreRBTInfoInDB inserts RBTs into DB and ensures a corresponding token_type entry exists
 func StoreRBTInfoInDB(RBTs []RBT) error {
-	// Loop through RBTs and store them
 	for _, rbt := range RBTs {
-		fmt.Printf("Storing RBT: %+v\n", rbt)
+		// Map API RBT to DB model
+		rbtModel := models.RBT{
+			TokenID:     rbt.TokenID,
+			TokenValue:  rbt.TokenValue,
+			OwnerDID:    rbt.OwnerDID,
+			BlockID:     rbt.BlockHash,
+			BlockHeight: fmt.Sprintf("%d", rbt.BlockHeight),
+		}
 
+		// Insert into rbt table using FirstOrCreate (same style as insertDummyRBTs)
+		if err := database.DB.FirstOrCreate(&rbtModel, models.RBT{TokenID: rbt.TokenID}).Error; err != nil {
+			log.Printf("⚠️ Failed to insert RBT %s: %v", rbt.TokenID, err)
+			continue
+		}
+		log.Printf("✅ RBT inserted or exists: %s", rbt.TokenID)
+
+		// Insert into token_types table using FirstOrCreate (same style)
+		tokenType := models.TokenType{
+			TokenID:     rbt.TokenID,
+			TokenType:   RBTType,
+			LastUpdated: time.Now(),
+		}
+
+		if err := database.DB.FirstOrCreate(&tokenType, models.TokenType{TokenID: rbt.TokenID}).Error; err != nil {
+			log.Printf("⚠️ Failed to insert token_type for %s: %v", rbt.TokenID, err)
+		} else {
+			log.Printf("✅ TokenType inserted or exists: %s (%s)", rbt.TokenID, RBTType)
+		}
 	}
+
 	return nil
 }
