@@ -2,6 +2,7 @@ package services
 
 import (
 	"encoding/json"
+	"errors"
 	"explorer-server/config"
 	"explorer-server/database"
 	"explorer-server/database/models"
@@ -10,6 +11,8 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 const (
@@ -235,6 +238,7 @@ func FetchAndStoreAllSCsFromFullNodeDB() error {
 
 // StoreRBTInfoInDB inserts RBTs into DB and ensures a corresponding token_type entry exists
 func StoreRBTInfoInDB(RBTs []RBT) error {
+	didCount := make(map[string]int)
 	for _, rbt := range RBTs {
 		rbtModel := models.RBT{
 			TokenID:     rbt.TokenID,
@@ -258,16 +262,36 @@ func StoreRBTInfoInDB(RBTs []RBT) error {
 
 		if err := database.DB.FirstOrCreate(&tokenType, models.TokenType{TokenID: rbt.TokenID}).Error; err != nil {
 			log.Printf("⚠️ Failed to insert token_type for %s: %v", rbt.TokenID, err)
+		}
+		didCount[rbt.OwnerDID]++
+	}
+
+	for did, count := range didCount {
+		var existing models.DIDs
+		if err := database.DB.First(&existing, "did = ?", did).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				newDID := models.DIDs{
+					DID:       did,
+					CreatedAt: time.Now(),
+					TotalRBTs: float64(count),
+				}
+				if err := database.DB.Create(&newDID).Error; err != nil {
+					log.Printf("⚠️ Failed to create DID %s: %v", did, err)
+				}
+			}
 		} else {
-			log.Printf("✅ TokenType inserted or exists: %s (%s)", rbt.TokenID, RBTType)
+			existing.TotalRBTs += float64(count)
+			if err := database.DB.Save(&existing).Error; err != nil {
+				log.Printf("⚠️ Failed to update TotalRBTs for DID %s: %v", did, err)
+			}
 		}
 	}
 
 	return nil
 }
 
-// StoreRBTInfoInDB inserts RBTs into DB and ensures a corresponding token_type entry exists
 func StoreFTInfoInDB(FTs []FT) error {
+	didCount := make(map[string]int)
 	for _, ft := range FTs {
 		ftmodel := models.FT{
 			FtID:       ft.TokenID,
@@ -277,7 +301,6 @@ func StoreFTInfoInDB(FTs []FT) error {
 			CreatorDID: ft.CreatorDID,
 			BlockID:    ft.BlockHash,
 			Txn_ID:     ft.TransactionID,
-			// BlockHeight: fmt.Sprintf("%d", ft.BlockHeight),
 		}
 
 		if err := database.DB.FirstOrCreate(&ftmodel, models.FT{FtID: ft.TokenID}).Error; err != nil {
@@ -294,14 +317,36 @@ func StoreFTInfoInDB(FTs []FT) error {
 
 		if err := database.DB.FirstOrCreate(&tokenType, models.TokenType{TokenID: ft.TokenID}).Error; err != nil {
 			log.Printf("⚠️ Failed to insert token_type for %s: %v", ft.TokenID, err)
+		}
+		didCount[ft.OwnerDID]++
+	}
+
+	for did, count := range didCount {
+		var existing models.DIDs
+		if err := database.DB.First(&existing, "did = ?", did).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				newDID := models.DIDs{
+					DID:       did,
+					CreatedAt: time.Now(),
+					TotalFTs:  float64(count),
+				}
+				if err := database.DB.Create(&newDID).Error; err != nil {
+					log.Printf("⚠️ Failed to create DID %s: %v", did, err)
+				}
+			}
 		} else {
-			log.Printf("✅ TokenType inserted or exists: %s (%s)", ft.TokenID, FTType)
+			existing.TotalFTs += float64(count)
+			if err := database.DB.Save(&existing).Error; err != nil {
+				log.Printf("⚠️ Failed to update TotalFTs for DID %s: %v", did, err)
+			}
 		}
 	}
+
 	return nil
 }
 
 func StoreNFTInfoInDB(NFTs []NFT) error {
+	didCount := make(map[string]int)
 	for _, nft := range NFTs {
 		nftmodel := models.NFT{
 			TokenID:    nft.TokenID,
@@ -309,7 +354,6 @@ func StoreNFTInfoInDB(NFTs []NFT) error {
 			OwnerDID:   nft.OwnerDID,
 			BlockHash:  nft.BlockHash,
 			Txn_ID:     nft.TransactionID,
-			// BlockHeight: fmt.Sprintf("%d", ft.BlockHeight),
 		}
 
 		if err := database.DB.FirstOrCreate(&nftmodel, models.NFT{TokenID: nft.TokenID}).Error; err != nil {
@@ -326,24 +370,43 @@ func StoreNFTInfoInDB(NFTs []NFT) error {
 
 		if err := database.DB.FirstOrCreate(&tokenType, models.TokenType{TokenID: nft.TokenID}).Error; err != nil {
 			log.Printf("⚠️ Failed to insert token_type for %s: %v", nft.TokenID, err)
+		}
+		didCount[nft.OwnerDID]++
+	}
+
+	for did, count := range didCount {
+		var existing models.DIDs
+		if err := database.DB.First(&existing, "did = ?", did).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				newDID := models.DIDs{
+					DID:       did,
+					CreatedAt: time.Now(),
+					TotalNFTs: int64(count),
+				}
+				if err := database.DB.Create(&newDID).Error; err != nil {
+					log.Printf("⚠️ Failed to create DID %s: %v", did, err)
+				}
+			}
 		} else {
-			log.Printf("✅ TokenType inserted or exists: %s (%s)", nft.TokenID, NFTType)
+			existing.TotalNFTs += int64(count)
+			if err := database.DB.Save(&existing).Error; err != nil {
+				log.Printf("⚠️ Failed to update TotalNFTs for DID %s: %v", did, err)
+			}
 		}
 	}
+
 	return nil
 }
 
 func StoreSCInfoInDB(SCs []SC) error {
+	didCount := make(map[string]int)
 	for _, sc := range SCs {
 		scmodel := models.SmartContract{
 			ContractID:  sc.SmartContractHash,
 			BlockHash:   sc.BlockHash,
 			DeployerDID: sc.Deployer,
 			TxnId:       sc.TransactionID,
-			// BlockHeight: fmt.Sprintf("%d", ft.BlockHeight),
 		}
-
-		fmt.Printf("Inserting SC: %+v\n", scmodel)
 
 		if err := database.DB.FirstOrCreate(&scmodel, models.SmartContract{ContractID: sc.SmartContractHash}).Error; err != nil {
 			log.Printf("⚠️ Failed to insert SC %s: %v", sc.SmartContractHash, err)
@@ -351,15 +414,37 @@ func StoreSCInfoInDB(SCs []SC) error {
 		}
 		log.Printf("✅ SC inserted or exists: %s", sc.SmartContractHash)
 
-		// Optionally, insert into token type table
 		tokenType := models.TokenType{
 			TokenID:     sc.SmartContractHash,
 			TokenType:   SCType,
 			LastUpdated: time.Now(),
 		}
 		if err := database.DB.FirstOrCreate(&tokenType, models.TokenType{TokenID: sc.SmartContractHash}).Error; err != nil {
-			log.Printf("⚠️ Failed to insert token type for SC %s: %v", sc.SmartContractHash, err)
+			log.Printf("⚠️ Failed to insert token_type for SC %s: %v", sc.SmartContractHash, err)
+		}
+		didCount[sc.Deployer]++
+	}
+
+	for did, count := range didCount {
+		var existing models.DIDs
+		if err := database.DB.First(&existing, "did = ?", did).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				newDID := models.DIDs{
+					DID:       did,
+					CreatedAt: time.Now(),
+					TotalSC:   int64(count),
+				}
+				if err := database.DB.Create(&newDID).Error; err != nil {
+					log.Printf("⚠️ Failed to create DID %s: %v", did, err)
+				}
+			}
+		} else {
+			existing.TotalSC += int64(count)
+			if err := database.DB.Save(&existing).Error; err != nil {
+				log.Printf("⚠️ Failed to update TotalSC for DID %s: %v", did, err)
+			}
 		}
 	}
+
 	return nil
 }
