@@ -19,55 +19,68 @@ const (
 	SCType  = "SC"
 )
 
-// RBT matches the structure returned by the API
 type RBT struct {
-	TokenID       string  `json:"TokenID"`
-	TokenValue    float64 `json:"TokenValue"`
-	OwnerDID      string  `json:"OwnerDID"`
-	PublisherDID  string  `json:"PublisherDID"`
-	TransactionID string  `json:"TransactionID"`
-	BlockHash     string  `json:"BlockHash"`
-	BlockHeight   uint64  `json:"BlockHeight"`
-	SyncStaus     int     `json:"SyncStaus"`
+	TokenID       string
+	TokenValue    float64
+	OwnerDID      string
+	PublisherDID  string
+	TransactionID string
+	BlockHash     string
+	BlockHeight   uint64
+	SyncStaus     int
 }
 
 type FT struct {
-	TokenID       string  `gorm:"column:token_id;primaryKey"`
-	FTName        string  `gorm:"column:ft_name"`
-	OwnerDID      string  `gorm:"column:owner_did"`
-	CreatorDID    string  `gorm:"column:creator_did"`
-	TokenValue    float64 `gorm:"column:token_value"`
-	TransactionID string  `gorm:"column:transaction_id"`
-	BlockHash     string  `gorm:"column:block_hash"`
-	SyncStatus    int     `gorm:"column:sync_status"`
+	TokenID       string
+	FTName        string
+	OwnerDID      string
+	CreatorDID    string
+	TokenValue    float64
+	TransactionID string
+	BlockHash     string
+	SyncStatus    int
 }
 
 type NFT struct {
-	TokenID       string  `gorm:"column:token_id;primaryKey" json:"token_id"`
-	TokenValue    float64 `gorm:"column:token_value;" json:"token_value"`
-	OwnerDID      string  `gorm:"column:owner_did"`
-	TransactionID string  `gorm:"column:transaction_id"`
-	BlockHash     string  `gorm:"column:block_hash"`
-	SyncStatus    int     `gorm:"column:sync_status"`
+	TokenID       string
+	TokenValue    float64
+	OwnerDID      string
+	TransactionID string
+	BlockHash     string
+	SyncStatus    int
 }
 
-// GetRBTListResponse represents the structure of the API response
+type SC struct {
+	SmartContractHash string `json:"smart_contract_hash"`
+	Deployer          string `json:"deployer"`
+	TransactionID     string `json:"TransactionID"`
+	BlockHash         string `json:"BlockHash"`
+	SyncStatus        int    `json:"SyncStatus"`
+}
+
+// API response structs
 type GetRBTListResponse struct {
-	Status  bool   `json:"status"`
-	Message string `json:"message"`
-	Result  []RBT  `json:"result"`
+	Status  bool
+	Message string
+	Result  []RBT
 }
 
 type GetFTListResponse struct {
-	Status  bool   `json:"status"`
-	Message string `json:"message"`
-	Result  []FT   `json:"result"`
+	Status  bool
+	Message string
+	Result  []FT
 }
 
 type GetNFTListResponse struct {
+	Status  bool
+	Message string
+	Result  []NFT
+}
+
+type GetSCListResponse struct {
 	Status  bool   `json:"status"`
 	Message string `json:"message"`
-	Result  []NFT  `json:"result"`
+	Result  []SC   `json:"result"`
 }
 
 // FetchAndStoreAllRBTsFromFullNodeDB fetches RBTs from full node API and stores them
@@ -182,6 +195,44 @@ func FetchAndStoreAllNFTsFromFullNodeDB() error {
 	return nil
 }
 
+func FetchAndStoreAllSCsFromFullNodeDB() error {
+	apiURL := config.RubixNodeURL + "/api/de-exp/get-smart-contract-list"
+
+	log.Println("📡 Fetching SC list from:", apiURL)
+
+	resp, err := http.Get(apiURL)
+	if err != nil {
+		return fmt.Errorf("failed to call get-smart-contract-list API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("API returned non-200 status: %d", resp.StatusCode)
+	}
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	var apiResp GetSCListResponse
+	fmt.Println("API response from SC API is:", apiResp)
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return fmt.Errorf("failed to parse API response: %w", err)
+	}
+
+	if !apiResp.Status {
+		return fmt.Errorf("API error: %s", apiResp.Message)
+	}
+
+	if err := StoreSCInfoInDB(apiResp.Result); err != nil {
+		return fmt.Errorf("failed to store SCs: %w", err)
+	}
+
+	log.Printf("✅ Successfully fetched and stored %d SCs\n", len(apiResp.Result))
+	return nil
+}
+
 // StoreRBTInfoInDB inserts RBTs into DB and ensures a corresponding token_type entry exists
 func StoreRBTInfoInDB(RBTs []RBT) error {
 	for _, rbt := range RBTs {
@@ -254,7 +305,7 @@ func StoreNFTInfoInDB(NFTs []NFT) error {
 	for _, nft := range NFTs {
 		nftmodel := models.NFT{
 			TokenID:    nft.TokenID,
-			TokenValue: nft.TokenValue,
+			TokenValue: fmt.Sprintf("%f", nft.TokenValue),
 			OwnerDID:   nft.OwnerDID,
 			BlockHash:  nft.BlockHash,
 			Txn_ID:     nft.TransactionID,
@@ -277,6 +328,37 @@ func StoreNFTInfoInDB(NFTs []NFT) error {
 			log.Printf("⚠️ Failed to insert token_type for %s: %v", nft.TokenID, err)
 		} else {
 			log.Printf("✅ TokenType inserted or exists: %s (%s)", nft.TokenID, NFTType)
+		}
+	}
+	return nil
+}
+
+func StoreSCInfoInDB(SCs []SC) error {
+	for _, sc := range SCs {
+		scmodel := models.SmartContract{
+			ContractID:  sc.SmartContractHash,
+			BlockHash:   sc.BlockHash,
+			DeployerDID: sc.Deployer,
+			TxnId:       sc.TransactionID,
+			// BlockHeight: fmt.Sprintf("%d", ft.BlockHeight),
+		}
+
+		fmt.Printf("Inserting SC: %+v\n", scmodel)
+
+		if err := database.DB.FirstOrCreate(&scmodel, models.SmartContract{ContractID: sc.SmartContractHash}).Error; err != nil {
+			log.Printf("⚠️ Failed to insert SC %s: %v", sc.SmartContractHash, err)
+			continue
+		}
+		log.Printf("✅ SC inserted or exists: %s", sc.SmartContractHash)
+
+		// Optionally, insert into token type table
+		tokenType := models.TokenType{
+			TokenID:     sc.SmartContractHash,
+			TokenType:   SCType,
+			LastUpdated: time.Now(),
+		}
+		if err := database.DB.FirstOrCreate(&tokenType, models.TokenType{TokenID: sc.SmartContractHash}).Error; err != nil {
+			log.Printf("⚠️ Failed to insert token type for SC %s: %v", sc.SmartContractHash, err)
 		}
 	}
 	return nil
