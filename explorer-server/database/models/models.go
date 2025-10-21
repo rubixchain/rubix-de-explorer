@@ -54,7 +54,6 @@ func (SmartContract) TableName() string { return "SmartContract" }
 // ========================= RBT =========================
 type RBT struct {
 	TokenID     string  `json:"rbt_id" gorm:"column:rbt_id"`
-	TokenValue  float64 `json:"token_value" gorm:"column:token_value"`
 	OwnerDID    string  `json:"owner_did" gorm:"column:owner_did"`
 	BlockID     string  `json:"block_id" gorm:"column:block_id"`
 	BlockHeight string  `json:"block_height" gorm:"column:block_height"`

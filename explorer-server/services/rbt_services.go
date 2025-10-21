@@ -37,6 +37,16 @@ func GetRBTList(limit, page int) ([]models.RBT, error) {
 	return rbts, nil
 }
 
+func GetRBTListFromDID(did string) ([]models.RBT, error) {
+	var rbts []models.RBT
+
+	if err := database.DB.
+		Where("owner_did = ?", did).
+		Find(&rbts).Error; err != nil {
+		return nil, err
+	}
+	return rbts, nil
+}
 // // GetRBTInfoFromRBTID fetches a single RBT by its ID
 // func GetRBTInfoFromRBTID(rbtID string) (*models.RBT, error) {
 // 	var rbt models.RBT

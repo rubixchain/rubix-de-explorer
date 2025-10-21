@@ -31,8 +31,13 @@ func GetDIDInfoHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	getAllRBTs, err := services.GetRBTListFromDID(did)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-	response := map[string]interface{}{"did": didInfo}
+	response := map[string]interface{}{"did": didInfo, "rbts": getAllRBTs}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
