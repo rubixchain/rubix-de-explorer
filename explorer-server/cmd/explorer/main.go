@@ -33,6 +33,8 @@ func main() {
 
 	// Insert dummy RBT data
 	insertDummyRBTs()
+	insertDummyDIDs()
+
 	insertDummyTransferBlocks()
 	insertDummyNFTs()
 	insertDummySmartContracts()
@@ -214,6 +216,44 @@ func insertDummyAssetTypes() {
 			log.Printf("⚠️ Failed to insert dummy asset type %s: %v", asset.TokenID, err)
 		} else {
 			log.Printf("✅ Dummy asset type inserted or exists: %s → %s", asset.TokenID, asset.TokenType)
+		}
+	}
+}
+
+// Insert dummy DIDs
+func insertDummyDIDs() {
+	dummyDIDs := []models.DIDs{
+		{
+			DID:       "bafy1234abcd",
+			CreatedAt: time.Now(),
+			TotalRBTs: 12.5,
+			TotalFTs:  34.8,
+			TotalNFTs: 5,
+			TotalSC:   2,
+		},
+		{
+			DID:       "bafy5678efgh",
+			CreatedAt: time.Now(),
+			TotalRBTs: 9.0,
+			TotalFTs:  15.2,
+			TotalNFTs: 3,
+			TotalSC:   1,
+		},
+		{
+			DID:       "bafy9999ijkl",
+			CreatedAt: time.Now(),
+			TotalRBTs: 22.7,
+			TotalFTs:  10.4,
+			TotalNFTs: 7,
+			TotalSC:   4,
+		},
+	}
+
+	for _, did := range dummyDIDs {
+		if err := database.DB.FirstOrCreate(&did, models.DIDs{DID: did.DID}).Error; err != nil {
+			log.Printf("⚠️ Failed to insert dummy DID %s: %v", did.DID, err)
+		} else {
+			log.Printf("✅ Dummy DID inserted or exists: %s", did.DID)
 		}
 	}
 }
