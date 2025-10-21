@@ -11,9 +11,10 @@ import (
 // GetTxnsCount returns the total number of Blocks in the database
 func GetTxnsCount() (int64, error) {
 	var count int64
-	if err := database.DB.Model(&models.AllBlocks{}).Count(&count).Error; err != nil {
+	if err := database.DB.Model(&models.RBT{}).Count(&count).Error; err != nil {
 		return 0, err
 	}
+	fmt.Printf("count", count)
 	return count, nil
 }
 
@@ -32,7 +33,7 @@ func GetTransferBlocksList(limit, offset int) (model.TransactionsResponse, error
 	// Map DB model to response model
 	for _, b := range blocks {
 		tx := model.TransactionResponse{
-			TxnHash:     b.BlockHash,
+			TxnHash:     *b.TxnID,
 			TxnType:     deref(b.TxnType),
 			Amount:      derefFloat(b.Amount),
 			SenderDID:   deref(b.SenderDID),
@@ -143,21 +144,21 @@ func derefInt64Ptr(i *int64) int64 {
 }
 
 // Helper functions to safely deref pointers
-func derefString(s *string) *string {
-	if s == nil {
-		empty := ""
-		return &empty
-	}
-	return s
-}
+// func derefString(s *string) *string {
+// 	if s == nil {
+// 		empty := ""
+// 		return &empty
+// 	}
+// 	return s
+// }
 
-func derefInt64(i *int64) *int64 {
-	if i == nil {
-		zero := int64(0)
-		return &zero
-	}
-	return i
-}
+// func derefInt64(i *int64) *int64 {
+// 	if i == nil {
+// 		zero := int64(0)
+// 		return &zero
+// 	}
+// 	return i
+// }
 
 // helper functions
 func deref(ptr *string) string {

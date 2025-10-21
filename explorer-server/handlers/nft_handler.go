@@ -7,7 +7,6 @@ import (
 	"explorer-server/services"
 )
 
-
 func GetNFTsCountHandler(w http.ResponseWriter, r *http.Request) {
 	count, err := services.GetNFTCount()
 	if err != nil {
@@ -25,7 +24,7 @@ func GetNFTsCountHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func GetNFTInfoFromNFTID(w http.ResponseWriter, r *http.Request) {
-	nftId := r.URL.Query().Get("nftId")
+	nftId := r.URL.Query().Get("nftid")
 	println("NFT ID:", nftId)
 	nftInfo, err := services.GetNFTInfoFromNFTID(nftId)
 	if err != nil {
@@ -72,5 +71,3 @@ func GetNFTInfoFromNFTID(w http.ResponseWriter, r *http.Request) {
 // 		}
 // 	}
 // }
-
-

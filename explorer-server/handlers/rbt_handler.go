@@ -7,7 +7,6 @@ import (
 	"strconv"
 )
 
-
 func GetRBTCountHandler(w http.ResponseWriter, r *http.Request) {
 	count, err := services.GetRBTCount()
 	if err != nil {
@@ -24,7 +23,7 @@ func GetRBTCountHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func GetRBTInfoFromRBTID(w http.ResponseWriter, r *http.Request) {
-	rbtId := r.URL.Query().Get("rbtId")
+	rbtId := r.URL.Query().Get("rbtid")
 	println("RBT ID:", rbtId)
 	rbtInfo, err := services.GetRBTInfoFromRBTID(rbtId)
 	if err != nil {
