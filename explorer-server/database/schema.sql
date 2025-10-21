@@ -15,7 +15,6 @@ CREATE TABLE IF NOT EXISTS transfer_blocks (
 -- Table: rbt
 CREATE TABLE IF NOT EXISTS rbt (
     token_id TEXT PRIMARY KEY,
-    token_value DOUBLE PRECISION,
     owner_did TEXT,
     block_id TEXT,
     block_height TEXT
