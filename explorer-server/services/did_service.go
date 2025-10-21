@@ -1,10 +1,10 @@
-
 package services
 
 import (
 	"explorer-server/database"
 	"explorer-server/database/models"
 	"explorer-server/model"
+	"fmt"
 )
 
 // GetRBTCount returns the total number of RBTs in the database
@@ -35,15 +35,17 @@ func GetDIDHoldersList(limit, page int) ([]model.HolderResponse, error) {
 		Find(&dids).Error; err != nil {
 		return nil, err
 	}
-
 	// Map to response format
 	holders := make([]model.HolderResponse, len(dids))
+	fmt.Printf("holder", holders )
+
 	for i, d := range dids {
 		holders[i] = model.HolderResponse{
 			OwnerDID:  d.DID,
 			TokenCount: d.TotalRBTs,
 		}
 	}
+    fmt.Printf("holder", holders )
 
 	return holders, nil
 }

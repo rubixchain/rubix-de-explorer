@@ -2,8 +2,8 @@ package handlers
 
 import (
 	"encoding/json"
-	"net/http"
 	"explorer-server/services"
+	"net/http"
 )
 
 func GetFTCountHandler(w http.ResponseWriter, r *http.Request) {
@@ -22,7 +22,7 @@ func GetFTCountHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func GetFTInfoFromFTID(w http.ResponseWriter, r *http.Request) {
-	ftId := r.URL.Query().Get("ftId")
+	ftId := r.URL.Query().Get("ftid")
 	println("FT ID:", ftId)
 	ftInfo, err := services.GetFTInfoFromFTID(ftId)
 	if err != nil {
@@ -37,7 +37,6 @@ func GetFTInfoFromFTID(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 	}
 }
-
 
 // func GetRBTInfoFromRBTIDHandler(w http.ResponseWriter, r *http.Request)  {
 // 	rbtId:= r.URL.Query().Get("rbtId")

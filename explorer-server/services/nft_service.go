@@ -16,7 +16,7 @@ func GetNFTCount() (int64, error) {
 
 func GetNFTInfoFromNFTID(nftID string) (*models.NFT, error) {
 	var nftInfo models.NFT
-	if err := database.DB.First(&nftInfo, "token_id = ?", nftID).Error; err != nil {
+	if err := database.DB.First(&nftInfo, "nft_id = ?", nftID).Error; err != nil {
 		return nil, err
 	}
 	return &nftInfo, nil

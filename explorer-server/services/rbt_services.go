@@ -30,14 +30,12 @@ func GetRBTList(limit, page int) ([]models.RBT, error) {
 	if err := database.DB.
 		Limit(limit).
 		Offset(offset).
-		Order("block_height ASC"). // optional ordering
 		Find(&rbts).Error; err != nil {
 		return nil, err
 	}
 
 	return rbts, nil
 }
-
 
 // // GetRBTInfoFromRBTID fetches a single RBT by its ID
 // func GetRBTInfoFromRBTID(rbtID string) (*models.RBT, error) {

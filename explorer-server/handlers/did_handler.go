@@ -2,11 +2,10 @@ package handlers
 
 import (
 	"encoding/json"
-	"net/http"
-    "strconv"
 	"explorer-server/services"
+	"net/http"
+	"strconv"
 )
-
 
 func GetDIDCountHandler(w http.ResponseWriter, r *http.Request) {
 	count, err := services.GetRBTCount()
@@ -24,16 +23,16 @@ func GetDIDCountHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func GetDIDInfoHandler(w http.ResponseWriter, r *http.Request) {
-	
+
 	did := r.URL.Query().Get("did")
 	println("DID:", did)
-    didInfo, err := services.GetDIDInfoFromDID(did)
+	didInfo, err := services.GetDIDInfoFromDID(did)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	response := map[string]interface{}{"did_info": didInfo}
+	response := map[string]interface{}{"did": didInfo}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
