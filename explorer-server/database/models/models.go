@@ -2,6 +2,7 @@ package models
 
 import (
 	"time"
+
 	"gorm.io/datatypes"
 )
 
@@ -52,10 +53,11 @@ func (SmartContract) TableName() string { return "SmartContract" }
 
 // ========================= RBT =========================
 type RBT struct {
-	TokenID     string  `json:"rbt_id" gorm:"column:rbt_id"`
-	OwnerDID    string  `json:"owner_did" gorm:"column:owner_did"`
-	BlockID     string  `json:"block_id" gorm:"column:block_id"`
-	BlockHeight string  `json:"block_height" gorm:"column:block_height"`
+	TokenID     string `json:"rbt_id" gorm:"column:rbt_id"`
+	OwnerDID    string `json:"owner_did" gorm:"column:owner_did"`
+	BlockID     string `json:"block_id" gorm:"column:block_id"`
+	BlockHeight string `json:"block_height" gorm:"column:block_height"`
+	TxnId       string `json:"txn_id" gorm:"column:txn_id"`
 }
 
 func (RBT) TableName() string { return "RBT" }
