@@ -22,3 +22,7 @@ func GetAssetType(id string) (string, error) {
 
 	return asset.TokenType, nil
 }
+
+func GetTokenChainFromTokenID(tokenID string ) {
+	
+}

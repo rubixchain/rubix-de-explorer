@@ -33,14 +33,14 @@ func main() {
 	database.ConnectAndMigrate(false) // pass true to drop tables
 
 	// Insert dummy RBT data
-	// insertDummyRBTs()
-	// insertDummyDIDs()
+	insertDummyRBTs()
+	insertDummyDIDs()
 
-	// insertDummyTransferBlocks()
-	// insertDummyNFTs()
-	// insertDummySmartContracts()
-	// insertDummyFTs()
-	// insertDummyAssetTypes() // 👈 Add this line
+	insertDummyTransferBlocks()
+	insertDummyNFTs()
+	insertDummySmartContracts()
+	insertDummyFTs()
+	insertDummyAssetTypes() // 👈 Add this line
 
 	RBTfetchErr := services.FetchAndStoreAllRBTsFromFullNodeDB()
 	if RBTfetchErr != nil {
@@ -94,8 +94,8 @@ func main() {
 // Insert dummy RBTs
 func insertDummyRBTs() {
 	dummyRBTs := []models.RBT{
-		{TokenID: "qemrbt-0019", OwnerDID: "bafy1234abcd", BlockID: "block-001", BlockHeight: "1"},
-		{TokenID: "rbt-0011", OwnerDID: "bafy1234abcd", BlockID: "block-002", BlockHeight: "2"},
+		{TokenID: "qemrbt-0019", OwnerDID: "bafy1234abcd", BlockID: "block-001", BlockHeight: "1", TokenValue: 0.5},
+		{TokenID: "rbt-0011", OwnerDID: "bafy1234abcd", BlockID: "block-002", BlockHeight: "2", TokenValue: 1.0},
 	}
 
 	for _, rbt := range dummyRBTs {

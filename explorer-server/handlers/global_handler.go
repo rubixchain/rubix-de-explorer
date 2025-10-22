@@ -81,3 +81,28 @@ func GetInfo(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 	}
 }
+
+
+func GetTokenChainFromTokenID(w http.ResponseWriter, r *http.Request) {
+	tokenID := r.URL.Query().Get("token_id")
+	if tokenID == "" {
+		http.Error(w, "Missing 'token_id' parameter", http.StatusBadRequest)
+		return
+	}
+
+	chainData, err := services.GetTokenChainFromTokenID(tokenID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to fetch token chain: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if chainData == nil {
+		http.Error(w, fmt.Sprintf("No chain data found for Token ID: %s", tokenID), http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(chainData); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
+}
