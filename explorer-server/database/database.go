@@ -22,7 +22,7 @@ func ConnectAndMigrate(drop bool) {
 		"host=%s user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=UTC",
 		getEnv("PG_HOST", "localhost"),
 		getEnv("PG_USER", "postgres"),
-		getEnv("PG_PASSWORD", "postgres"),
+		getEnv("PG_PASSWORD", "postgres123"),
 		getEnv("PG_DB", "explorer"),
 		getEnv("PG_PORT", "5432"),
 	)

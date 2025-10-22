@@ -13,6 +13,7 @@ import (
 	"explorer-server/database"
 	"explorer-server/database/models"
 	"explorer-server/router"
+	"explorer-server/services"
 
 	"github.com/joho/godotenv"
 	"github.com/rs/cors"
@@ -32,14 +33,34 @@ func main() {
 	database.ConnectAndMigrate(false) // pass true to drop tables
 
 	// Insert dummy RBT data
-	insertDummyRBTs()
-	insertDummyDIDs()
+	// insertDummyRBTs()
+	// insertDummyDIDs()
 
-	insertDummyTransferBlocks()
-	insertDummyNFTs()
-	insertDummySmartContracts()
-	insertDummyFTs()
-	insertDummyAssetTypes() // 👈 Add this line
+	// insertDummyTransferBlocks()
+	// insertDummyNFTs()
+	// insertDummySmartContracts()
+	// insertDummyFTs()
+	// insertDummyAssetTypes() // 👈 Add this line
+
+	RBTfetchErr := services.FetchAndStoreAllRBTsFromFullNodeDB()
+	if RBTfetchErr != nil {
+		log.Printf("Failed to call `FetchAndStoreAllRBTsFromFullNodeDB`, err: %v", RBTfetchErr)
+	}
+
+	FTfetchErr := services.FetchAndStoreAllFTsFromFullNodeDB()
+	if FTfetchErr != nil {
+		log.Printf("Failed to call `FetchAndStoreAllRBTsFromFullNodeDB`, err: %v", FTfetchErr)
+	}
+
+	NFTfetchErr := services.FetchAndStoreAllNFTsFromFullNodeDB()
+	if NFTfetchErr != nil {
+		log.Printf("Failed to call `FetchAndStoreAllRBTsFromFullNodeDB`, err: %v", NFTfetchErr)
+	}
+
+	SCfetchErr := services.FetchAndStoreAllSCsFromFullNodeDB()
+	if SCfetchErr != nil {
+		log.Printf("Failed to call `FetchAndStoreAllRBTsFromFullNodeDB`, err: %v", SCfetchErr)
+	}
 
 	// Setup router
 	r := router.NewRouter()
@@ -147,7 +168,7 @@ func newDummyBlock(
 func insertDummyNFTs() {
 	dummyNFTs := []models.NFT{
 		{TokenID: "nft-001", OwnerDID: "did:example:owner001", TokenValue: "1.2", BlockHash: "block-010", Txn_ID: "10asfsadf"},
-		{TokenID: "nft-002", OwnerDID: "did:example:owner001", TokenValue: "1.2", BlockHash: "block-010", Txn_ID: "10asfsadf"},
+		{TokenID: "nft-002", OwnerDID: "did:example:owner001", TokenValue: "1.3", BlockHash: "block-010", Txn_ID: "10asfsadf"},
 	}
 
 	for _, nft := range dummyNFTs {
