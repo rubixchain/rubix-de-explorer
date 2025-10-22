@@ -57,7 +57,6 @@ type RBT struct {
 	OwnerDID    string `json:"owner_did" gorm:"column:owner_did"`
 	BlockID     string `json:"block_id" gorm:"column:block_id"`
 	BlockHeight string `json:"block_height" gorm:"column:block_height"`
-	TxnId       string `json:"txn_id" gorm:"column:txn_id"`
 }
 
 func (RBT) TableName() string { return "RBT" }

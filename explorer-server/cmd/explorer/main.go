@@ -73,8 +73,8 @@ func main() {
 // Insert dummy RBTs
 func insertDummyRBTs() {
 	dummyRBTs := []models.RBT{
-		{TokenID: "qemrbt-0019", OwnerDID: "bafy1234abcd", BlockID: "block-001", BlockHeight: "1", TxnId:"rbttxn002"},
-		{TokenID: "rbt-0011", OwnerDID: "bafy1234abcd", BlockID: "block-002", BlockHeight: "2", TxnId: "rbttxn001"},
+		{TokenID: "qemrbt-0019", OwnerDID: "bafy1234abcd", BlockID: "block-001", BlockHeight: "1"},
+		{TokenID: "rbt-0011", OwnerDID: "bafy1234abcd", BlockID: "block-002", BlockHeight: "2"},
 	}
 
 	for _, rbt := range dummyRBTs {
