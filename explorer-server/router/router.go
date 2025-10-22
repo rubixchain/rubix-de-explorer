@@ -1,8 +1,9 @@
 package router
 
 import (
-	"net/http"
 	"explorer-server/handlers"
+	"net/http"
+
 	"github.com/gorilla/mux"
 )
 
@@ -23,19 +24,19 @@ func NewRouter() *mux.Router {
 	r.HandleFunc("/api/allnftcount", handlers.GetNFTsCountHandler).Methods(http.MethodGet)
 
 	// // route to get the did with most rbts
-    r.HandleFunc("/api/didwithmostrbts", handlers.GetDIDHoldersListHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/didwithmostrbts", handlers.GetDIDHoldersListHandler).Methods(http.MethodGet)
 	r.HandleFunc("/api/txnblocks", handlers.GetTransferBlockListHandler).Methods(http.MethodGet)
 	r.HandleFunc("/api/getdidinfo", handlers.GetDIDInfoHandler).Methods(http.MethodGet)
 	r.HandleFunc("/api/txnhash", handlers.GetBlockInfoFromTxnHash).Methods(http.MethodGet)
 	r.HandleFunc("/api/blockhash", handlers.GetBlockInfoFromBlockHash).Methods(http.MethodGet)
 	r.HandleFunc("/api/smartcontract", handlers.GetSmartContractInfoFromSCID).Methods(http.MethodGet)
-	r.HandleFunc("/api/nft", handlers.GetNFTInfoFromNFTID).Methods(http.MethodGet) //done 
-	r.HandleFunc("/api/rbt", handlers.GetRBTInfoFromRBTID).Methods(http.MethodGet) //done 
-	r.HandleFunc("/api/ft", handlers.GetFTInfoFromFTID).Methods(http.MethodGet) //done
-    r.HandleFunc("/api/getrbtlist", handlers.GetRBTListHandler).Methods(http.MethodGet) 
+	r.HandleFunc("/api/nft", handlers.GetNFTInfoFromNFTID).Methods(http.MethodGet) //done
+	r.HandleFunc("/api/rbt", handlers.GetRBTInfoFromRBTID).Methods(http.MethodGet) //done
+	r.HandleFunc("/api/ft", handlers.GetFTInfoFromFTID).Methods(http.MethodGet)    //done
+	r.HandleFunc("/api/getrbtlist", handlers.GetRBTListHandler).Methods(http.MethodGet)
 
 	r.HandleFunc("/api/search", handlers.GetInfo).Methods(http.MethodGet)
-	r.HandleFunc("/api/token-chain", handlers.GetTokenChainFromTokenID).Methods(http.MethodGet)
+	// r.HandleFunc("/api/token-chain", handlers.GetTokenChainFromTokenID).Methods(http.MethodGet)
 
 	// r.HandleFunc("/api/analytics", handlers.DatabaseAnalyticsHandler).Methods(http.MethodGet)
 	// r.HandleFunc("/api/database", handlers.DatabaseInterfaceHandler).Methods(http.MethodGet)
