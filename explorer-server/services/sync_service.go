@@ -7,12 +7,15 @@ import (
 	"explorer-server/database"
 	"explorer-server/database/models"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"time"
 
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const (
@@ -219,7 +222,6 @@ func FetchAndStoreAllSCsFromFullNodeDB() error {
 	}
 
 	var apiResp GetSCListResponse
-	fmt.Println("API response from SC API is:", apiResp)
 	if err := json.Unmarshal(body, &apiResp); err != nil {
 		return fmt.Errorf("failed to parse API response: %w", err)
 	}
@@ -447,4 +449,158 @@ func StoreSCInfoInDB(SCs []SC) error {
 	}
 
 	return nil
+}
+
+// FetchAllTokenChainFromFullNode iterates over all tokens and stores transfer blocks
+func FetchAllTokenChainFromFullNode() error {
+	var tokens []models.TokenType
+
+	// Fetch all tokens from DB
+	if err := database.DB.Find(&tokens).Error; err != nil {
+		log.Fatalf("❌ Failed to fetch tokens from DB: %v", err)
+		return err
+	}
+
+	for _, token := range tokens {
+		apiURL := fmt.Sprintf("%s/api/de-exp/get-token-chain?tokenID=%s&tokenType=%s",
+			config.RubixNodeURL, token.TokenID, token.TokenType)
+
+		resp, err := http.Get(apiURL)
+		if err != nil {
+			log.Printf("❌ Error fetching chain for %s: %v", token.TokenID, err)
+			continue
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			log.Printf("❌ Error reading response for %s: %v", token.TokenID, err)
+			continue
+		}
+
+		var chainData map[string]interface{}
+		if err := json.Unmarshal(body, &chainData); err != nil {
+			log.Printf("❌ Error decoding JSON for %s: %v", token.TokenID, err)
+			continue
+		}
+
+		// ✅ Correct key for blocks
+		var blocks []interface{}
+		if b, ok := chainData["TokenChainData"].([]interface{}); ok {
+			blocks = b
+		} else if b, ok := chainData["blocks"].([]interface{}); ok {
+			blocks = b
+		} else {
+			log.Printf("⚠️ No blocks found for token %s", token.TokenID)
+			continue
+		}
+
+		for _, blk := range blocks {
+			blockMap, ok := blk.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			// Only store transfer-type blocks
+			transType, ok := blockMap["TCTransTypeKey"].(string)
+			if !ok || (transType != "02" && transType != "2") {
+				continue
+			}
+
+			// --- Parse subkeys safely ---
+			transInfo, _ := blockMap["TCTransInfoKey"].(map[string]interface{})
+			tokensKey, _ := transInfo["TITokensKey"].(map[string]interface{})
+
+			// Marshal child maps to JSON
+			tokensJSON, _ := json.Marshal(tokensKey)
+			pledgeMapJSON, _ := json.Marshal(blockMap["TCPledgeDetailsKey"])
+
+			// Parse amount & epoch safely
+			amount := float64Ptr(blockMap["TCTokenValueKey"])
+			epoch := int64Ptr(blockMap["TCEpoch"])
+
+			// Build DB entry
+			tb := models.TransferBlocks{
+				BlockHash:          fmt.Sprintf("%v", blockMap["TCBlockHashKey"]),
+				PrevBlockID:        stringPtr(getNested(transInfo, "TTPreviousBlockIDKey")),
+				SenderDID:          stringPtr(getNested(transInfo, "TISenderDIDKey")),
+				ReceiverDID:        stringPtr(getNested(transInfo, "TIReceiverDIDKey")),
+				TxnType:            stringPtr(transType),
+				TxnID:              stringPtr(getNested(transInfo, "TITIDKey")),
+				Amount:             amount,
+				Epoch:              epoch,
+				Tokens:             datatypes.JSON(tokensJSON),
+				ValidatorPledgeMap: datatypes.JSON(pledgeMapJSON),
+			}
+
+			// Upsert into DB
+			if err := database.DB.Clauses(clause.OnConflict{
+				UpdateAll: true,
+			}).Create(&tb).Error; err != nil && !errors.Is(err, gorm.ErrDuplicatedKey) {
+				log.Printf("❌ Failed to store transfer block %v: %v", tb.BlockHash, err)
+			}
+		}
+
+		time.Sleep(100 * time.Millisecond) // avoid hammering full node
+	}
+
+	log.Println("✅ Finished fetching all token chains and storing transfer blocks")
+	return nil
+}
+
+// Safe string pointer
+func stringPtr(v interface{}) *string {
+	if v == nil {
+		return nil
+	}
+	str := fmt.Sprintf("%v", v)
+	return &str
+}
+
+// Safe float64 pointer
+func float64Ptr(v interface{}) *float64 {
+	if v == nil {
+		return nil
+	}
+	switch val := v.(type) {
+	case float64:
+		return &val
+	case int:
+		f := float64(val)
+		return &f
+	case string:
+		var f float64
+		fmt.Sscanf(val, "%f", &f)
+		return &f
+	default:
+		return nil
+	}
+}
+
+// Safe int64 pointer
+func int64Ptr(v interface{}) *int64 {
+	if v == nil {
+		return nil
+	}
+	switch val := v.(type) {
+	case float64:
+		i := int64(val)
+		return &i
+	case int64:
+		return &val
+	case string:
+		var i int64
+		fmt.Sscanf(val, "%d", &i)
+		return &i
+	default:
+		return nil
+	}
+}
+
+// getNested safely fetches a nested map key
+func getNested(m map[string]interface{}, key string) interface{} {
+	if m == nil {
+		return nil
+	}
+	return m[key]
 }

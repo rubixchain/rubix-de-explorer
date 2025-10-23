@@ -33,14 +33,14 @@ func main() {
 	database.ConnectAndMigrate(false) // pass true to drop tables
 
 	// Insert dummy RBT data
-	insertDummyRBTs()
-	insertDummyDIDs()
+	// insertDummyRBTs()
+	// insertDummyDIDs()
 
-	insertDummyTransferBlocks()
-	insertDummyNFTs()
-	insertDummySmartContracts()
-	insertDummyFTs()
-	insertDummyAssetTypes() // 👈 Add this line
+	// insertDummyTransferBlocks()
+	// insertDummyNFTs()
+	// insertDummySmartContracts()
+	// insertDummyFTs()
+	// insertDummyAssetTypes() // 👈 Add this line
 
 	RBTfetchErr := services.FetchAndStoreAllRBTsFromFullNodeDB()
 	if RBTfetchErr != nil {
@@ -49,17 +49,22 @@ func main() {
 
 	FTfetchErr := services.FetchAndStoreAllFTsFromFullNodeDB()
 	if FTfetchErr != nil {
-		log.Printf("Failed to call `FetchAndStoreAllRBTsFromFullNodeDB`, err: %v", FTfetchErr)
+		log.Printf("Failed to call `FetchAndStoreAllFTsFromFullNodeDB`, err: %v", FTfetchErr)
 	}
 
 	NFTfetchErr := services.FetchAndStoreAllNFTsFromFullNodeDB()
 	if NFTfetchErr != nil {
-		log.Printf("Failed to call `FetchAndStoreAllRBTsFromFullNodeDB`, err: %v", NFTfetchErr)
+		log.Printf("Failed to call `FetchAndStoreAllNFTsFromFullNodeDB`, err: %v", NFTfetchErr)
 	}
 
 	SCfetchErr := services.FetchAndStoreAllSCsFromFullNodeDB()
 	if SCfetchErr != nil {
-		log.Printf("Failed to call `FetchAndStoreAllRBTsFromFullNodeDB`, err: %v", SCfetchErr)
+		log.Printf("Failed to call `FetchAndStoreAllSCsFromFullNodeDB`, err: %v", SCfetchErr)
+	}
+
+	FetchTokenChainErr := services.FetchAllTokenChainFromFullNode()
+	if FetchTokenChainErr != nil {
+		log.Printf("Failed to call `FetchAllTokenChainFromFullNode`, err: %v", FetchTokenChainErr)
 	}
 
 	// Setup router
