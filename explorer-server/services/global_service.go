@@ -79,12 +79,12 @@ func GetTokenChainFromTokenID(tokenID string) (map[string]interface{}, error) {
 	return chainData, nil
 }
 
-// Fetches all blocks from a given token chain
-func GetTokenBlocksFromTokenID(tokenID string) ([]map[string]interface{}, error) {
+// Fetches all blocks from a given token chain with pagination
+func GetTokenBlocksFromTokenID(tokenID string, page int, limit int) ([]map[string]interface{}, int, error) {
 	// Step 1: Get token type
 	tokenType, err := GetAssetType(tokenID)
 	if err != nil {
-		return nil, fmt.Errorf("❌ failed to get token type from asset table: %v", err)
+		return nil, 0, fmt.Errorf("❌ failed to get token type from asset table: %v", err)
 	}
 
 	// Step 2: Build API URL
@@ -94,24 +94,24 @@ func GetTokenBlocksFromTokenID(tokenID string) ([]map[string]interface{}, error)
 	// Step 3: Fetch data
 	resp, err := http.Get(apiURL)
 	if err != nil {
-		return nil, fmt.Errorf("❌ error fetching token chain for %s: %v", tokenID, err)
+		return nil, 0, fmt.Errorf("❌ error fetching token chain for %s: %v", tokenID, err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("❌ error reading response for %s: %v", tokenID, err)
+		return nil, 0, fmt.Errorf("❌ error reading response for %s: %v", tokenID, err)
 	}
 
 	// Step 4: Decode JSON
 	var chainData map[string]interface{}
 	if err := json.Unmarshal(body, &chainData); err != nil {
-		return nil, fmt.Errorf("❌ error decoding JSON for %s: %v", tokenID, err)
+		return nil, 0, fmt.Errorf("❌ error decoding JSON for %s: %v", tokenID, err)
 	}
 
 	tokenChainData, ok := chainData["TokenChainData"].([]interface{})
 	if !ok || len(tokenChainData) == 0 {
-		return nil, fmt.Errorf("❌ TokenChainData not found or empty for %s", tokenID)
+		return nil, 0, fmt.Errorf("❌ TokenChainData not found or empty for %s", tokenID)
 	}
 
 	var allBlocks []map[string]interface{}
@@ -125,7 +125,6 @@ func GetTokenBlocksFromTokenID(tokenID string) ([]map[string]interface{}, error)
 
 		blockData := make(map[string]interface{})
 
-		// Extract core fields (numeric or string keys)
 		blockHash := getValue(block, "98", "TCBlockHashKey")
 		owner := getValue(block, "3", "TCTokenOwnerKey")
 		epoch := getValue(block, "epoch", "TCEpoch")
@@ -142,7 +141,6 @@ func GetTokenBlocksFromTokenID(tokenID string) ([]map[string]interface{}, error)
 			blockData["epoch"] = epoch
 		}
 
-		// Decode transaction type to readable form
 		if transType != nil {
 			if transTypeStr, ok := transType.(string); ok {
 				if name, found := transactionTypeNames[transTypeStr]; found {
@@ -151,7 +149,6 @@ func GetTokenBlocksFromTokenID(tokenID string) ([]map[string]interface{}, error)
 			}
 		}
 
-		// Extract TID from TransInfo if available
 		if len(transInfo) > 0 {
 			tid := getValue(transInfo, "4", "TITIDKey")
 			if tid != nil {
@@ -162,11 +159,31 @@ func GetTokenBlocksFromTokenID(tokenID string) ([]map[string]interface{}, error)
 		allBlocks = append(allBlocks, blockData)
 	}
 
-	if len(allBlocks) == 0 {
-		return nil, fmt.Errorf("❌ no valid token chain blocks found for %s", tokenID)
+	totalBlocks := len(allBlocks)
+	if totalBlocks == 0 {
+		return nil, 0, fmt.Errorf("❌ no valid token chain blocks found for %s", tokenID)
 	}
 
-	return allBlocks, nil
+	// Step 5: Standard pagination logic
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 10
+	}
+
+	start := (page - 1) * limit
+	if start >= totalBlocks {
+		return []map[string]interface{}{}, totalBlocks, nil
+	}
+
+	end := start + limit
+	if end > totalBlocks {
+		end = totalBlocks
+	}
+
+	paginated := allBlocks[start:end]
+	return paginated, totalBlocks, nil
 }
 
 // Helper: safely get value using either numeric or string key

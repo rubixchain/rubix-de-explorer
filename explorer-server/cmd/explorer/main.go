@@ -42,20 +42,20 @@ func main() {
 	// insertDummyFTs()
 	// insertDummyAssetTypes() // 👈 Add this line
 
-	// RBTfetchErr := services.FetchAndStoreAllRBTsFromFullNodeDB()
-	// if RBTfetchErr != nil {
-	// 	log.Printf("Failed to call `FetchAndStoreAllRBTsFromFullNodeDB`, err: %v", RBTfetchErr)
-	// }
+	RBTfetchErr := services.FetchAndStoreAllRBTsFromFullNodeDB()
+	if RBTfetchErr != nil {
+		log.Printf("Failed to call `FetchAndStoreAllRBTsFromFullNodeDB`, err: %v", RBTfetchErr)
+	}
 
 	FTfetchErr := services.FetchAndStoreAllFTsFromFullNodeDB()
 	if FTfetchErr != nil {
 		log.Printf("Failed to call `FetchAndStoreAllFTsFromFullNodeDB`, err: %v", FTfetchErr)
 	}
 
-	// NFTfetchErr := services.FetchAndStoreAllNFTsFromFullNodeDB()
-	// if NFTfetchErr != nil {
-	// 	log.Printf("Failed to call `FetchAndStoreAllNFTsFromFullNodeDB`, err: %v", NFTfetchErr)
-	// }
+	NFTfetchErr := services.FetchAndStoreAllNFTsFromFullNodeDB()
+	if NFTfetchErr != nil {
+		log.Printf("Failed to call `FetchAndStoreAllNFTsFromFullNodeDB`, err: %v", NFTfetchErr)
+	}
 
 	SCfetchErr := services.FetchAndStoreAllSCsFromFullNodeDB()
 	if SCfetchErr != nil {
