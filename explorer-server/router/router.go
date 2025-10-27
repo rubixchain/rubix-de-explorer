@@ -37,6 +37,7 @@ func NewRouter() *mux.Router {
 
 	r.HandleFunc("/api/search", handlers.GetInfo).Methods(http.MethodGet)
 	r.HandleFunc("/api/token-chain", handlers.GetTokenChainFromTokenID).Methods(http.MethodGet)
+	r.HandleFunc("/api/token-blocks", handlers.GetTokenBlocksFromTokenID).Methods(http.MethodGet)
 
 	// r.HandleFunc("/api/analytics", handlers.DatabaseAnalyticsHandler).Methods(http.MethodGet)
 	// r.HandleFunc("/api/database", handlers.DatabaseInterfaceHandler).Methods(http.MethodGet)
