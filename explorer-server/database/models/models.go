@@ -53,11 +53,11 @@ func (SmartContract) TableName() string { return "SmartContract" }
 
 // ========================= RBT =========================
 type RBT struct {
-	TokenID     string `json:"rbt_id" gorm:"column:rbt_id"`
-	OwnerDID    string `json:"owner_did" gorm:"column:owner_did"`
-	BlockID     string `json:"block_id" gorm:"column:block_id"`
-	BlockHeight string `json:"block_height" gorm:"column:block_height"`
-	TokenValue  float64  `json:"token_value" gorm:"column:token_value"`
+	TokenID     string  `json:"rbt_id" gorm:"column:rbt_id"`
+	OwnerDID    string  `json:"owner_did" gorm:"column:owner_did"`
+	BlockID     string  `json:"block_id" gorm:"column:block_id"`
+	BlockHeight string  `json:"block_height" gorm:"column:block_height"`
+	TokenValue  float64 `json:"token_value" gorm:"column:token_value"`
 }
 
 func (RBT) TableName() string { return "RBT" }
@@ -118,3 +118,13 @@ type DatabaseHealth struct {
 }
 
 func (DatabaseHealth) TableName() string { return "DatabaseHealth" }
+
+type SC_Block struct {
+	Executor_DID *string   `json:"executor_did" gorm:"column:executor_did"`
+	Contract_ID  string    `json:"contract_id" gorm:"column:contract_id"`
+	Block_Height int64     `json:"block_height" gorm:"column:block_height"`
+	Epoch        time.Time `json:"epoch" gorm:"column:epoch"`
+	Owner_DID    string    `json:"owner_did" gorm:"column:owner_did"`
+}
+
+func (SC_Block) TableName() string { return "SC_Block" }

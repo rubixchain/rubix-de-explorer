@@ -37,14 +37,15 @@ func NewRouter() *mux.Router {
 
 	r.HandleFunc("/api/search", handlers.GetInfo).Methods(http.MethodGet)
 	r.HandleFunc("/api/token-chain", handlers.GetTokenChainFromTokenID).Methods(http.MethodGet)
+    r.HandleFunc("/api/burntblocks", handlers.GetBurntBlocks).Methods(http.MethodGet)
+
+	// r.HandleFunc("/api/addblock", handlers.AddBlockInTokenChain).Methods(http.MethodGet)
 
 	// r.HandleFunc("/api/analytics", handlers.DatabaseAnalyticsHandler).Methods(http.MethodGet)
 	// r.HandleFunc("/api/database", handlers.DatabaseInterfaceHandler).Methods(http.MethodGet)
 
 	// docs endpoint
 	// r.HandleFunc("/api/docs", handlers.DocsHandler).Methods(http.MethodGet)
-
-	// r.HandleFunc("/api/addBlock", handlers.AddBlockHandler).Methods(http.MethodPost)
 
 	return r
 }

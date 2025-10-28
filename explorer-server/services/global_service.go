@@ -57,25 +57,7 @@ func GetTokenChainFromTokenID(tokenID string) (map[string]interface{}, error) {
 	if err := json.Unmarshal(body, &chainData); err != nil {
 		return nil, fmt.Errorf("❌ error decoding JSON for %s: %v", tokenID, err)
 	}
-
-	// Step 6: Check and extract required fields
-	respData := make(map[string]interface{})
-
-	if val, ok := chainData["TCBlockHashKey"]; ok {
-		respData["block_hash"] = val
-	}
-	if val, ok := chainData["TCTokenOwnerKey"]; ok {
-		respData["owner_did"] = val
-	}
-	if val, ok := chainData["TCTransTypeKey"]; ok {
-		respData["block_type"] = val
-	}
-
-	// If none of the keys exist, return an error
-	if len(respData) == 0 {
-		return nil, fmt.Errorf("❌ no valid token chain fields found for %s", tokenID)
-	}
-
-	// Step 7: Return only the relevant fields
-	return respData, nil
+    
+	// Step 6: Return the full token chain response
+	return chainData, nil
 }

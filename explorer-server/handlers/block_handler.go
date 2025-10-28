@@ -27,9 +27,9 @@ func GetTransferBlockListHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse pagination params
 	limitStr := r.URL.Query().Get("limit")
 	pageStr := r.URL.Query().Get("page")
-
 	limit := 10
 	page := 1
+	
 	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
 		limit = l
 	}
@@ -48,6 +48,7 @@ func GetTransferBlockListHandler(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 	}
+
 }
 
 func GetBlockInfoFromTxnHash(w http.ResponseWriter, r *http.Request) {
@@ -82,5 +83,9 @@ func GetBlockInfoFromBlockHash(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 	}
+}
+
+func GetBurntBlocks(w http.ResponseWriter, r *http.Request) {
+	
 }
 

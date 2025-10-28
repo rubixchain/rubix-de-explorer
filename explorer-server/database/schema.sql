@@ -80,3 +80,11 @@ CREATE TABLE IF NOT EXISTS all_blocks (
     epoch TIMESTAMP NOT NULL,
     txn_id VARCHAR(255)
 );
+
+CREATE TABLE IF NOT EXISTS sc_blocks (
+    contract_id VARCHAR(255) PRIMARY KEY,
+    executor_did VARCHAR(255),
+    block_height BIGINT,
+    epoch TIMESTAMP NOT NULL,
+    owner_did VARCHAR(255),
+)

@@ -49,7 +49,6 @@ func GetDIDHoldersListHandler(w http.ResponseWriter, r *http.Request) {
 	// Get query params for pagination
 	limitStr := r.URL.Query().Get("limit")
 	pageStr := r.URL.Query().Get("page")
-
 	limit := 10
 	page := 1
 
