@@ -5,6 +5,7 @@ import (
 	"explorer-server/services"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -103,6 +104,62 @@ func GetTokenChainFromTokenID(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(chainData); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
+}
+
+func GetTokenBlocksFromTokenID(w http.ResponseWriter, r *http.Request) {
+	// Parse query parameters
+	tokenID := r.URL.Query().Get("token_id")
+	if tokenID == "" {
+		http.Error(w, "Missing 'token_id' parameter", http.StatusBadRequest)
+		return
+	}
+
+	// Parse pagination parameters
+	limitStr := r.URL.Query().Get("limit")
+	pageStr := r.URL.Query().Get("page")
+
+	limit := 10
+	page := 1
+	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+		limit = l
+	}
+	if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+		page = p
+	}
+
+	// Fetch token chain data with pagination
+	chainData, totalBlocks, err := services.GetTokenBlocksFromTokenID(tokenID, page, limit)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to fetch token chain: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Calculate total pages
+	totalPages := (totalBlocks + limit - 1) / limit
+	if totalPages == 0 {
+		totalPages = 1 // handle edge case of empty chain
+	}
+
+	// Prepare standard response
+	response := map[string]interface{}{
+		"page":         page,
+		"limit":        limit,
+		"total_blocks": totalBlocks,
+		"total_pages":  totalPages,
+		"data":         chainData,
+	}
+
+	// Add message for empty data (out of range or no blocks)
+	if len(chainData) == 0 {
+		response["message"] = "No data available for this page."
+	}
+
+	// Send JSON response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 	}
 }
