@@ -66,6 +66,9 @@ func ConnectAndMigrate(drop bool) {
 		&models.AllBlocks{},
 		&models.TransferBlocks{},
 		&models.TxnAnalytics{},
+		&models.BurntBlocks{}, 
+		&models.SC_Block{},
+
 	)
 	if err != nil {
 		log.Fatalf("❌ Failed to migrate tables: %v", err)
