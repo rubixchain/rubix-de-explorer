@@ -128,15 +128,16 @@ type SC_Block struct {
 	Owner_DID    string    `json:"owner_did" gorm:"column:owner_did"`
 }
 
-func (SC_Block) TableName() string { return "SC_Block" }
+func (SC_Block) TableName() string { return "sc_blocks" }
 
-
+// ========================= BurntBlocks =========================
 type BurntBlocks struct {
-    BlockHash          string          `json:"block_hash" gorm:"primaryKey;column:block_hash"`
-    ChildTokens        datatypes.JSON  `json:"child_tokens" gorm:"column:child_tokens type:jsonb"`
-    TxnType            *string         `json:"txn_type" gorm:"column:txn_type"`
-    OwnerDID           string          `json:"owner_did" gorm:"column:owner_did"`
-    Epoch              time.Time          `json:"epoch" gorm:"column:epoch"`
+	BlockHash   string         `json:"block_hash" gorm:"primaryKey;column:block_hash"`
+	ChildTokens datatypes.JSON `json:"child_tokens" gorm:"column:child_tokens;type:jsonb"`
+	TxnType     *string        `json:"txn_type" gorm:"column:txn_type"`
+	OwnerDID    string         `json:"owner_did" gorm:"column:owner_did"`
+	Epoch       *int64         `json:"epoch" gorm:"column:epoch"`
+	Tokens      datatypes.JSON `json:"tokens" gorm:"column:tokens;type:jsonb"`
 }
 
 func (BurntBlocks) TableName() string { return "BurntBlocks" }

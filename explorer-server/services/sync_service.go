@@ -11,6 +11,8 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"regexp"
+	"strconv"
 	"time"
 
 	"gorm.io/datatypes"
@@ -451,7 +453,7 @@ func StoreSCInfoInDB(SCs []SC) error {
 	return nil
 }
 
-// FetchAllTokenChainFromFullNode iterates over all tokens and stores transfer blocks
+// FetchAllTokenChainFromFullNode iterates over all tokens and stores different blocks
 func FetchAllTokenChainFromFullNode() error {
 	var tokens []models.TokenType
 
@@ -484,7 +486,6 @@ func FetchAllTokenChainFromFullNode() error {
 			continue
 		}
 
-		// ✅ Correct key for blocks
 		var blocks []interface{}
 		if b, ok := chainData["TokenChainData"].([]interface{}); ok {
 			blocks = b
@@ -501,51 +502,208 @@ func FetchAllTokenChainFromFullNode() error {
 				continue
 			}
 
-			// Only store transfer-type blocks
-			transType, ok := blockMap["TCTransTypeKey"].(string)
-			if !ok || (transType != "02" && transType != "2") {
+			transType, _ := blockMap["TCTransTypeKey"].(string)
+
+			if token.TokenType == "SC" {
+				switch transType {
+				case "09", "9":
+					StoreSCDeployBlock(blockMap)
+				case "10":
+					StoreSCExecuteBlock(blockMap)
+				default:
+					log.Printf("⚠️ Ignoring non-SC block type %s for token %s", transType, token.TokenID)
+				}
 				continue
 			}
 
-			// --- Parse subkeys safely ---
-			transInfo, _ := blockMap["TCTransInfoKey"].(map[string]interface{})
-			tokensKey, _ := transInfo["TITokensKey"].(map[string]interface{})
-
-			// Marshal child maps to JSON
-			tokensJSON, _ := json.Marshal(tokensKey)
-			pledgeMapJSON, _ := json.Marshal(blockMap["TCPledgeDetailsKey"])
-
-			// Parse amount & epoch safely
-			amount := float64Ptr(blockMap["TCTokenValueKey"])
-			epoch := int64Ptr(blockMap["TCEpoch"])
-
-			// Build DB entry
-			tb := models.TransferBlocks{
-				BlockHash:          fmt.Sprintf("%v", blockMap["TCBlockHashKey"]),
-				PrevBlockID:        stringPtr(getNested(transInfo, "TTPreviousBlockIDKey")),
-				SenderDID:          stringPtr(getNested(transInfo, "TISenderDIDKey")),
-				ReceiverDID:        stringPtr(getNested(transInfo, "TIReceiverDIDKey")),
-				TxnType:            stringPtr(transType),
-				TxnID:              stringPtr(getNested(transInfo, "TITIDKey")),
-				Amount:             amount,
-				Epoch:              epoch,
-				Tokens:             datatypes.JSON(tokensJSON),
-				ValidatorPledgeMap: datatypes.JSON(pledgeMapJSON),
-			}
-
-			// Upsert into DB
-			if err := database.DB.Clauses(clause.OnConflict{
-				UpdateAll: true,
-			}).Create(&tb).Error; err != nil && !errors.Is(err, gorm.ErrDuplicatedKey) {
-				log.Printf("❌ Failed to store transfer block %v: %v", tb.BlockHash, err)
+			switch transType {
+			case "02", "2":
+				StoreTransferBlock(blockMap)
+			case "08", "13":
+				StoreBurntBlock(blockMap)
+			default:
+				log.Printf("⚠️ Unknown block type %s for token %s", transType, token.TokenID)
 			}
 		}
 
-		time.Sleep(100 * time.Millisecond) // avoid hammering full node
+		time.Sleep(100 * time.Millisecond)
 	}
 
-	log.Println("✅ Finished fetching all token chains and storing transfer blocks")
+	log.Println("✅ Finished fetching all token chains and storing block data")
 	return nil
+}
+
+// StoreTransferBlock handles inserting a single transfer-type block into DB
+func StoreTransferBlock(blockMap map[string]interface{}) {
+	transInfo, _ := blockMap["TCTransInfoKey"].(map[string]interface{})
+	tokensKey, _ := transInfo["TITokensKey"].(map[string]interface{})
+
+	tokensJSON, _ := json.Marshal(tokensKey)
+	pledgeMapJSON, _ := json.Marshal(blockMap["TCPledgeDetailsKey"])
+
+	amount := float64Ptr(blockMap["TCTokenValueKey"])
+	epoch := int64Ptr(blockMap["TCEpoch"])
+
+	tb := models.TransferBlocks{
+		BlockHash:          fmt.Sprintf("%v", blockMap["TCBlockHashKey"]),
+		PrevBlockID:        stringPtr(getNested(transInfo, "TTPreviousBlockIDKey")),
+		SenderDID:          stringPtr(getNested(transInfo, "TISenderDIDKey")),
+		ReceiverDID:        stringPtr(getNested(transInfo, "TIReceiverDIDKey")),
+		TxnType:            stringPtr(getNested(blockMap, "TCTransTypeKey")),
+		TxnID:              stringPtr(getNested(transInfo, "TITIDKey")),
+		Amount:             amount,
+		Epoch:              epoch,
+		Tokens:             datatypes.JSON(tokensJSON),
+		ValidatorPledgeMap: datatypes.JSON(pledgeMapJSON),
+	}
+
+	if err := database.DB.Clauses(clause.OnConflict{
+		UpdateAll: true,
+	}).Create(&tb).Error; err != nil && !errors.Is(err, gorm.ErrDuplicatedKey) {
+		log.Printf("❌ Failed to store transfer block %v: %v", tb.BlockHash, err)
+	}
+	time.Sleep(100 * time.Millisecond) // avoid hammering full node
+	log.Println("Transfer block stored")
+}
+
+// StoreBurntBlock handles inserting a single burnt-type block into DB
+func StoreBurntBlock(blockMap map[string]interface{}) {
+	transInfo, _ := blockMap["TCTransInfoKey"].(map[string]interface{})
+	tokensKey, _ := transInfo["TITokensKey"].(map[string]interface{})
+
+	tokensJSON, _ := json.Marshal(tokensKey)
+	childTokensJSON, _ := json.Marshal(blockMap["TCChildTokensKey"])
+
+	// Extract epoch from comment (e.g. "Token burnt at : 2025-10-09 15:31:14")
+	var epoch *int64
+	if comment, ok := transInfo["TICommentKey"].(string); ok {
+		re := regexp.MustCompile(`\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}`)
+		if match := re.FindString(comment); match != "" {
+			if t, err := time.Parse("2006-01-02 15:04:05", match); err == nil {
+				val := t.Unix()
+				epoch = &val
+			}
+		}
+	}
+
+	// Normalize transaction type
+	txnType := fmt.Sprintf("%v", blockMap["TCTransTypeKey"])
+	var txnTypeStr string
+	switch txnType {
+	case "13":
+		txnTypeStr = "Burnt for FT"
+	case "08":
+		txnTypeStr = "Burnt"
+	default:
+		txnTypeStr = "Unknown"
+	}
+
+	bb := models.BurntBlocks{
+		BlockHash:   fmt.Sprintf("%v", blockMap["TCBlockHashKey"]),
+		ChildTokens: datatypes.JSON(childTokensJSON),
+		TxnType:     &txnTypeStr,
+		OwnerDID:    fmt.Sprintf("%v", blockMap["TCTokenOwnerKey"]),
+		Epoch:       epoch,
+		Tokens:      datatypes.JSON(tokensJSON),
+	}
+
+	if err := database.DB.Clauses(clause.OnConflict{
+		UpdateAll: true,
+	}).Create(&bb).Error; err != nil && !errors.Is(err, gorm.ErrDuplicatedKey) {
+		log.Printf("❌ Failed to store burnt block %v: %v", bb.BlockHash, err)
+	}
+
+	time.Sleep(100 * time.Millisecond) // avoid hammering full node
+	log.Println("✅ Burnt block stored:", bb.BlockHash)
+}
+
+// StoreSCDeployBlock handles inserting a smart contract deploy block into DB
+func StoreSCDeployBlock(blockMap map[string]interface{}) {
+	transInfo, _ := blockMap["TCTransInfoKey"].(map[string]interface{})
+	tokensKey, _ := transInfo["TITokensKey"].(map[string]interface{})
+
+	// extract contract id and block height from TITokensKey (there will be one entry)
+	var contractID string
+	var blockHeight int64
+	for k, v := range tokensKey {
+		contractID = k
+		if tk, ok := v.(map[string]interface{}); ok {
+			if bh, ok := tk["TTBlockNumberKey"].(string); ok {
+				if vbh, err := strconv.ParseInt(bh, 10, 64); err == nil {
+					blockHeight = vbh
+				}
+			}
+		}
+		break
+	}
+
+	// epoch: only set if present; otherwise keep zero value
+	var epoch time.Time
+	if e, ok := blockMap["TCEpoch"].(float64); ok {
+		epoch = time.Unix(int64(e), 0)
+	}
+
+	// Owner_DID comes from TIDeployerDIDKey in TCTransInfoKey
+	ownerDID := fmt.Sprintf("%v", getNested(transInfo, "TIDeployerDIDKey"))
+
+	scBlock := models.SC_Block{
+		Contract_ID:  contractID,
+		Block_Height: blockHeight,
+		Epoch:        epoch,
+		Owner_DID:    ownerDID,
+	}
+
+	if err := database.DB.Clauses(clause.OnConflict{UpdateAll: true}).Create(&scBlock).Error; err != nil && !errors.Is(err, gorm.ErrDuplicatedKey) {
+		log.Printf("❌ Failed to store SC deploy block %v: %v", scBlock.Contract_ID, err)
+		return
+	}
+
+	log.Println("✅ SC Deploy block stored:", scBlock.Contract_ID)
+}
+
+// StoreSCExecuteBlock handles inserting a smart contract execute block into DB
+func StoreSCExecuteBlock(blockMap map[string]interface{}) {
+	transInfo, _ := blockMap["TCTransInfoKey"].(map[string]interface{})
+	tokensKey, _ := transInfo["TITokensKey"].(map[string]interface{})
+
+	// extract contract id and block height from TITokensKey (there will be one entry)
+	var contractID string
+	var blockHeight int64
+	for k, v := range tokensKey {
+		contractID = k
+		if tk, ok := v.(map[string]interface{}); ok {
+			if bh, ok := tk["TTBlockNumberKey"].(string); ok {
+				if vbh, err := strconv.ParseInt(bh, 10, 64); err == nil {
+					blockHeight = vbh
+				}
+			}
+		}
+		break
+	}
+
+	// epoch: only set if present; otherwise keep zero value
+	var epoch time.Time
+	if e, ok := blockMap["TCEpoch"].(float64); ok {
+		epoch = time.Unix(int64(e), 0)
+	}
+
+	// Executor_DID comes from TIExecutorDIDKey in TCTransInfoKey
+	execDidStr := getNested(transInfo, "TIExecutorDIDKey")
+	execDidPtr := stringPtr(execDidStr)
+
+	scBlock := models.SC_Block{
+		Executor_DID: execDidPtr,
+		Contract_ID:  contractID,
+		Block_Height: blockHeight,
+		Epoch:        epoch,
+	}
+
+	if err := database.DB.Clauses(clause.OnConflict{UpdateAll: true}).Create(&scBlock).Error; err != nil && !errors.Is(err, gorm.ErrDuplicatedKey) {
+		log.Printf("❌ Failed to store SC execute block %v: %v", scBlock.Contract_ID, err)
+		return
+	}
+
+	log.Println("✅ SC Execute block stored:", scBlock.Contract_ID)
 }
 
 // Safe string pointer
@@ -603,4 +761,21 @@ func getNested(m map[string]interface{}, key string) interface{} {
 		return nil
 	}
 	return m[key]
+}
+
+func sliceStringPtr(v interface{}) *[]string {
+	if v == nil {
+		return nil
+	}
+	arr, ok := v.([]interface{})
+	if !ok {
+		return nil
+	}
+	strs := make([]string, 0, len(arr))
+	for _, val := range arr {
+		if s, ok := val.(string); ok {
+			strs = append(strs, s)
+		}
+	}
+	return &strs
 }
