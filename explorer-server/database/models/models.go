@@ -33,8 +33,8 @@ func (TokenType) TableName() string { return "TokenType" }
 
 // ========================= AllBlocks =========================
 type AllBlocks struct {
-	BlockHash string    `json:"block_hash" gorm:"column:block_hash"`
-	BlockType int64     `json:"block_type" gorm:"column:block_type"`
+	BlockHash string    `json:"block_hash" gorm:"column:block_hash;primaryKey"`
+	BlockType string    `json:"block_type" gorm:"column:block_type"`
 	Epoch     time.Time `json:"epoch" gorm:"column:epoch"`
 	TxnID     string    `json:"txn_id" gorm:"column:txn_id"`
 }

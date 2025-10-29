@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS "TokenTypes" (
 -- =============================================
 CREATE TABLE IF NOT EXISTS "AllBlocks" (
     block_hash VARCHAR(255) PRIMARY KEY,
-    block_type BIGINT,
+    block_type VARCHAR(50),
     epoch TIMESTAMP NOT NULL,
     txn_id VARCHAR(255)
 );
