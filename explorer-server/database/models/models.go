@@ -125,6 +125,8 @@ type SC_Block struct {
 	Block_Height int64     `json:"block_height" gorm:"column:block_height"`
 	Epoch        time.Time `json:"epoch" gorm:"column:epoch"`
 	Owner_DID    string    `json:"owner_did" gorm:"column:owner_did"`
+	Block_Id    string    `json:"block_id" gorm:"column:block_id"`
+
 }
 
 func (SC_Block) TableName() string { return "sc_blocks" }
