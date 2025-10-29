@@ -86,5 +86,15 @@ CREATE TABLE IF NOT EXISTS sc_blocks (
     executor_did VARCHAR(255),
     block_height BIGINT,
     epoch TIMESTAMP NOT NULL,
-    owner_did VARCHAR(255),
-)
+    owner_did VARCHAR(255)
+);
+
+
+CREATE TABLE IF NOT EXISTS burntblocks (
+    block_hash VARCHAR(255) PRIMARY KEY,
+    child_tokens JSONB,                   
+    txn_type VARCHAR(255),                
+    owner_did VARCHAR(255) NOT NULL,      
+    epoch BIGINT,                         
+    tokens JSONB                          
+);
