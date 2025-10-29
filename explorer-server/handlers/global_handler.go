@@ -110,7 +110,7 @@ func GetTokenChainFromTokenID(w http.ResponseWriter, r *http.Request) {
 
 func GetTokenBlocksFromTokenID(w http.ResponseWriter, r *http.Request) {
 	// Parse query parameters
-	tokenID := r.URL.Query().Get("token_id")
+	tokenID := r.URL.Query().Get("tokenID")
 	if tokenID == "" {
 		http.Error(w, "Missing 'token_id' parameter", http.StatusBadRequest)
 		return
@@ -164,50 +164,28 @@ func GetTokenBlocksFromTokenID(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-
 func GetSCBlockInfoFromTxnHash(w http.ResponseWriter, r *http.Request) {
-	
+
 	hash := r.URL.Query().Get("hash")
 	if hash == "" {
 		http.Error(w, "Missing transaction hash", http.StatusBadRequest)
 		return
 	}
 
-	// Identify block type
-	blockType, err := services.GetBlockType(hash)
-	if err != nil {
-		http.Error(w, "Failed to determine block type", http.StatusInternalServerError)
-		return
-	}
-
 	var response interface{}
 
-	switch blockType {
-	case 1:
-		transferBlockInfo, err := services.GetTransferBlockInfoFromTxnID(hash)
-		if err != nil {
-			http.Error(w, "Failed to fetch transfer block info", http.StatusInternalServerError)
-			return
-		}
-		response = transferBlockInfo
-
-	case 2:
-		scBlockInfo, err := services.GetSCBlockInfoFromTxnId(hash)
-		if err != nil {
-			http.Error(w, "Failed to fetch SC block info", http.StatusInternalServerError)
-			return
-		}
-		response = scBlockInfo
-
-	default:
-		http.Error(w, "Invalid block type", http.StatusBadRequest)
+	scBlockInfo, err := services.GetSCBlockInfoFromTxnId(hash)
+	if err != nil {
+		http.Error(w, "Failed to fetch SC block info", http.StatusInternalServerError)
 		return
 	}
+	response = scBlockInfo
+
 	// Send JSON response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 	}
-	
+
 }

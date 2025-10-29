@@ -85,7 +85,21 @@ func GetBlockInfoFromBlockHash(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func GetBurntBlocks(w http.ResponseWriter, r *http.Request) {
+func GetBurntTxnInfoFromTxnHash(w http.ResponseWriter, r *http.Request) {
 	
+	txnkHash := r.URL.Query().Get("hash")
+
+	// Fetch data using service
+	data, err := services.GetBurntBlockInfo(txnkHash)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Send JSON response
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
 }
 

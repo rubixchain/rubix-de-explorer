@@ -82,9 +82,18 @@ CREATE TABLE IF NOT EXISTS all_blocks (
 );
 
 CREATE TABLE IF NOT EXISTS sc_blocks (
-    contract_id VARCHAR(255) PRIMARY KEY,
+    contract_id VARCHAR(255),
     executor_did VARCHAR(255),
     block_height BIGINT,
     epoch TIMESTAMP NOT NULL,
     owner_did VARCHAR(255),
-)
+    block_id VARCHAR(255)  PRIMARY KEY
+);
+
+CREATE TABLE IF NOT EXISTS burnt_blocks (
+    block_hash VARCHAR(255) PRIMARY KEY,
+    child_tokens JSONB,
+    txn_type VARCHAR(255),
+    epoch TIMESTAMP NOT NULL,
+    owner_did VARCHAR(255)
+);

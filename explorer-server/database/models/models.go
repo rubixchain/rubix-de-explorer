@@ -120,6 +120,7 @@ type DatabaseHealth struct {
 func (DatabaseHealth) TableName() string { return "DatabaseHealth" }
 
 type SC_Block struct {
+	Block_Id    string    `json:"block_id" gorm:"column:block_id"`
 	Executor_DID *string   `json:"executor_did" gorm:"column:executor_did"`
 	Contract_ID  string    `json:"contract_id" gorm:"column:contract_id"`
 	Block_Height int64     `json:"block_height" gorm:"column:block_height"`
@@ -128,3 +129,14 @@ type SC_Block struct {
 }
 
 func (SC_Block) TableName() string { return "SC_Block" }
+
+
+type BurntBlocks struct {
+    BlockHash          string          `json:"block_hash" gorm:"primaryKey;column:block_hash"`
+    ChildTokens        datatypes.JSON  `json:"child_tokens" gorm:"column:child_tokens type:jsonb"`
+    TxnType            *string         `json:"txn_type" gorm:"column:txn_type"`
+    OwnerDID           string          `json:"owner_did" gorm:"column:owner_did"`
+    Epoch              time.Time          `json:"epoch" gorm:"column:epoch"`
+}
+
+func (BurntBlocks) TableName() string { return "BurntBlocks" }

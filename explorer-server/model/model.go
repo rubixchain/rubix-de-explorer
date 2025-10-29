@@ -58,20 +58,6 @@ type SCBlocksListResponse struct {
 	SC_Blocks [] models.SC_Block `json:"sc_blocks"`
 }
 
-// type SearchResponse struct {
-// 	ResponseType  string `json:"response_type"`
-
-// 	TotalRBTCount           int64           `json:"total_rbt_count"`
-// 	RBTs                    []RBT           `json:"rbts"`
-// 	TotalFTCount           int64           `json:"total_ft_count"`
-// 	FTs                    []FT           `json:"fts"`
-// 	TotalNFTCount          int64          `json:"total_nft_count"`
-// 	NFTs                   []NFT          `json:"nfts"`
-// 	TotalSmartContractCount int64           `json:"total_smart_contract_count"`
-// 	SmartContracts         []SmartContract `json:"smart_contracts"`
-// 	TotalDIDCount          int64          `json:"total_did_count"`
-// 	DIDs                   []DIDs         `json:"dids"`
-// }
 
 // -----Token explorer response
 type RbtResponse struct {

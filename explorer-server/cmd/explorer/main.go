@@ -33,8 +33,10 @@ func main() {
 	database.ConnectAndMigrate(false) // pass true to drop tables
 
 	// Insert dummy RBT data
-	// insertDummyRBTs()
 	// insertDummyDIDs()
+	insertDummyBurntBlocks()
+	insertDummySCBlocks()
+	insertDummyRBTs()
 
 	// insertDummyTransferBlocks()
 	// insertDummyNFTs()
@@ -282,4 +284,102 @@ func insertDummyDIDs() {
 			log.Printf("✅ Dummy DID inserted or exists: %s", did.DID)
 		}
 	}
+}
+
+// Insert dummy SC blocks (sc_blocks table)
+func insertDummySCBlocks() {
+	now := time.Now()
+
+	dummySCBlocks := []models.SC_Block{
+		{
+			Block_Id:     "1-sc-block",
+			Contract_ID:  "sc-addr-001",
+			Executor_DID: ptr("did:example:executor001"),
+			Block_Height: 101,
+			Epoch:        now,
+			Owner_DID:    "did:example:owner001",
+		},
+		{
+			Block_Id:     "2-sc-block",
+			Contract_ID:  "sc-addr-001",
+			Executor_DID: ptr("did:example:executor001"),
+			Block_Height: 101,
+			Epoch:        now,
+			Owner_DID:    "did:example:owner001",
+		},
+		{
+			Block_Id:     "4-sc-block",
+			Contract_ID:  "sc-addr-001",
+			Executor_DID: ptr("did:example:executor001"),
+			Block_Height: 101,
+			Epoch:        now,
+			Owner_DID:    "did:example:owner001",
+		},
+	}
+
+	for _, sc := range dummySCBlocks {
+		if err := database.DB.FirstOrCreate(&sc, models.SC_Block{Block_Id: sc.Block_Id}).Error; err != nil {
+			log.Printf("Failed to insert dummy SCBlock %s: %v", sc.Block_Id, err)
+		} else {
+			log.Printf("Dummy SCBlock inserted or exists: %s (height=%d)", sc.Block_Id)
+		}
+	}
+}
+
+// Insert dummy Burnt blocks (burnt_blocks table)
+func insertDummyBurntBlocks() {
+	now := time.Now()
+
+	// Example child-tokens JSON structures
+	childTokens1 := []string{"qemrbt-0019", "nft-007"}
+	childTokens2 := []map[string]any{
+		{"id": "qemrbt-0019", "amount": 45.5},
+		{"id": "ft-456", "amount": 12.0},
+	}
+	childTokens3 := map[string]any{
+		"tokens": []string{"tokenA", "tokenB"},
+		"metadata": map[string]string{
+			"burnReason": "upgrade",
+		},
+	}
+
+	dummyBurntBlocks := []models.BurntBlocks{
+		{
+			BlockHash:   "burn-hash-005",
+			ChildTokens: jsonb(childTokens1),
+			TxnType:     ptr("burn"),
+			Epoch:       now,
+			OwnerDID:    "did:example:burner001",
+		},
+		{
+			BlockHash:   "burn-hash-002",
+			ChildTokens: jsonb(childTokens2),
+			TxnType:     ptr("burn"),
+			Epoch:       now.Add(-3 * time.Minute),
+			OwnerDID:    "did:example:burner002",
+		},
+		{
+			BlockHash:   "burn-hash-003",
+			ChildTokens: jsonb(childTokens3),
+			TxnType:     ptr("burn"),
+			Epoch:       now.Add(-8 * time.Minute),
+			OwnerDID:    "did:example:burner001",
+		},
+	}
+
+	for _, bb := range dummyBurntBlocks {
+		if err := database.DB.FirstOrCreate(&bb, models.BurntBlocks{BlockHash: bb.BlockHash}).Error; err != nil {
+			log.Printf("Failed to insert dummy BurntBlock %s: %v", bb.BlockHash, err)
+		} else {
+			log.Printf("Dummy BurntBlock inserted or exists: %s", bb.BlockHash)
+		}
+	}
+}
+
+// tiny helpers (already in your file, just re-exported for clarity)
+// func ptr[T any](v T) *T               { return &v }
+func ptrInt64(v int64) *int64 { return &v }
+func jsonb(v any) datatypes.JSON {
+	b, _ := json.Marshal(v)
+	return datatypes.JSON(b)
 }

@@ -143,13 +143,25 @@ func GetSCBlockInfoFromTxnId(hash string ) (interface{},error){
 
 	// Fetch block where block_hash matches
 	if err := database.DB.
-		Where("txn_id = ?", hash).
+		Where("block_id = ?", hash).
 		First(&block).Error; err != nil {
 		return models.SC_Block{}, err
 	}
 
 	return block, nil
 	
+}
+func GetBurntBlockInfo(hash string) (interface{},error){
+  var block models.BurntBlocks
+
+	// Fetch block where block_hash matches
+	if err := database.DB.
+		Where("block_hash = ?", hash).
+		First(&block).Error; err != nil {
+		return models.BurntBlocks{}, err
+	}
+
+	return block, nil
 }
 // Helper functions
 func derefStringPtr(s *string) string {
