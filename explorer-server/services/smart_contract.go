@@ -3,9 +3,9 @@ package services
 import (
 	"explorer-server/database"
 	"explorer-server/database/models"
+	"explorer-server/model"
 )
 
-// GetRBTCount returns the total number of RBTs in the database
 func GetSCCount() (int64, error) {
 	var count int64
 	if err := database.DB.Model(&models.SmartContract{}).Count(&count).Error; err != nil {
@@ -22,11 +22,23 @@ func GetSCInfoFromSCID(scID string) (*models.SmartContract, error) {
 	return &scInfo, nil
 }
 
-// // GetRBTInfoFromRBTID fetches a single RBT by its ID
-// func GetRBTInfoFromRBTID(rbtID string) (*models.RBT, error) {
-// 	var rbt models.RBT
-// 	if err := database.DB.First(&rbt, "rbt_id = ?", rbtID).Error; err != nil {
-// 		return nil, err
-// 	}
-// 	return &rbt, nil
-// }
+func GetSCBlockList(limit, page int) (interface{}, error) {
+	var blocks []models.SC_Block
+
+	offset := (page - 1) * limit
+
+	// Fetch all blocks with pagination
+	if err := database.DB.
+		Limit(int(limit)).
+		Offset(int(offset)).
+		Find(&blocks).Error; err != nil {
+		return nil, err
+	}
+
+	// Wrap in response struct
+	response := model.SCBlocksListResponse{
+		SC_Blocks: blocks,
+	}
+
+	return response, nil
+}

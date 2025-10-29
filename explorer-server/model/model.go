@@ -54,6 +54,10 @@ type TransactionsResponse struct {
 	TransactionsResponse []TransactionResponse `json:"transactions_response"`
 }
 
+type SCBlocksListResponse struct {
+	SC_Blocks [] models.SC_Block `json:"sc_blocks"`
+}
+
 // type SearchResponse struct {
 // 	ResponseType  string `json:"response_type"`
 

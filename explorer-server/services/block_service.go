@@ -121,6 +121,36 @@ func GetTransferBlockInfoFromBlockHash(hash string) (models.TransferBlocks, erro
 	return block, nil
 }
 
+func GetBlockType(txnId string) (int64, error) {
+	var blockType int64
+
+	err := database.DB.
+		Table("all_blocks").
+		Select("block_type").
+		Where("txn_id = ?", txnId).
+		Scan(&blockType).Error
+
+	if err != nil {
+		return 0, fmt.Errorf("❌ failed to get block_type for txn_id %s: %v", txnId, err)
+	}
+
+	return blockType, nil
+}
+
+func GetSCBlockInfoFromTxnId(hash string ) (interface{},error){
+  
+	var block models.SC_Block
+
+	// Fetch block where block_hash matches
+	if err := database.DB.
+		Where("txn_id = ?", hash).
+		First(&block).Error; err != nil {
+		return models.SC_Block{}, err
+	}
+
+	return block, nil
+	
+}
 // Helper functions
 func derefStringPtr(s *string) string {
 	if s == nil {
@@ -174,3 +204,5 @@ func derefFloat(ptr *float64) float64 {
 	}
 	return *ptr
 }
+
+
