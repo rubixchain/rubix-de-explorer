@@ -36,3 +36,4 @@ require (
 	golang.org/x/text v0.21.0 // indirect
 	gorm.io/driver/mysql v1.5.6 // indirect
 )
+require github.com/stretchr/testify v1.9.0

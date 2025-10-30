@@ -58,6 +58,11 @@ type SCBlocksListResponse struct {
 	SC_Blocks [] models.SC_Block `json:"sc_blocks"`
 }
 
+type BurntBlocksListResponse struct {
+	BurntBlocks [] models.BurntBlocks `json:"burntblocks"`
+}
+
+
 
 // -----Token explorer response
 type RbtResponse struct {

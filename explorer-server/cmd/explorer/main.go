@@ -9,12 +9,10 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
-
 	"explorer-server/database"
 	"explorer-server/database/models"
 	"explorer-server/router"
 	"explorer-server/services"
-
 	"github.com/joho/godotenv"
 	"github.com/rs/cors"
 	"gorm.io/datatypes"
@@ -292,7 +290,7 @@ func insertDummySCBlocks() {
 
 	dummySCBlocks := []models.SC_Block{
 		{
-			Block_Id:     "1-sc-block",
+			Block_ID:     "1-sc-block",
 			Contract_ID:  "sc-addr-001",
 			Executor_DID: ptr("did:example:executor001"),
 			Block_Height: 101,
@@ -300,7 +298,7 @@ func insertDummySCBlocks() {
 			Owner_DID:    "did:example:owner001",
 		},
 		{
-			Block_Id:     "2-sc-block",
+			Block_ID:     "2-sc-block",
 			Contract_ID:  "sc-addr-001",
 			Executor_DID: ptr("did:example:executor001"),
 			Block_Height: 101,
@@ -308,7 +306,7 @@ func insertDummySCBlocks() {
 			Owner_DID:    "did:example:owner001",
 		},
 		{
-			Block_Id:     "4-sc-block",
+			Block_ID:     "4-sc-block",
 			Contract_ID:  "sc-addr-001",
 			Executor_DID: ptr("did:example:executor001"),
 			Block_Height: 101,
@@ -318,17 +316,17 @@ func insertDummySCBlocks() {
 	}
 
 	for _, sc := range dummySCBlocks {
-		if err := database.DB.FirstOrCreate(&sc, models.SC_Block{Block_Id: sc.Block_Id}).Error; err != nil {
-			log.Printf("Failed to insert dummy SCBlock %s: %v", sc.Block_Id, err)
+		if err := database.DB.FirstOrCreate(&sc, models.SC_Block{Block_ID: sc.Block_ID}).Error; err != nil {
+			log.Printf("Failed to insert dummy SCBlock %s: %v", sc.Block_ID, err)
 		} else {
-			log.Printf("Dummy SCBlock inserted or exists: %s (height=%d)", sc.Block_Id)
+			log.Printf("Dummy SCBlock inserted or exists: %s (height=%d)", sc.Block_ID)
 		}
 	}
 }
 
 // Insert dummy Burnt blocks (burnt_blocks table)
 func insertDummyBurntBlocks() {
-	now := time.Now()
+	// now := time.Now()
 
 	// Example child-tokens JSON structures
 	childTokens1 := []string{"qemrbt-0019", "nft-007"}
@@ -348,21 +346,21 @@ func insertDummyBurntBlocks() {
 			BlockHash:   "burn-hash-005",
 			ChildTokens: jsonb(childTokens1),
 			TxnType:     ptr("burn"),
-			Epoch:       now,
+			// Epoch:       now,
 			OwnerDID:    "did:example:burner001",
 		},
 		{
 			BlockHash:   "burn-hash-002",
 			ChildTokens: jsonb(childTokens2),
 			TxnType:     ptr("burn"),
-			Epoch:       now.Add(-3 * time.Minute),
+			// Epoch:       now.Add(-3 * time.Minute),
 			OwnerDID:    "did:example:burner002",
 		},
 		{
 			BlockHash:   "burn-hash-003",
 			ChildTokens: jsonb(childTokens3),
 			TxnType:     ptr("burn"),
-			Epoch:       now.Add(-8 * time.Minute),
+			// Epoch:       now.Add(-8 * time.Minute),
 			OwnerDID:    "did:example:burner001",
 		},
 	}

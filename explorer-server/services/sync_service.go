@@ -502,8 +502,13 @@ func FetchAllTokenChainFromFullNode() error {
 				continue
 			}
 
+			// Always store in AllBlocks first
+			StoreBlockInAllBlocks(blockMap)
+
+			// Extract transaction type
 			transType, _ := blockMap["TCTransTypeKey"].(string)
 
+			// Smart Contract (Deploy or Execute)
 			if token.TokenType == "SC" {
 				switch transType {
 				case "09", "9":
@@ -516,6 +521,7 @@ func FetchAllTokenChainFromFullNode() error {
 				continue
 			}
 
+			// Regular tokens (FT, NFT, RBT)
 			switch transType {
 			case "02", "2":
 				StoreTransferBlock(blockMap)
@@ -526,6 +532,7 @@ func FetchAllTokenChainFromFullNode() error {
 			}
 		}
 
+		// Small delay between tokens to avoid overloading node
 		time.Sleep(100 * time.Millisecond)
 	}
 
@@ -622,7 +629,8 @@ func StoreSCDeployBlock(blockMap map[string]interface{}) {
 	transInfo, _ := blockMap["TCTransInfoKey"].(map[string]interface{})
 	tokensKey, _ := transInfo["TITokensKey"].(map[string]interface{})
 
-	// extract contract id and block height from TITokensKey (there will be one entry)
+	blockID := fmt.Sprintf("%v", blockMap["TCBlockHashKey"])
+
 	var contractID string
 	var blockHeight int64
 	for k, v := range tokensKey {
@@ -637,28 +645,33 @@ func StoreSCDeployBlock(blockMap map[string]interface{}) {
 		break
 	}
 
-	// epoch: only set if present; otherwise keep zero value
+	// Parse epoch
 	var epoch time.Time
 	if e, ok := blockMap["TCEpoch"].(float64); ok {
 		epoch = time.Unix(int64(e), 0)
 	}
 
-	// Owner_DID comes from TIDeployerDIDKey in TCTransInfoKey
+	// Owner_DID from TIDeployerDIDKey
 	ownerDID := fmt.Sprintf("%v", getNested(transInfo, "TIDeployerDIDKey"))
 
 	scBlock := models.SC_Block{
+		Block_ID:     blockID,
 		Contract_ID:  contractID,
 		Block_Height: blockHeight,
 		Epoch:        epoch,
 		Owner_DID:    ownerDID,
 	}
 
-	if err := database.DB.Clauses(clause.OnConflict{UpdateAll: true}).Create(&scBlock).Error; err != nil && !errors.Is(err, gorm.ErrDuplicatedKey) {
+	// Insert or update (on conflict block_id)
+	if err := database.DB.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "block_id"}},
+		UpdateAll: true,
+	}).Create(&scBlock).Error; err != nil && !errors.Is(err, gorm.ErrDuplicatedKey) {
 		log.Printf("❌ Failed to store SC deploy block %v: %v", scBlock.Contract_ID, err)
 		return
 	}
 
-	log.Println("✅ SC Deploy block stored:", scBlock.Contract_ID)
+	log.Println("SC Deploy block stored:", scBlock.Block_ID)
 }
 
 // StoreSCExecuteBlock handles inserting a smart contract execute block into DB
@@ -666,7 +679,8 @@ func StoreSCExecuteBlock(blockMap map[string]interface{}) {
 	transInfo, _ := blockMap["TCTransInfoKey"].(map[string]interface{})
 	tokensKey, _ := transInfo["TITokensKey"].(map[string]interface{})
 
-	// extract contract id and block height from TITokensKey (there will be one entry)
+	blockID := fmt.Sprintf("%v", blockMap["TCBlockHashKey"])
+
 	var contractID string
 	var blockHeight int64
 	for k, v := range tokensKey {
@@ -681,29 +695,92 @@ func StoreSCExecuteBlock(blockMap map[string]interface{}) {
 		break
 	}
 
-	// epoch: only set if present; otherwise keep zero value
+	// Parse epoch (if available)
 	var epoch time.Time
 	if e, ok := blockMap["TCEpoch"].(float64); ok {
 		epoch = time.Unix(int64(e), 0)
 	}
 
-	// Executor_DID comes from TIExecutorDIDKey in TCTransInfoKey
+	// Executor_DID from TIExecutorDIDKey
 	execDidStr := getNested(transInfo, "TIExecutorDIDKey")
 	execDidPtr := stringPtr(execDidStr)
 
 	scBlock := models.SC_Block{
-		Executor_DID: execDidPtr,
+		Block_ID:     blockID,
 		Contract_ID:  contractID,
+		Executor_DID: execDidPtr,
 		Block_Height: blockHeight,
 		Epoch:        epoch,
 	}
 
-	if err := database.DB.Clauses(clause.OnConflict{UpdateAll: true}).Create(&scBlock).Error; err != nil && !errors.Is(err, gorm.ErrDuplicatedKey) {
+	// Insert or update (on conflict block_id)
+	if err := database.DB.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "block_id"}},
+		UpdateAll: true,
+	}).Create(&scBlock).Error; err != nil && !errors.Is(err, gorm.ErrDuplicatedKey) {
 		log.Printf("❌ Failed to store SC execute block %v: %v", scBlock.Contract_ID, err)
 		return
 	}
 
-	log.Println("✅ SC Execute block stored:", scBlock.Contract_ID)
+	log.Println("SC Execute block stored:", scBlock.Block_ID)
+}
+
+// StoreBlockInAllBlocks inserts a block entry into the AllBlocks table
+func StoreBlockInAllBlocks(blockMap map[string]interface{}) {
+	transInfo, _ := blockMap["TCTransInfoKey"].(map[string]interface{})
+
+	blockHash := fmt.Sprintf("%v", blockMap["TCBlockHashKey"])
+	txnID := fmt.Sprintf("%v", transInfo["TITIDKey"])
+
+	// Determine readable block type
+	var blockType string
+	switch fmt.Sprintf("%v", blockMap["TCTransTypeKey"]) {
+	case "02", "2":
+		blockType = "transfer"
+	case "08":
+		blockType = "burnt"
+	case "13":
+		blockType = "burnt_for_ft"
+	case "09", "9":
+		blockType = "deploy"
+	case "10":
+		blockType = "execute"
+	default:
+		blockType = "unknown"
+	}
+
+	// Parse epoch timestamp
+	var epochTime time.Time
+	switch v := blockMap["TCEpoch"].(type) {
+	case string:
+		t, err := time.Parse(time.RFC3339, v)
+		if err == nil {
+			epochTime = t
+		} else {
+			epochTime = time.Now()
+		}
+	case float64:
+		epochTime = time.Unix(int64(v), 0)
+	case int64:
+		epochTime = time.Unix(v, 0)
+	default:
+		epochTime = time.Now()
+	}
+
+	record := models.AllBlocks{
+		BlockHash: blockHash,
+		BlockType: blockType,
+		Epoch:     epochTime,
+		TxnID:     txnID,
+	}
+
+	// Insert — if duplicate, skip (no update needed)
+	if err := database.DB.Clauses(clause.OnConflict{DoNothing: true}).Create(&record).Error; err != nil {
+		log.Printf("❌ Failed to insert block into AllBlocks (%v): %v", blockHash, err)
+		return
+	}
+
+	log.Printf("Stored block in AllBlocks: %v (type=%s)", blockHash, blockType)
 }
 
 // Safe string pointer

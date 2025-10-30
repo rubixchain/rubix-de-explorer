@@ -163,6 +163,28 @@ func GetBurntBlockInfo(hash string) (interface{},error){
 
 	return block, nil
 }
+
+func GetBurntBlockList(limit, page int)(interface{}, error){
+	var blocks []models.BurntBlocks
+
+	offset := (page - 1) * limit
+
+	// Fetch all blocks with pagination
+	if err := database.DB.
+		Limit(int(limit)).
+		Offset(int(offset)).
+		Find(&blocks).Error; err != nil {
+		return nil, err
+	}
+
+	// Wrap in response struct
+	response := model.BurntBlocksListResponse{
+		BurntBlocks: blocks,
+	}
+
+	return response, nil
+}
+
 // Helper functions
 func derefStringPtr(s *string) string {
 	if s == nil {

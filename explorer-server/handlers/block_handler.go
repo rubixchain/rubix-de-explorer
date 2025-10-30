@@ -103,3 +103,33 @@ func GetBurntTxnInfoFromTxnHash(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func GetBurntBlockList(w http.ResponseWriter, r *http.Request) {
+	limitStr := r.URL.Query().Get("limit")
+	pageStr := r.URL.Query().Get("page")
+
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit <= 0 {
+		limit = 10 // default limit
+	}
+
+	page, err := strconv.Atoi(pageStr)
+	if err != nil || page <= 0 {
+		page = 1 // default page
+	}
+
+	// Fetch data using service
+	data, err := services.GetBurntBlockList(limit, page)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Send JSON response
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
+}
+
+
+

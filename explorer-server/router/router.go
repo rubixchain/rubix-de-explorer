@@ -39,6 +39,8 @@ func NewRouter() *mux.Router {
 	r.HandleFunc("/api/token-chain", handlers.GetTokenChainFromTokenID).Methods(http.MethodGet)
 	r.HandleFunc("/api/token-blocks", handlers.GetTokenBlocksFromTokenID).Methods(http.MethodGet)
     r.HandleFunc("/api/sc-blocks", handlers.GetSCBlockList).Methods(http.MethodGet)
+	r.HandleFunc("/api/burnt-blocks", handlers.GetBurntBlockList).Methods(http.MethodGet)
+
 	r.HandleFunc("/api/sctxn-info", handlers.GetSCBlockInfoFromTxnHash).Methods(http.MethodGet)
 	r.HandleFunc("/api/burnttxn-info", handlers.GetBurntTxnInfoFromTxnHash).Methods(http.MethodGet)
 	// r.HandleFunc("/api/analytics", handlers.DatabaseAnalyticsHandler).Methods(http.MethodGet)
