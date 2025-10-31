@@ -23,7 +23,7 @@ func GetInfo(w http.ResponseWriter, r *http.Request) {
 	)
 
 	// Determine logic based on ID prefix
-	if strings.HasPrefix(id, "qem") {
+	if strings.HasPrefix(id, "Qm") {
 		// Fetch asset type from DB
 		assetType, err = services.GetAssetType(id)
 		if err != nil {
