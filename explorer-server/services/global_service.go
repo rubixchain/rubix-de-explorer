@@ -32,7 +32,7 @@ func GetAssetType(id string) (string, error) {
 	var asset models.TokenType // assuming this matches your table structure
 
 	// Fetch asset by ID
-	result := database.DB.Where("token_id= ?", id).First(&asset)
+	result := database.DB.Where("token_id = ?", id).First(&asset)
 	if result.Error != nil {
 		return "", fmt.Errorf("failed to fetch asset type: %w", result.Error)
 	}
