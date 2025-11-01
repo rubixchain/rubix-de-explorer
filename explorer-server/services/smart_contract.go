@@ -25,12 +25,12 @@ func GetSCInfoFromSCID(scID string) (*models.SmartContract, error) {
 func GetSCBlockList(limit, page int) (interface{}, error) {
 	var blocks []models.SC_Block
 
-	offset := (page - 1) * limit
+	// offset := (page - 1) * limit
 
 	// Fetch all blocks with pagination
 	if err := database.DB.
-		Limit(int(limit)).
-		Offset(int(offset)).
+		// Limit(int(limit)).
+		// Offset(int(offset)).
 		Find(&blocks).Error; err != nil {
 		return nil, err
 	}

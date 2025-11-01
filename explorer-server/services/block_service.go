@@ -24,8 +24,8 @@ func GetTransferBlocksList(limit, offset int) (model.TransactionsResponse, error
 
 	// Fetch all blocks with pagination
 	if err := database.DB.
-		Limit(limit).
-		Offset(offset).
+		// Limit(limit).
+		// Offset(offset).
 		Find(&blocks).Error; err != nil {
 		return model.TransactionsResponse{}, err
 	}
