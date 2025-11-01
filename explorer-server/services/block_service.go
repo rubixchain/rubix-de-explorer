@@ -24,9 +24,14 @@ func GetTransferBlocksList(limit, offset int) (model.TransactionsResponse, error
 
 	// Fetch all blocks with pagination
 	if err := database.DB.
-		// Limit(limit).
-		// Offset(offset).
+		Limit(limit).
+		Offset(offset).
 		Find(&blocks).Error; err != nil {
+		return model.TransactionsResponse{}, err
+	}
+
+	var count int64
+	if err := database.DB.Model(&models.TransferBlocks{}).Count(&count).Error; err != nil {
 		return model.TransactionsResponse{}, err
 	}
 
@@ -41,6 +46,7 @@ func GetTransferBlocksList(limit, offset int) (model.TransactionsResponse, error
 		}
 		response.TransactionsResponse = append(response.TransactionsResponse, tx)
 	}
+	response.Count = count
 
 	return response, nil
 }

@@ -52,6 +52,7 @@ type TransactionResponse struct {
 
 type TransactionsResponse struct {
 	TransactionsResponse []TransactionResponse `json:"transactions_response"`
+	Count int64 `json:"count"`
 }
 
 type SCBlocksListResponse struct {
