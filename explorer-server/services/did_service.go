@@ -4,7 +4,6 @@ import (
 	"explorer-server/database"
 	"explorer-server/database/models"
 	"explorer-server/model"
-	"fmt"
 )
 
 // GetRBTCount returns the total number of RBTs in the database
@@ -24,7 +23,7 @@ func GetDIDInfoFromDID(did string) (*models.DIDs, error) {
 	return &didInfo, nil
 }
 
-func GetDIDHoldersList(limit, page int) ([]model.HolderResponse, error) {
+func GetDIDHoldersList(limit, page int) (interface{}, error) {
 	var dids []models.DIDs
 	offset := (page - 1) * limit
 
@@ -35,19 +34,29 @@ func GetDIDHoldersList(limit, page int) ([]model.HolderResponse, error) {
 		Find(&dids).Error; err != nil {
 		return nil, err
 	}
+
 	// Map to response format
 	holders := make([]model.HolderResponse, len(dids))
-	fmt.Printf("holder", holders )
-
 	for i, d := range dids {
 		holders[i] = model.HolderResponse{
-			OwnerDID:  d.DID,
+			OwnerDID:   d.DID,
 			TokenCount: d.TotalRBTs,
 		}
 	}
-    fmt.Printf("holder", holders )
 
-	return holders, nil
+	// Get total count of DIDs
+	var count int64
+	if err := database.DB.Model(&models.DIDs{}).Count(&count).Error; err != nil {
+		return nil, err
+	}
+
+	// Wrap in HoldersResponse
+	response := model.HoldersResponse{
+		HoldersResponse: holders,
+		Count:           count,
+	}
+
+	return response, nil
 }
 
 // // GetRBTInfoFromRBTID fetches a single RBT by its ID

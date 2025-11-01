@@ -39,6 +39,7 @@ type HolderResponse struct {
 
 type HoldersResponse struct {
 	HoldersResponse []HolderResponse `json:"holders_response"`
+	Count int64 `json:"count"` 
 }
 
 type TransactionResponse struct {

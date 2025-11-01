@@ -23,24 +23,43 @@ func GetRBTInfoFromRBTID(rbtID string) (*models.RBT, error) {
 	return &rbt, nil
 }
 
-func GetRBTList(limit, page int) (model.RBTListResponse, error) {
-	var rbts model.RBTListResponse
-
+func GetRBTList(limit, page int) (interface{}, error) {
+	var rbtModels []models.RBT
 	offset := (page - 1) * limit
 
+	// Fetch paginated RBTs
 	if err := database.DB.
 		Limit(limit).
 		Offset(offset).
-		Find(&rbts).Error; err != nil {
-		return model.RBTListResponse{}, err
+		Find(&rbtModels).Error; err != nil {
+		return nil, err
 	}
+
+	// Map to response Tokens
+	tokens := make([]model.Token, len(rbtModels))
+	for i, r := range rbtModels {
+		tokens[i] = model.Token{
+			TokenId:    r.TokenID,
+			OwnerDID:   r.OwnerDID,
+			TokenValue: r.TokenValue,
+		}
+	}
+
+	// Get total count of RBTs
 	var count int64
 	if err := database.DB.Model(&models.RBT{}).Count(&count).Error; err != nil {
-		return model.RBTListResponse{}, err
+		return nil, err
 	}
-    rbts.Count = count 
-	return rbts, nil
+
+	// Wrap in response
+	response := model.RBTListResponse{
+		Tokens: tokens,
+		Count:  count,
+	}
+
+	return response, nil
 }
+
 
 func GetRBTListFromDID(did string) ([]models.RBT, error) {
 	var rbts []models.RBT
