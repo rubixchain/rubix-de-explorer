@@ -3,6 +3,7 @@ package services
 import (
 	"explorer-server/database"
 	"explorer-server/database/models"
+	"explorer-server/model"
 )
 
 // GetRBTCount returns the total number of RBTs in the database
@@ -22,8 +23,8 @@ func GetRBTInfoFromRBTID(rbtID string) (*models.RBT, error) {
 	return &rbt, nil
 }
 
-func GetRBTList(limit, page int) ([]models.RBT, error) {
-	var rbts []models.RBT
+func GetRBTList(limit, page int) (model.RBTListResponse, error) {
+	var rbts model.RBTListResponse
 
 	offset := (page - 1) * limit
 
@@ -31,9 +32,13 @@ func GetRBTList(limit, page int) ([]models.RBT, error) {
 		Limit(limit).
 		Offset(offset).
 		Find(&rbts).Error; err != nil {
-		return nil, err
+		return model.RBTListResponse{}, err
 	}
-
+	var count int64
+	if err := database.DB.Model(&models.RBT{}).Count(&count).Error; err != nil {
+		return model.RBTListResponse{}, err
+	}
+    rbts.Count = count 
 	return rbts, nil
 }
 

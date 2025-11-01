@@ -183,9 +183,15 @@ func GetBurntBlockList(limit, page int)(interface{}, error){
 		return nil, err
 	}
 
+	var count int64
+	if err := database.DB.Model(&models.BurntBlocks{}).Count(&count).Error; err != nil {
+		return model.BurntBlocksListResponse{}, err
+	}
+
 	// Wrap in response struct
 	response := model.BurntBlocksListResponse{
 		BurntBlocks: blocks,
+		Count : count,
 	}
 
 	return response, nil

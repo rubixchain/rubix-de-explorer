@@ -57,12 +57,18 @@ type TransactionsResponse struct {
 
 type SCBlocksListResponse struct {
 	SC_Blocks [] models.SC_Block `json:"sc_blocks"`
+	Count int64 `json:"count"`
 }
 
 type BurntBlocksListResponse struct {
 	BurntBlocks [] models.BurntBlocks `json:"burntblocks"`
+	Count int64 `json:"count"`
 }
 
+type RBTListResponse struct {
+	Tokens []Token `json:"tokens"`
+	Count int64 `json:"count"`
+}
 
 
 // -----Token explorer response
