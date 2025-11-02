@@ -745,6 +745,8 @@ func StoreBlockInAllBlocks(blockMap map[string]interface{}) {
 		blockType = "deploy"
 	case "10":
 		blockType = "execute"
+	case "05", "5":
+		blockType = "mint"
 	default:
 		blockType = "unknown"
 	}

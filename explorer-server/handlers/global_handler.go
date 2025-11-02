@@ -112,7 +112,7 @@ func GetTokenBlocksFromTokenID(w http.ResponseWriter, r *http.Request) {
 	// Parse query parameters
 	tokenID := r.URL.Query().Get("tokenID")
 	if tokenID == "" {
-		http.Error(w, "Missing 'token_id' parameter", http.StatusBadRequest)
+		http.Error(w, "Missing 'tokenID' parameter", http.StatusBadRequest)
 		return
 	}
 

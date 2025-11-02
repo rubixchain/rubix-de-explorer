@@ -5,6 +5,7 @@ import (
 	"explorer-server/database"
 	"explorer-server/database/models"
 	"explorer-server/model"
+	"explorer-server/util"
 	"fmt"
 )
 
@@ -137,8 +138,8 @@ func GetBlockType(txnId string) (int64, error) {
 	return blockType, nil
 }
 
-func GetSCBlockInfoFromTxnId(hash string ) (interface{},error){
-  
+func GetSCBlockInfoFromTxnId(hash string) (interface{}, error) {
+
 	var block models.SC_Block
 
 	// Fetch block where block_hash matches
@@ -149,10 +150,10 @@ func GetSCBlockInfoFromTxnId(hash string ) (interface{},error){
 	}
 
 	return block, nil
-	
+
 }
-func GetBurntBlockInfo(hash string) (interface{},error){
-  var block models.BurntBlocks
+func GetBurntBlockInfo(hash string) (interface{}, error) {
+	var block models.BurntBlocks
 
 	// Fetch block where block_hash matches
 	if err := database.DB.
@@ -164,7 +165,7 @@ func GetBurntBlockInfo(hash string) (interface{},error){
 	return block, nil
 }
 
-func GetBurntBlockList(limit, page int)(interface{}, error){
+func GetBurntBlockList(limit, page int) (interface{}, error) {
 	var blocks []models.BurntBlocks
 
 	offset := (page - 1) * limit
@@ -239,4 +240,44 @@ func derefFloat(ptr *float64) float64 {
 	return *ptr
 }
 
+// ProcessIncomingBlock flattens numeric keys and maps them to readable names
+func ProcessIncomingBlock(blockData map[string]interface{}) map[string]interface{} {
+	// Step 1: Flatten nested numeric keys like "4-2-5"
+	flattened := util.FlattenKeys("", blockData).(map[string]interface{})
 
+	// Step 2: Apply mapping (e.g., 1 → TCTokenTypeKey, etc.)
+	mapped := util.ApplyKeyMapping(flattened).(map[string]interface{})
+
+	return mapped
+}
+
+// UpdateBlocks processes an incoming block and routes it to the right storage function
+func UpdateBlocks(blockMap map[string]interface{}) {
+
+	// Convert numeric keys → named keys
+	mappedBlock := ProcessIncomingBlock(blockMap)
+
+	// Store in AllBlocks first (universal record)
+	StoreBlockInAllBlocks(mappedBlock)
+
+	// Identify transaction type
+	transType, _ := mappedBlock["TCTransTypeKey"].(string)
+
+	switch transType {
+	case "02", "2":
+		fmt.Println("Storing transfer block")
+		StoreTransferBlock(mappedBlock)
+
+	case "08", "13":
+		fmt.Println("Storing burnt block")
+		StoreBurntBlock(mappedBlock)
+
+	case "09", "9":
+		fmt.Println("Storing smart contract deploy block")
+		StoreSCDeployBlock(mappedBlock)
+
+	case "10":
+		fmt.Println("Storing smart contract execute block")
+		StoreSCExecuteBlock(mappedBlock)
+	}
+}

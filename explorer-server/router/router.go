@@ -38,9 +38,8 @@ func NewRouter() *mux.Router {
 	r.HandleFunc("/api/search", handlers.GetInfo).Methods(http.MethodGet)
 	r.HandleFunc("/api/token-chain", handlers.GetTokenChainFromTokenID).Methods(http.MethodGet)
 	r.HandleFunc("/api/token-blocks", handlers.GetTokenBlocksFromTokenID).Methods(http.MethodGet)
-    r.HandleFunc("/api/sc-blocks", handlers.GetSCBlockList).Methods(http.MethodGet)
+	r.HandleFunc("/api/sc-blocks", handlers.GetSCBlockList).Methods(http.MethodGet)
 	r.HandleFunc("/api/burnt-blocks", handlers.GetBurntBlockList).Methods(http.MethodGet)
-
 
 	r.HandleFunc("/api/sctxn-info", handlers.GetSCBlockInfoFromTxnHash).Methods(http.MethodGet)
 	r.HandleFunc("/api/burnttxn-info", handlers.GetBurntTxnInfoFromTxnHash).Methods(http.MethodGet)
@@ -49,6 +48,9 @@ func NewRouter() *mux.Router {
 
 	// docs endpoint
 	// r.HandleFunc("/api/docs", handlers.DocsHandler).Methods(http.MethodGet)
+
+	//Block Updation endpoint
+	r.HandleFunc("/api/block-update", handlers.UpdateBlocksHandler).Methods(http.MethodPost)
 
 	return r
 }

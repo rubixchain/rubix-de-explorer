@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -29,7 +30,7 @@ func GetTransferBlockListHandler(w http.ResponseWriter, r *http.Request) {
 	pageStr := r.URL.Query().Get("page")
 	limit := 10
 	page := 1
-	
+
 	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
 		limit = l
 	}
@@ -86,7 +87,7 @@ func GetBlockInfoFromBlockHash(w http.ResponseWriter, r *http.Request) {
 }
 
 func GetBurntTxnInfoFromTxnHash(w http.ResponseWriter, r *http.Request) {
-	
+
 	txnkHash := r.URL.Query().Get("hash")
 
 	// Fetch data using service
@@ -131,5 +132,22 @@ func GetBurntBlockList(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// UpdateBlocksHandler handles block updates pushed from the full node
+func UpdateBlocksHandler(w http.ResponseWriter, r *http.Request) {
+	var block map[string]interface{}
 
+	// Decode incoming JSON body
+	if err := json.NewDecoder(r.Body).Decode(&block); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
 
+	log.Println("✅ Received block from fullnode:")
+
+	// Process the incoming block
+	services.UpdateBlocks(block)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "Block processed successfully"}`))
+}
