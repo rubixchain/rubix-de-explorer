@@ -48,6 +48,7 @@ type SmartContract struct {
 	DeployerDID string `json:"deployer_did" gorm:"column:deployer_did"`
 	TxnId       string `json:"txn_id" gorm:"column:txn_id"`
 	BlockHeight uint64 `json:"block_height" gorm:"column:block_height"`
+	TokenStatus int    `json:"token_status" gorm:"column:token_status"`
 }
 
 func (SmartContract) TableName() string { return "SmartContract" }
@@ -59,6 +60,7 @@ type RBT struct {
 	BlockID     string  `json:"block_id" gorm:"column:block_id"`
 	BlockHeight string  `json:"block_height" gorm:"column:block_height"`
 	TokenValue  float64 `json:"token_value" gorm:"column:token_value"`
+	TokenStatus int     `json:"token_status" gorm:"column:token_status"`
 }
 
 func (RBT) TableName() string { return "RBT" }
@@ -73,6 +75,7 @@ type FT struct {
 	BlockHeight uint64  `json:"block_height" gorm:"column:block_height"`
 	BlockID     string  `json:"block_id" gorm:"column:block_id"`
 	Txn_ID      string  `json:"txn_id" gorm:"column:txn_id"`
+	TokenStatus int     `json:"token_status" gorm:"column:token_status"`
 }
 
 func (FT) TableName() string { return "FT" }
@@ -85,6 +88,7 @@ type NFT struct {
 	BlockHash   string `json:"block_hash" gorm:"column:block_hash"`
 	Txn_ID      string `json:"txn_id" gorm:"column:txn_id"`
 	BlockHeight uint64 `json:"block_height" gorm:"column:block_height"`
+	TokenStatus int    `json:"token_status" gorm:"column:token_status"`
 }
 
 func (NFT) TableName() string { return "NFT" }

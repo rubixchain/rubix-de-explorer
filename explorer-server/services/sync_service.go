@@ -267,6 +267,7 @@ func StoreRBTInfoInDB(RBTs []RBT) error {
 			OwnerDID:    rbt.OwnerDID,
 			BlockID:     rbt.BlockHash,
 			BlockHeight: fmt.Sprintf("%d", rbt.BlockHeight),
+			TokenStatus: rbt.TokenStatus,
 		}
 
 		var existingRBT models.RBT
@@ -329,13 +330,14 @@ func StoreFTInfoInDB(FTs []FT) error {
 	didCount := make(map[string]int)
 	for _, ft := range FTs {
 		ftmodel := models.FT{
-			FtID:       ft.TokenID,
-			TokenValue: ft.TokenValue,
-			FTName:     ft.FTName,
-			OwnerDID:   ft.OwnerDID,
-			CreatorDID: ft.CreatorDID,
-			BlockID:    ft.BlockHash,
-			Txn_ID:     ft.TransactionID,
+			FtID:        ft.TokenID,
+			TokenValue:  ft.TokenValue,
+			FTName:      ft.FTName,
+			OwnerDID:    ft.OwnerDID,
+			CreatorDID:  ft.CreatorDID,
+			BlockID:     ft.BlockHash,
+			Txn_ID:      ft.TransactionID,
+			TokenStatus: ft.TokenStatus,
 		}
 
 		var existingFT models.FT
@@ -401,6 +403,7 @@ func StoreNFTInfoInDB(NFTs []NFT) error {
 			BlockHash:   nft.BlockHash,
 			Txn_ID:      nft.TransactionID,
 			BlockHeight: nft.BlockHeight,
+			TokenStatus: nft.TokenStatus,
 		}
 
 		var existingNFT models.NFT
@@ -465,6 +468,7 @@ func StoreSCInfoInDB(SCs []SC) error {
 			DeployerDID: sc.Deployer,
 			TxnId:       sc.TransactionID,
 			BlockHeight: sc.BlockHeight,
+			TokenStatus: sc.TokenStatus,
 		}
 
 		var existingSC models.SmartContract
