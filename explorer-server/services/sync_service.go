@@ -326,11 +326,25 @@ func StoreFTInfoInDB(FTs []FT) error {
 			Txn_ID:     ft.TransactionID,
 		}
 
-		if err := database.DB.FirstOrCreate(&ftmodel, models.FT{FtID: ft.TokenID}).Error; err != nil {
-			log.Printf("⚠️ Failed to insert FT %s: %v", ft.TokenID, err)
+		var existingFT models.FT
+		err := database.DB.Where("ft_id = ?", ft.TokenID).First(&existingFT).Error
+
+		// Only count if this is a NEW token (not already in DB)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			if err := database.DB.Create(&ftmodel).Error; err != nil {
+				log.Printf("⚠️ Failed to insert FT %s: %v", ft.TokenID, err)
+				continue
+			}
+			log.Printf("✅ FT inserted: %s", ft.TokenID)
+
+			// Only increment count if token was newly created
+			didCount[ft.OwnerDID]++
+		} else if err != nil {
+			log.Printf("⚠️ Error checking FT %s: %v", ft.TokenID, err)
 			continue
+		} else {
+			log.Printf("FT already exists, skipping: %s", ft.TokenID)
 		}
-		log.Printf("✅ FT inserted or exists: %s", ft.TokenID)
 
 		tokenType := models.TokenType{
 			TokenID:     ft.TokenID,
@@ -341,7 +355,6 @@ func StoreFTInfoInDB(FTs []FT) error {
 		if err := database.DB.FirstOrCreate(&tokenType, models.TokenType{TokenID: ft.TokenID}).Error; err != nil {
 			log.Printf("⚠️ Failed to insert token_type for %s: %v", ft.TokenID, err)
 		}
-		didCount[ft.OwnerDID]++
 	}
 
 	for did, count := range didCount {
@@ -379,11 +392,25 @@ func StoreNFTInfoInDB(NFTs []NFT) error {
 			Txn_ID:     nft.TransactionID,
 		}
 
-		if err := database.DB.FirstOrCreate(&nftmodel, models.NFT{TokenID: nft.TokenID}).Error; err != nil {
-			log.Printf("⚠️ Failed to insert NFT %s: %v", nft.TokenID, err)
+		var existingNFT models.NFT
+		err := database.DB.Where("nft_id = ?", nft.TokenID).First(&existingNFT).Error
+
+		// Only count if this is a NEW token (not already in DB)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			if err := database.DB.Create(&nftmodel).Error; err != nil {
+				log.Printf("⚠️ Failed to insert NFT %s: %v", nft.TokenID, err)
+				continue
+			}
+			log.Printf("✅ NFT inserted: %s", nft.TokenID)
+
+			// Only increment count if token was newly created
+			didCount[nft.OwnerDID]++
+		} else if err != nil {
+			log.Printf("⚠️ Error checking NFT %s: %v", nft.TokenID, err)
 			continue
+		} else {
+			log.Printf("NFT already exists, skipping: %s", nft.TokenID)
 		}
-		log.Printf("✅ NFT inserted or exists: %s", nft.TokenID)
 
 		tokenType := models.TokenType{
 			TokenID:     nft.TokenID,
@@ -394,7 +421,6 @@ func StoreNFTInfoInDB(NFTs []NFT) error {
 		if err := database.DB.FirstOrCreate(&tokenType, models.TokenType{TokenID: nft.TokenID}).Error; err != nil {
 			log.Printf("⚠️ Failed to insert token_type for %s: %v", nft.TokenID, err)
 		}
-		didCount[nft.OwnerDID]++
 	}
 
 	for did, count := range didCount {
@@ -431,11 +457,25 @@ func StoreSCInfoInDB(SCs []SC) error {
 			TxnId:       sc.TransactionID,
 		}
 
-		if err := database.DB.FirstOrCreate(&scmodel, models.SmartContract{ContractID: sc.SmartContractHash}).Error; err != nil {
-			log.Printf("⚠️ Failed to insert SC %s: %v", sc.SmartContractHash, err)
+		var existingSC models.SmartContract
+		err := database.DB.Where("contract_id = ?", sc.SmartContractHash).First(&existingSC).Error
+
+		// Only count if this is a NEW smart contract (not already in DB)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			if err := database.DB.Create(&scmodel).Error; err != nil {
+				log.Printf("⚠️ Failed to insert SC %s: %v", sc.SmartContractHash, err)
+				continue
+			}
+			log.Printf("✅ SC inserted: %s", sc.SmartContractHash)
+
+			// Only increment count if SC was newly created
+			didCount[sc.Deployer]++
+		} else if err != nil {
+			log.Printf("⚠️ Error checking SC %s: %v", sc.SmartContractHash, err)
 			continue
+		} else {
+			log.Printf("SC already exists, skipping: %s", sc.SmartContractHash)
 		}
-		log.Printf("✅ SC inserted or exists: %s", sc.SmartContractHash)
 
 		tokenType := models.TokenType{
 			TokenID:     sc.SmartContractHash,
@@ -445,7 +485,6 @@ func StoreSCInfoInDB(SCs []SC) error {
 		if err := database.DB.FirstOrCreate(&tokenType, models.TokenType{TokenID: sc.SmartContractHash}).Error; err != nil {
 			log.Printf("⚠️ Failed to insert token_type for SC %s: %v", sc.SmartContractHash, err)
 		}
-		didCount[sc.Deployer]++
 	}
 
 	for did, count := range didCount {
