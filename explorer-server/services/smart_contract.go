@@ -35,9 +35,15 @@ func GetSCBlockList(limit, page int) (interface{}, error) {
 		return nil, err
 	}
 
+	var count int64
+	if err := database.DB.Model(&models.SC_Block{}).Count(&count).Error; err != nil {
+		return model.SCBlocksListResponse{}, err
+	}
+
 	// Wrap in response struct
 	response := model.SCBlocksListResponse{
 		SC_Blocks: blocks,
+		Count: count,
 	}
 
 	return response, nil

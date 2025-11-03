@@ -31,6 +31,11 @@ func GetTransferBlocksList(limit, offset int) (model.TransactionsResponse, error
 		return model.TransactionsResponse{}, err
 	}
 
+	var count int64
+	if err := database.DB.Model(&models.TransferBlocks{}).Count(&count).Error; err != nil {
+		return model.TransactionsResponse{}, err
+	}
+
 	// Map DB model to response model
 	for _, b := range blocks {
 		tx := model.TransactionResponse{
@@ -42,6 +47,7 @@ func GetTransferBlocksList(limit, offset int) (model.TransactionsResponse, error
 		}
 		response.TransactionsResponse = append(response.TransactionsResponse, tx)
 	}
+	response.Count = count
 
 	return response, nil
 }
@@ -178,9 +184,15 @@ func GetBurntBlockList(limit, page int) (interface{}, error) {
 		return nil, err
 	}
 
+	var count int64
+	if err := database.DB.Model(&models.BurntBlocks{}).Count(&count).Error; err != nil {
+		return model.BurntBlocksListResponse{}, err
+	}
+
 	// Wrap in response struct
 	response := model.BurntBlocksListResponse{
 		BurntBlocks: blocks,
+		Count : count,
 	}
 
 	return response, nil

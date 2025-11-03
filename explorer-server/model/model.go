@@ -39,6 +39,7 @@ type HolderResponse struct {
 
 type HoldersResponse struct {
 	HoldersResponse []HolderResponse `json:"holders_response"`
+	Count int64 `json:"count"` 
 }
 
 type TransactionResponse struct {
@@ -52,16 +53,23 @@ type TransactionResponse struct {
 
 type TransactionsResponse struct {
 	TransactionsResponse []TransactionResponse `json:"transactions_response"`
+	Count int64 `json:"count"`
 }
 
 type SCBlocksListResponse struct {
 	SC_Blocks [] models.SC_Block `json:"sc_blocks"`
+	Count int64 `json:"count"`
 }
 
 type BurntBlocksListResponse struct {
 	BurntBlocks [] models.BurntBlocks `json:"burntblocks"`
+	Count int64 `json:"count"`
 }
 
+type RBTListResponse struct {
+	Tokens []Token `json:"tokens"`
+	Count int64 `json:"count"`
+}
 
 
 // -----Token explorer response
