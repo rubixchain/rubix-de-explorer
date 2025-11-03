@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"math"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -242,7 +243,7 @@ func FetchAndStoreAllSCsFromFullNodeDB() error {
 
 // StoreRBTInfoInDB inserts RBTs into DB and ensures a corresponding token_type entry exists
 func StoreRBTInfoInDB(RBTs []RBT) error {
-	didCount := make(map[string]int)
+	didValueSum := make(map[string]float64)
 	for _, rbt := range RBTs {
 		rbtModel := models.RBT{
 			TokenID:     rbt.TokenID,
@@ -252,11 +253,25 @@ func StoreRBTInfoInDB(RBTs []RBT) error {
 			BlockHeight: fmt.Sprintf("%d", rbt.BlockHeight),
 		}
 
-		if err := database.DB.FirstOrCreate(&rbtModel, models.RBT{TokenID: rbt.TokenID}).Error; err != nil {
-			log.Printf("⚠️ Failed to insert RBT %s: %v", rbt.TokenID, err)
+		var existingRBT models.RBT
+		err := database.DB.Where("rbt_id = ?", rbt.TokenID).First(&existingRBT).Error
+
+		// Only count if this is a NEW token (not already in DB)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			if err := database.DB.Create(&rbtModel).Error; err != nil {
+				log.Printf("⚠️ Failed to insert RBT %s: %v", rbt.TokenID, err)
+				continue
+			}
+			log.Printf("✅ RBT inserted: %s", rbt.TokenID)
+
+			// Only add to sum if token was newly created
+			didValueSum[rbt.OwnerDID] += rbt.TokenValue
+		} else if err != nil {
+			log.Printf("⚠️ Error checking RBT %s: %v", rbt.TokenID, err)
 			continue
+		} else {
+			log.Printf("RBT already exists, skipping: %s", rbt.TokenID)
 		}
-		log.Printf("✅ RBT inserted or exists: %s", rbt.TokenID)
 
 		tokenType := models.TokenType{
 			TokenID:     rbt.TokenID,
@@ -267,24 +282,28 @@ func StoreRBTInfoInDB(RBTs []RBT) error {
 		if err := database.DB.FirstOrCreate(&tokenType, models.TokenType{TokenID: rbt.TokenID}).Error; err != nil {
 			log.Printf("⚠️ Failed to insert token_type for %s: %v", rbt.TokenID, err)
 		}
-		didCount[rbt.OwnerDID]++
 	}
 
-	for did, count := range didCount {
+	for did, valueSum := range didValueSum {
+		// Round to 3 decimal places
+		roundedValue := math.Round(valueSum*1000) / 1000
+
 		var existing models.DIDs
 		if err := database.DB.First(&existing, "did = ?", did).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				newDID := models.DIDs{
 					DID:       did,
 					CreatedAt: time.Now(),
-					TotalRBTs: float64(count),
+					TotalRBTs: roundedValue,
 				}
 				if err := database.DB.Create(&newDID).Error; err != nil {
 					log.Printf("⚠️ Failed to create DID %s: %v", did, err)
 				}
 			}
 		} else {
-			existing.TotalRBTs += float64(count)
+			existing.TotalRBTs += roundedValue
+			// Round again after addition to maintain 3 decimal precision
+			existing.TotalRBTs = math.Round(existing.TotalRBTs*1000) / 1000
 			if err := database.DB.Save(&existing).Error; err != nil {
 				log.Printf("⚠️ Failed to update TotalRBTs for DID %s: %v", did, err)
 			}
