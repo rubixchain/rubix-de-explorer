@@ -28,43 +28,59 @@ const (
 	SCType  = "SC"
 )
 
+// These structs are ONLY for receiving API responses
+
+// RBT - All PascalCase
 type RBT struct {
-	TokenID       string
-	TokenValue    float64
-	OwnerDID      string
-	PublisherDID  string
-	TransactionID string
-	BlockHash     string
-	BlockHeight   uint64
-	SyncStaus     int
+	TokenID       string  `json:"TokenID"`
+	TokenValue    float64 `json:"TokenValue"`
+	OwnerDID      string  `json:"OwnerDID"`
+	PublisherDID  string  `json:"PublisherDID"`
+	TransactionID string  `json:"TransactionID"`
+	BlockHash     string  `json:"BlockHash"`
+	BlockHeight   uint64  `json:"BlockHeight"`
+	SyncStaus     int     `json:"SyncStaus"` // Note: typo in API
+	TokenStatus   int     `json:"TokenStatus"`
 }
 
+// FT - All PascalCase
 type FT struct {
-	TokenID       string
-	FTName        string
-	OwnerDID      string
-	CreatorDID    string
-	TokenValue    float64
-	TransactionID string
-	BlockHash     string
-	SyncStatus    int
+	TokenID       string  `json:"TokenID"`
+	FTName        string  `json:"FTName"`
+	OwnerDID      string  `json:"OwnerDID"`
+	CreatorDID    string  `json:"CreatorDID"`
+	PublisherDID  string  `json:"PublisherDID"`
+	TokenValue    float64 `json:"TokenValue"`
+	TransactionID string  `json:"TransactionID"`
+	BlockHash     string  `json:"BlockHash"`
+	BlockHeight   uint64  `json:"BlockHeight"`
+	SyncStatus    int     `json:"SyncStatus"`
+	TokenStatus   int     `json:"TokenStatus"`
 }
 
+// NFT - Mix of snake_case and PascalCase
 type NFT struct {
-	TokenID       string
-	TokenValue    float64
-	OwnerDID      string
-	TransactionID string
-	BlockHash     string
-	SyncStatus    int
+	TokenID       string  `json:"token_id"`
+	TokenValue    float64 `json:"token_value"`
+	OwnerDID      string  `json:"OwnerDID"`
+	PublisherDID  string  `json:"PublisherDID"`
+	TransactionID string  `json:"TransactionID"`
+	BlockHash     string  `json:"BlockHash"`
+	BlockHeight   uint64  `json:"BlockHeight"`
+	SyncStatus    int     `json:"SyncStatus"`
+	TokenStatus   int     `json:"TokenStatus"`
 }
 
+// SC - Mix of snake_case and lowercase/PascalCase
 type SC struct {
 	SmartContractHash string `json:"smart_contract_hash"`
 	Deployer          string `json:"deployer"`
+	PublisherDID      string `json:"PublisherDID"`
 	TransactionID     string `json:"TransactionID"`
 	BlockHash         string `json:"BlockHash"`
+	BlockHeight       uint64 `json:"BlockHeight"`
 	SyncStatus        int    `json:"SyncStatus"`
+	TokenStatus       int    `json:"TokenStatus"`
 }
 
 // API response structs
@@ -256,7 +272,6 @@ func StoreRBTInfoInDB(RBTs []RBT) error {
 		var existingRBT models.RBT
 		err := database.DB.Where("rbt_id = ?", rbt.TokenID).First(&existingRBT).Error
 
-		// Only count if this is a NEW token (not already in DB)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			if err := database.DB.Create(&rbtModel).Error; err != nil {
 				log.Printf("⚠️ Failed to insert RBT %s: %v", rbt.TokenID, err)
@@ -264,13 +279,12 @@ func StoreRBTInfoInDB(RBTs []RBT) error {
 			}
 			log.Printf("✅ RBT inserted: %s", rbt.TokenID)
 
-			// Only add to sum if token was newly created
 			didValueSum[rbt.OwnerDID] += rbt.TokenValue
 		} else if err != nil {
 			log.Printf("⚠️ Error checking RBT %s: %v", rbt.TokenID, err)
 			continue
 		} else {
-			log.Printf("RBT already exists, skipping: %s", rbt.TokenID)
+			log.Printf("ℹ️ RBT already exists, skipping: %s", rbt.TokenID)
 		}
 
 		tokenType := models.TokenType{
@@ -285,7 +299,6 @@ func StoreRBTInfoInDB(RBTs []RBT) error {
 	}
 
 	for did, valueSum := range didValueSum {
-		// Round to 3 decimal places
 		roundedValue := math.Round(valueSum*1000) / 1000
 
 		var existing models.DIDs
@@ -302,7 +315,6 @@ func StoreRBTInfoInDB(RBTs []RBT) error {
 			}
 		} else {
 			existing.TotalRBTs += roundedValue
-			// Round again after addition to maintain 3 decimal precision
 			existing.TotalRBTs = math.Round(existing.TotalRBTs*1000) / 1000
 			if err := database.DB.Save(&existing).Error; err != nil {
 				log.Printf("⚠️ Failed to update TotalRBTs for DID %s: %v", did, err)
@@ -329,7 +341,6 @@ func StoreFTInfoInDB(FTs []FT) error {
 		var existingFT models.FT
 		err := database.DB.Where("ft_id = ?", ft.TokenID).First(&existingFT).Error
 
-		// Only count if this is a NEW token (not already in DB)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			if err := database.DB.Create(&ftmodel).Error; err != nil {
 				log.Printf("⚠️ Failed to insert FT %s: %v", ft.TokenID, err)
@@ -337,13 +348,12 @@ func StoreFTInfoInDB(FTs []FT) error {
 			}
 			log.Printf("✅ FT inserted: %s", ft.TokenID)
 
-			// Only increment count if token was newly created
 			didCount[ft.OwnerDID]++
 		} else if err != nil {
 			log.Printf("⚠️ Error checking FT %s: %v", ft.TokenID, err)
 			continue
 		} else {
-			log.Printf("FT already exists, skipping: %s", ft.TokenID)
+			log.Printf("ℹ️ FT already exists, skipping: %s", ft.TokenID)
 		}
 
 		tokenType := models.TokenType{
@@ -385,17 +395,17 @@ func StoreNFTInfoInDB(NFTs []NFT) error {
 	didCount := make(map[string]int)
 	for _, nft := range NFTs {
 		nftmodel := models.NFT{
-			TokenID:    nft.TokenID,
-			TokenValue: fmt.Sprintf("%f", nft.TokenValue),
-			OwnerDID:   nft.OwnerDID,
-			BlockHash:  nft.BlockHash,
-			Txn_ID:     nft.TransactionID,
+			TokenID:     nft.TokenID,
+			TokenValue:  fmt.Sprintf("%f", nft.TokenValue),
+			OwnerDID:    nft.OwnerDID,
+			BlockHash:   nft.BlockHash,
+			Txn_ID:      nft.TransactionID,
+			BlockHeight: nft.BlockHeight,
 		}
 
 		var existingNFT models.NFT
 		err := database.DB.Where("nft_id = ?", nft.TokenID).First(&existingNFT).Error
 
-		// Only count if this is a NEW token (not already in DB)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			if err := database.DB.Create(&nftmodel).Error; err != nil {
 				log.Printf("⚠️ Failed to insert NFT %s: %v", nft.TokenID, err)
@@ -403,7 +413,6 @@ func StoreNFTInfoInDB(NFTs []NFT) error {
 			}
 			log.Printf("✅ NFT inserted: %s", nft.TokenID)
 
-			// Only increment count if token was newly created
 			didCount[nft.OwnerDID]++
 		} else if err != nil {
 			log.Printf("⚠️ Error checking NFT %s: %v", nft.TokenID, err)
@@ -455,12 +464,12 @@ func StoreSCInfoInDB(SCs []SC) error {
 			BlockHash:   sc.BlockHash,
 			DeployerDID: sc.Deployer,
 			TxnId:       sc.TransactionID,
+			BlockHeight: sc.BlockHeight,
 		}
 
 		var existingSC models.SmartContract
 		err := database.DB.Where("contract_id = ?", sc.SmartContractHash).First(&existingSC).Error
 
-		// Only count if this is a NEW smart contract (not already in DB)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			if err := database.DB.Create(&scmodel).Error; err != nil {
 				log.Printf("⚠️ Failed to insert SC %s: %v", sc.SmartContractHash, err)
@@ -468,13 +477,12 @@ func StoreSCInfoInDB(SCs []SC) error {
 			}
 			log.Printf("✅ SC inserted: %s", sc.SmartContractHash)
 
-			// Only increment count if SC was newly created
 			didCount[sc.Deployer]++
 		} else if err != nil {
 			log.Printf("⚠️ Error checking SC %s: %v", sc.SmartContractHash, err)
 			continue
 		} else {
-			log.Printf("SC already exists, skipping: %s", sc.SmartContractHash)
+			log.Printf("ℹ️ SC already exists, skipping: %s", sc.SmartContractHash)
 		}
 
 		tokenType := models.TokenType{

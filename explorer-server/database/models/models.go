@@ -47,6 +47,7 @@ type SmartContract struct {
 	BlockHash   string `json:"block_hash" gorm:"column:block_hash"`
 	DeployerDID string `json:"deployer_did" gorm:"column:deployer_did"`
 	TxnId       string `json:"txn_id" gorm:"column:txn_id"`
+	BlockHeight uint64 `json:"block_height" gorm:"column:block_height"`
 }
 
 func (SmartContract) TableName() string { return "SmartContract" }
@@ -69,7 +70,7 @@ type FT struct {
 	FTName      string  `json:"ft_name" gorm:"column:ft_name"`
 	OwnerDID    string  `json:"owner_did" gorm:"column:owner_did"`
 	CreatorDID  string  `json:"creator_did" gorm:"column:creator_did"`
-	BlockHeight string  `json:"block_height" gorm:"column:block_height"`
+	BlockHeight uint64  `json:"block_height" gorm:"column:block_height"`
 	BlockID     string  `json:"block_id" gorm:"column:block_id"`
 	Txn_ID      string  `json:"txn_id" gorm:"column:txn_id"`
 }
@@ -78,11 +79,12 @@ func (FT) TableName() string { return "FT" }
 
 // ========================= NFT =========================
 type NFT struct {
-	TokenID    string `json:"nft_id" gorm:"column:nft_id"`
-	TokenValue string `json:"token_value" gorm:"column:token_value"`
-	OwnerDID   string `json:"owner_did" gorm:"column:owner_did"`
-	BlockHash  string `json:"block_hash" gorm:"column:block_hash"`
-	Txn_ID     string `json:"txn_id" gorm:"column:txn_id"`
+	TokenID     string `json:"nft_id" gorm:"column:nft_id"`
+	TokenValue  string `json:"token_value" gorm:"column:token_value"`
+	OwnerDID    string `json:"owner_did" gorm:"column:owner_did"`
+	BlockHash   string `json:"block_hash" gorm:"column:block_hash"`
+	Txn_ID      string `json:"txn_id" gorm:"column:txn_id"`
+	BlockHeight uint64 `json:"block_height" gorm:"column:block_height"`
 }
 
 func (NFT) TableName() string { return "NFT" }
