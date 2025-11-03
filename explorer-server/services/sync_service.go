@@ -280,7 +280,10 @@ func StoreRBTInfoInDB(RBTs []RBT) error {
 			}
 			log.Printf("✅ RBT inserted: %s", rbt.TokenID)
 
-			didValueSum[rbt.OwnerDID] += rbt.TokenValue
+			// Only add to sum if TokenStatus is 0 (free)
+			if rbt.TokenStatus == 0 {
+				didValueSum[rbt.OwnerDID] += rbt.TokenValue
+			}
 		} else if err != nil {
 			log.Printf("⚠️ Error checking RBT %s: %v", rbt.TokenID, err)
 			continue
@@ -350,7 +353,10 @@ func StoreFTInfoInDB(FTs []FT) error {
 			}
 			log.Printf("✅ FT inserted: %s", ft.TokenID)
 
-			didCount[ft.OwnerDID]++
+			// Only increment count if TokenStatus is 0 (free)
+			if ft.TokenStatus == 0 {
+				didCount[ft.OwnerDID]++
+			}
 		} else if err != nil {
 			log.Printf("⚠️ Error checking FT %s: %v", ft.TokenID, err)
 			continue
