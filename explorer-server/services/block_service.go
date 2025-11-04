@@ -19,18 +19,23 @@ func GetTxnsCount() (int64, error) {
 	return count, nil
 }
 
-func GetTransferBlocksList(limit, offset int) (model.TransactionsResponse, error) {
+func GetTransferBlocksList(limit, page int) (model.TransactionsResponse, error) {
 	var blocks []models.TransferBlocks
 	var response model.TransactionsResponse
 
-	// Fetch all blocks with pagination
+	// Calculate correct offset
+	offset := (page - 1) * limit
+
+	// Fetch paginated data
 	if err := database.DB.
 		Limit(limit).
 		Offset(offset).
+		Order("epoch DESC"). // optional: keeps pagination consistent
 		Find(&blocks).Error; err != nil {
 		return model.TransactionsResponse{}, err
 	}
 
+	// Count total records
 	var count int64
 	if err := database.DB.Model(&models.TransferBlocks{}).Count(&count).Error; err != nil {
 		return model.TransactionsResponse{}, err
@@ -39,7 +44,7 @@ func GetTransferBlocksList(limit, offset int) (model.TransactionsResponse, error
 	// Map DB model to response model
 	for _, b := range blocks {
 		tx := model.TransactionResponse{
-			TxnHash:     *b.TxnID,
+			TxnHash:     deref(b.TxnID),
 			TxnType:     deref(b.TxnType),
 			Amount:      derefFloat(b.Amount),
 			SenderDID:   deref(b.SenderDID),
@@ -47,10 +52,11 @@ func GetTransferBlocksList(limit, offset int) (model.TransactionsResponse, error
 		}
 		response.TransactionsResponse = append(response.TransactionsResponse, tx)
 	}
-	response.Count = count
 
+	response.Count = count
 	return response, nil
 }
+
 
 func GetTransferBlockInfoFromTxnID(hash string) (models.TransferBlocks, error) {
 	var block models.TransferBlocks
