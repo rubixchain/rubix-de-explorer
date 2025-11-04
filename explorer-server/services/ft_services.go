@@ -21,7 +21,18 @@ func GetFTInfoFromFTID(ftID string) (*models.FT, error) {
 	}
 	return &ftInfo, nil
 }
+func GetFTListFromDID(did string) ([]models.FT, error) {
+	var ftList []models.FT
 
+	// Fetch all FTs where owner_did = given DID
+	if err := database.DB.
+		Where("owner_did = ?", did).
+		Find(&ftList).Error; err != nil {
+		return nil, err
+	}
+
+	return ftList, nil
+}
 // // GetRBTInfoFromRBTID fetches a single RBT by its ID
 // func GetRBTInfoFromRBTID(rbtID string) (*models.RBT, error) {
 // 	var rbt models.RBT

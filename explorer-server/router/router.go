@@ -45,6 +45,7 @@ func NewRouter() *mux.Router {
 	r.HandleFunc("/api/burnttxn-info", handlers.GetBurntTxnInfoFromTxnHash).Methods(http.MethodGet)
 	// r.HandleFunc("/api/analytics", handlers.DatabaseAnalyticsHandler).Methods(http.MethodGet)
 	// r.HandleFunc("/api/database", handlers.DatabaseInterfaceHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/ftholdings",handlers.GetFtHoldingList).Methods(http.MethodGet )
 
 	// docs endpoint
 	// r.HandleFunc("/api/docs", handlers.DocsHandler).Methods(http.MethodGet)
