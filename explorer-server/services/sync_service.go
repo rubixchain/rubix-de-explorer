@@ -13,7 +13,9 @@ import (
 	"math"
 	"net/http"
 	"regexp"
+	"runtime"
 	"strconv"
+	"sync"
 	"time"
 
 	"gorm.io/datatypes"
@@ -529,92 +531,92 @@ func StoreSCInfoInDB(SCs []SC) error {
 	return nil
 }
 
-// FetchAllTokenChainFromFullNode iterates over all tokens and stores different blocks
-func FetchAllTokenChainFromFullNode() error {
-	var tokens []models.TokenType
+// // FetchAllTokenChainFromFullNode iterates over all tokens and stores different blocks
+// func FetchAllTokenChainFromFullNode() error {
+// 	var tokens []models.TokenType
 
-	// Fetch all tokens from DB
-	if err := database.DB.Find(&tokens).Error; err != nil {
-		log.Fatalf("❌ Failed to fetch tokens from DB: %v", err)
-		return err
-	}
+// 	// Fetch all tokens from DB
+// 	if err := database.DB.Find(&tokens).Error; err != nil {
+// 		log.Fatalf("❌ Failed to fetch tokens from DB: %v", err)
+// 		return err
+// 	}
 
-	for _, token := range tokens {
-		apiURL := fmt.Sprintf("%s/api/de-exp/get-token-chain?tokenID=%s&tokenType=%s",
-			config.RubixNodeURL, token.TokenID, token.TokenType)
+// 	for _, token := range tokens {
+// 		apiURL := fmt.Sprintf("%s/api/de-exp/get-token-chain?tokenID=%s&tokenType=%s",
+// 			config.RubixNodeURL, token.TokenID, token.TokenType)
 
-		resp, err := http.Get(apiURL)
-		if err != nil {
-			log.Printf("❌ Error fetching chain for %s: %v", token.TokenID, err)
-			continue
-		}
-		defer resp.Body.Close()
+// 		resp, err := http.Get(apiURL)
+// 		if err != nil {
+// 			log.Printf("❌ Error fetching chain for %s: %v", token.TokenID, err)
+// 			continue
+// 		}
+// 		defer resp.Body.Close()
 
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			log.Printf("❌ Error reading response for %s: %v", token.TokenID, err)
-			continue
-		}
+// 		body, err := io.ReadAll(resp.Body)
+// 		if err != nil {
+// 			log.Printf("❌ Error reading response for %s: %v", token.TokenID, err)
+// 			continue
+// 		}
 
-		var chainData map[string]interface{}
-		if err := json.Unmarshal(body, &chainData); err != nil {
-			log.Printf("❌ Error decoding JSON for %s: %v", token.TokenID, err)
-			continue
-		}
+// 		var chainData map[string]interface{}
+// 		if err := json.Unmarshal(body, &chainData); err != nil {
+// 			log.Printf("❌ Error decoding JSON for %s: %v", token.TokenID, err)
+// 			continue
+// 		}
 
-		var blocks []interface{}
-		if b, ok := chainData["TokenChainData"].([]interface{}); ok {
-			blocks = b
-		} else if b, ok := chainData["blocks"].([]interface{}); ok {
-			blocks = b
-		} else {
-			log.Printf("⚠️ No blocks found for token %s", token.TokenID)
-			continue
-		}
+// 		var blocks []interface{}
+// 		if b, ok := chainData["TokenChainData"].([]interface{}); ok {
+// 			blocks = b
+// 		} else if b, ok := chainData["blocks"].([]interface{}); ok {
+// 			blocks = b
+// 		} else {
+// 			log.Printf("⚠️ No blocks found for token %s", token.TokenID)
+// 			continue
+// 		}
 
-		for _, blk := range blocks {
-			blockMap, ok := blk.(map[string]interface{})
-			if !ok {
-				continue
-			}
+// 		for _, blk := range blocks {
+// 			blockMap, ok := blk.(map[string]interface{})
+// 			if !ok {
+// 				continue
+// 			}
 
-			// Always store in AllBlocks first
-			StoreBlockInAllBlocks(blockMap)
+// 			// Always store in AllBlocks first
+// 			StoreBlockInAllBlocks(blockMap)
 
-			// Extract transaction type
-			transType, _ := blockMap["TCTransTypeKey"].(string)
+// 			// Extract transaction type
+// 			transType, _ := blockMap["TCTransTypeKey"].(string)
 
-			// Smart Contract (Deploy or Execute)
-			if token.TokenType == "SC" {
-				switch transType {
-				case "09", "9":
-					StoreSCDeployBlock(blockMap)
-				case "10":
-					StoreSCExecuteBlock(blockMap)
-				default:
-					log.Printf("⚠️ Ignoring non-SC block type %s for token %s", transType, token.TokenID)
-				}
-				continue
-			}
+// 			// Smart Contract (Deploy or Execute)
+// 			if token.TokenType == "SC" {
+// 				switch transType {
+// 				case "09", "9":
+// 					StoreSCDeployBlock(blockMap)
+// 				case "10":
+// 					StoreSCExecuteBlock(blockMap)
+// 				default:
+// 					log.Printf("⚠️ Ignoring non-SC block type %s for token %s", transType, token.TokenID)
+// 				}
+// 				continue
+// 			}
 
-			// Regular tokens (FT, NFT, RBT)
-			switch transType {
-			case "02", "2":
-				StoreTransferBlock(blockMap)
-			case "08", "13":
-				StoreBurntBlock(blockMap)
-			default:
-				log.Printf("⚠️ Unknown block type %s for token %s", transType, token.TokenID)
-			}
-		}
+// 			// Regular tokens (FT, NFT, RBT)
+// 			switch transType {
+// 			case "02", "2":
+// 				StoreTransferBlock(blockMap)
+// 			case "08", "13":
+// 				StoreBurntBlock(blockMap)
+// 			default:
+// 				log.Printf("⚠️ Unknown block type %s for token %s", transType, token.TokenID)
+// 			}
+// 		}
 
-		// Small delay between tokens to avoid overloading node
-		time.Sleep(100 * time.Millisecond)
-	}
+// 		// Small delay between tokens to avoid overloading node
+// 		time.Sleep(100 * time.Millisecond)
+// 	}
 
-	log.Println("✅ Finished fetching all token chains and storing block data")
-	return nil
-}
+// 	log.Println("✅ Finished fetching all token chains and storing block data")
+// 	return nil
+// }
 
 // StoreTransferBlock handles inserting a single transfer-type block into DB
 func StoreTransferBlock(blockMap map[string]interface{}) {
@@ -645,7 +647,7 @@ func StoreTransferBlock(blockMap map[string]interface{}) {
 	}).Create(&tb).Error; err != nil && !errors.Is(err, gorm.ErrDuplicatedKey) {
 		log.Printf("❌ Failed to store transfer block %v: %v", tb.BlockHash, err)
 	}
-	time.Sleep(100 * time.Millisecond) // avoid hammering full node
+	// time.Sleep(100 * time.Millisecond) // avoid hammering full node
 	log.Println("Transfer block stored")
 }
 
@@ -696,7 +698,7 @@ func StoreBurntBlock(blockMap map[string]interface{}) {
 		log.Printf("❌ Failed to store burnt block %v: %v", bb.BlockHash, err)
 	}
 
-	time.Sleep(100 * time.Millisecond) // avoid hammering full node
+	// time.Sleep(100 * time.Millisecond) // avoid hammering full node
 	log.Println("✅ Burnt block stored:", bb.BlockHash)
 }
 
@@ -933,4 +935,208 @@ func sliceStringPtr(v interface{}) *[]string {
 		}
 	}
 	return &strs
+}
+
+/// parallel processing test
+
+// FetchAllTokenChainFromFullNode syncs token chains in parallel based on system capacity
+func FetchAllTokenChainFromFullNode() error {
+	var tokens []models.TokenType
+
+	// Fetch all tokens from DB
+	if err := database.DB.Find(&tokens).Error; err != nil {
+		log.Fatalf("❌ Failed to fetch tokens from DB: %v", err)
+		return err
+	}
+
+	if len(tokens) == 0 {
+		log.Println("⚠️ No tokens found to sync")
+		return nil
+	}
+
+	// Calculate optimal concurrency based on system resources
+	numWorkers := calculateOptimalWorkers()
+	log.Printf("ℹ️ Starting sync with %d parallel workers for %d tokens", numWorkers, len(tokens))
+
+	// Use semaphore pattern to limit concurrent workers
+	semaphore := make(chan struct{}, numWorkers)
+	var wg sync.WaitGroup
+	errChan := make(chan error, len(tokens))
+
+	for _, token := range tokens {
+		wg.Add(1)
+		go func(t models.TokenType) {
+			defer wg.Done()
+
+			// Acquire semaphore
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			if err := fetchAndStoreTokenChain(t); err != nil {
+				errChan <- err
+			}
+		}(token)
+	}
+
+	// Wait for all goroutines to complete
+	wg.Wait()
+	close(errChan)
+
+	// Collect errors
+	var errs []error
+	for err := range errChan {
+		errs = append(errs, err)
+	}
+
+	if len(errs) > 0 {
+		log.Printf("⚠️ Completed with %d errors out of %d tokens", len(errs), len(tokens))
+	}
+
+	log.Println("✅ Finished fetching all token chains and storing block data")
+	return nil
+}
+
+// calculateOptimalWorkers determines concurrency based on CPU cores and memory
+func calculateOptimalWorkers() int {
+	numCPU := runtime.NumCPU()
+
+	// Conservative approach: use 2x CPU cores, capped at 32
+	// Adjust multiplier (1x, 2x, 4x) based on your workload and memory
+	workers := numCPU * 2
+	if workers > 32 {
+		workers = 32
+	}
+	if workers < 1 {
+		workers = 1
+	}
+
+	return workers
+}
+
+// fetchAndStoreTokenChain handles individual token chain syncing
+func fetchAndStoreTokenChain(token models.TokenType) error {
+	apiURL := fmt.Sprintf("%s/api/de-exp/get-token-chain?tokenID=%s&tokenType=%s",
+		config.RubixNodeURL, token.TokenID, token.TokenType)
+
+	resp, err := http.Get(apiURL)
+	if err != nil {
+		log.Printf("❌ Error fetching chain for %s: %v", token.TokenID, err)
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("❌ Bad status code %d for token %s", resp.StatusCode, token.TokenID)
+		return fmt.Errorf("bad status code: %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("❌ Error reading response for %s: %v", token.TokenID, err)
+		return err
+	}
+
+	var chainData map[string]interface{}
+	if err := json.Unmarshal(body, &chainData); err != nil {
+		log.Printf("❌ Error decoding JSON for %s: %v", token.TokenID, err)
+		return err
+	}
+
+	// Extract blocks
+	var blocks []interface{}
+	if b, ok := chainData["TokenChainData"].([]interface{}); ok {
+		blocks = b
+	} else if b, ok := chainData["blocks"].([]interface{}); ok {
+		blocks = b
+	} else {
+		log.Printf("⚠️ No blocks found for token %s", token.TokenID)
+		return nil
+	}
+
+	// Process blocks
+	if err := processAndStoreBlocks(token, blocks); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// processAndStoreBlocks handles block classification and parallel storage
+func processAndStoreBlocks(token models.TokenType, blocks []interface{}) error {
+	// Determine optimal concurrency for block processing
+	blockWorkers := calculateBlockWorkers(len(blocks))
+	blockSemaphore := make(chan struct{}, blockWorkers)
+	var wg sync.WaitGroup
+	errChan := make(chan error, len(blocks))
+
+	for _, blk := range blocks {
+		wg.Add(1)
+		go func(blockData interface{}) {
+			defer wg.Done()
+
+			blockSemaphore <- struct{}{}
+			defer func() { <-blockSemaphore }()
+
+			blockMap, ok := blockData.(map[string]interface{})
+			if !ok {
+				return
+			}
+
+			// Always store in AllBlocks first
+			StoreBlockInAllBlocks(blockMap)
+
+			// Extract transaction type
+			transType, _ := blockMap["TCTransTypeKey"].(string)
+
+			// Smart Contract (Deploy or Execute)
+			if token.TokenType == "SC" {
+				switch transType {
+				case "09", "9":
+					StoreSCDeployBlock(blockMap)
+				case "10":
+					StoreSCExecuteBlock(blockMap)
+				default:
+					log.Printf("⚠️ Ignoring non-SC block type %s for token %s", transType, token.TokenID)
+				}
+				return
+			}
+
+			// Regular tokens (FT, NFT, RBT)
+			switch transType {
+			case "02", "2":
+				StoreTransferBlock(blockMap)
+			case "08", "13":
+				StoreBurntBlock(blockMap)
+			default:
+				log.Printf("⚠️ Unknown block type %s for token %s", transType, token.TokenID)
+			}
+		}(blk)
+	}
+
+	wg.Wait()
+	close(errChan)
+
+	return nil
+}
+
+// calculateBlockWorkers determines concurrency for block processing
+func calculateBlockWorkers(blockCount int) int {
+	numCPU := runtime.NumCPU()
+
+	// Use lower concurrency for block processing to avoid DB contention
+	// 1x CPU cores for block DB writes, minimum 2, maximum 16
+	workers := numCPU
+	if workers > 16 {
+		workers = 16
+	}
+	if workers < 2 {
+		workers = 2
+	}
+
+	// Scale down if fewer blocks than workers
+	if blockCount < workers {
+		workers = blockCount
+	}
+
+	return workers
 }
