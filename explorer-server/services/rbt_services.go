@@ -65,18 +65,18 @@ func GetRBTListFromDID(did string, limit, page int) ([]models.RBT, int64, error)
 	var rbts []models.RBT
 	var totalCount int64
 
-	// Count total records for the DID
+	// Count total records for the DID with TokenStatus = 0
 	if err := database.DB.Model(&models.RBT{}).
-		Where("owner_did = ?", did).
+		Where("owner_did = ? AND token_status = ?", did, 0).
 		Count(&totalCount).Error; err != nil {
 		return nil, 0, err
 	}
 
-	// Apply pagination
+	// Apply pagination and fetch only TokenStatus = 0
 	offset := (page - 1) * limit
 
 	if err := database.DB.
-		Where("owner_did = ?", did).
+		Where("owner_did = ? AND token_status = ?", did, 0).
 		Limit(limit).
 		Offset(offset).
 		Find(&rbts).Error; err != nil {
@@ -85,6 +85,7 @@ func GetRBTListFromDID(did string, limit, page int) ([]models.RBT, int64, error)
 
 	return rbts, totalCount, nil
 }
+
 // // GetRBTInfoFromRBTID fetches a single RBT by its ID
 // func GetRBTInfoFromRBTID(rbtID string) (*models.RBT, error) {
 // 	var rbt models.RBT
