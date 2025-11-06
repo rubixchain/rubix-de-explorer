@@ -45,30 +45,30 @@ func main() {
 	//Sync Missing amount field in transfer block table
 	go services.SyncMissingTxnAmounts()
 
-	RBTfetchErr := services.FetchAndStoreAllRBTsFromFullNodeDB()
-	if RBTfetchErr != nil {
-		log.Printf("Failed to call `FetchAndStoreAllRBTsFromFullNodeDB`, err: %v", RBTfetchErr)
-	}
+	// RBTfetchErr := services.FetchAndStoreAllRBTsFromFullNodeDB()
+	// if RBTfetchErr != nil {
+	// 	log.Printf("Failed to call `FetchAndStoreAllRBTsFromFullNodeDB`, err: %v", RBTfetchErr)
+	// }
 
-	FTfetchErr := services.FetchAndStoreAllFTsFromFullNodeDB()
-	if FTfetchErr != nil {
-		log.Printf("Failed to call `FetchAndStoreAllFTsFromFullNodeDB`, err: %v", FTfetchErr)
-	}
+	// FTfetchErr := services.FetchAndStoreAllFTsFromFullNodeDB()
+	// if FTfetchErr != nil {
+	// 	log.Printf("Failed to call `FetchAndStoreAllFTsFromFullNodeDB`, err: %v", FTfetchErr)
+	// }
 
-	NFTfetchErr := services.FetchAndStoreAllNFTsFromFullNodeDB()
-	if NFTfetchErr != nil {
-		log.Printf("Failed to call `FetchAndStoreAllNFTsFromFullNodeDB`, err: %v", NFTfetchErr)
-	}
+	// NFTfetchErr := services.FetchAndStoreAllNFTsFromFullNodeDB()
+	// if NFTfetchErr != nil {
+	// 	log.Printf("Failed to call `FetchAndStoreAllNFTsFromFullNodeDB`, err: %v", NFTfetchErr)
+	// }
 
-	SCfetchErr := services.FetchAndStoreAllSCsFromFullNodeDB()
-	if SCfetchErr != nil {
-		log.Printf("Failed to call `FetchAndStoreAllSCsFromFullNodeDB`, err: %v", SCfetchErr)
-	}
+	// SCfetchErr := services.FetchAndStoreAllSCsFromFullNodeDB()
+	// if SCfetchErr != nil {
+	// 	log.Printf("Failed to call `FetchAndStoreAllSCsFromFullNodeDB`, err: %v", SCfetchErr)
+	// }
 
-	FetchTokenChainErr := services.FetchAllTokenChainFromFullNode()
-	if FetchTokenChainErr != nil {
-		log.Printf("Failed to call `FetchAllTokenChainFromFullNode`, err: %v", FetchTokenChainErr)
-	}
+	// FetchTokenChainErr := services.FetchAllTokenChainFromFullNode()
+	// if FetchTokenChainErr != nil {
+	// 	log.Printf("Failed to call `FetchAllTokenChainFromFullNode`, err: %v", FetchTokenChainErr)
+	// }
 
 	// Setup router
 	r := router.NewRouter()
