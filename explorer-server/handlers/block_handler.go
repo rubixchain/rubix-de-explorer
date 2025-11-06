@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/http"
 	"strconv"
-
 	"explorer-server/services"
 )
 
@@ -135,14 +134,13 @@ func GetBurntBlockList(w http.ResponseWriter, r *http.Request) {
 // UpdateBlocksHandler handles block updates pushed from the full node
 func UpdateBlocksHandler(w http.ResponseWriter, r *http.Request) {
 	var block map[string]interface{}
-
 	// Decode incoming JSON body
 	if err := json.NewDecoder(r.Body).Decode(&block); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
 
-	log.Println("✅ Received block from fullnode:")
+	log.Println("✅ Received block from fullnode:", block)
 
 	// Process the incoming block
 	services.UpdateBlocks(block)
