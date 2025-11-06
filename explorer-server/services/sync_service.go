@@ -664,7 +664,15 @@ func StoreBurntBlock(blockMap map[string]interface{}) {
 	if comment, ok := transInfo["TICommentKey"].(string); ok {
 		re := regexp.MustCompile(`\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}`)
 		if match := re.FindString(comment); match != "" {
-			if t, err := time.Parse("2006-01-02 15:04:05", match); err == nil {
+			// Load IST timezone (UTC+5:30)
+			ist, err := time.LoadLocation("Asia/Kolkata")
+			if err != nil {
+				log.Printf("⚠️ Failed to load IST timezone: %v", err)
+				ist = time.FixedZone("IST", 5*3600+30*60) // fallback to fixed offset
+			}
+			
+			// Parse the time as IST, then convert to Unix epoch (which is always UTC)
+			if t, err := time.ParseInLocation("2006-01-02 15:04:05", match, ist); err == nil {
 				val := t.Unix()
 				epoch = &val
 			}
@@ -698,7 +706,6 @@ func StoreBurntBlock(blockMap map[string]interface{}) {
 		log.Printf("❌ Failed to store burnt block %v: %v", bb.BlockHash, err)
 	}
 
-	// time.Sleep(100 * time.Millisecond) // avoid hammering full node
 	log.Println("✅ Burnt block stored:", bb.BlockHash)
 }
 
