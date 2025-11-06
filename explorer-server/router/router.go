@@ -53,5 +53,8 @@ func NewRouter() *mux.Router {
 	//Block Updation endpoint
 	r.HandleFunc("/api/block-update", handlers.UpdateBlocksHandler).Methods(http.MethodPost)
 
+	//Token Updation endpoint
+	r.HandleFunc("/api/token-update", handlers.UpdateTokensHandler).Methods(http.MethodPost)
+
 	return r
 }

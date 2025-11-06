@@ -947,6 +947,74 @@ func sliceStringPtr(v interface{}) *[]string {
 /// parallel processing test
 
 // FetchAllTokenChainFromFullNode syncs token chains in parallel based on system capacity
+// ResourceMonitor tracks VM resources and adjusts concurrency dynamically
+type ResourceMonitor struct {
+	mu             sync.RWMutex
+	maxWorkers     int
+	currentWorkers int
+	cpuThreshold   float64
+	memThreshold   uint64
+	lastAdjustTime time.Time
+	adjustInterval time.Duration
+}
+
+// NewResourceMonitor creates a new resource monitor
+func NewResourceMonitor(maxWorkers int) *ResourceMonitor {
+	return &ResourceMonitor{
+		maxWorkers:     maxWorkers,
+		cpuThreshold:   85.0,                   // 85% CPU usage threshold
+		memThreshold:   3 * 1024 * 1024 * 1024, // 3GB threshold
+		lastAdjustTime: time.Now(),
+		adjustInterval: 5 * time.Second,
+	}
+}
+
+// AdjustConcurrency checks resources and adjusts worker count
+func (rm *ResourceMonitor) AdjustConcurrency() int {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+
+	// Check adjustment interval
+	if time.Since(rm.lastAdjustTime) < rm.adjustInterval {
+		return rm.currentWorkers
+	}
+
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+
+	allocMB := m.Alloc / 1024 / 1024
+	totalMB := m.TotalAlloc / 1024 / 1024
+	sysMB := m.Sys / 1024 / 1024
+
+	// Get current goroutine count
+	goroutines := runtime.NumGoroutine()
+
+	// Dynamic adjustment logic
+	if allocMB > 2048 || goroutines > 10000 {
+		// High memory usage - reduce workers
+		if rm.currentWorkers > 2 {
+			rm.currentWorkers--
+			log.Printf("⚠️ High memory usage (%dMB alloc, %d goroutines). Reduced workers to %d",
+				allocMB, goroutines, rm.currentWorkers)
+		}
+	} else if allocMB < 1024 && goroutines < 5000 {
+		// Low memory usage - increase workers
+		if rm.currentWorkers < rm.maxWorkers {
+			rm.currentWorkers++
+			log.Printf("✅ Low memory usage (%dMB alloc, %d goroutines). Increased workers to %d",
+				allocMB, goroutines, rm.currentWorkers)
+		}
+	}
+
+	rm.lastAdjustTime = time.Now()
+
+	log.Printf("📊 Memory: Alloc=%dMB, TotalAlloc=%dMB, Sys=%dMB | Goroutines=%d | Active Workers=%d",
+		allocMB, totalMB, sysMB, goroutines, rm.currentWorkers)
+
+	return rm.currentWorkers
+}
+
+// FetchAllTokenChainFromFullNode syncs token chains in parallel with resource management
 func FetchAllTokenChainFromFullNode() error {
 	var tokens []models.TokenType
 
@@ -961,28 +1029,74 @@ func FetchAllTokenChainFromFullNode() error {
 		return nil
 	}
 
-	// Calculate optimal concurrency based on system resources
-	numWorkers := calculateOptimalWorkers()
-	log.Printf("ℹ️ Starting sync with %d parallel workers for %d tokens", numWorkers, len(tokens))
+	// Calculate initial concurrency
+	initialWorkers := calculateOptimalWorkers()
+	log.Printf("ℹ️ Starting sync with %d initial workers for %d tokens", initialWorkers, len(tokens))
 
-	// Use semaphore pattern to limit concurrent workers
-	semaphore := make(chan struct{}, numWorkers)
+	// Create resource monitor
+	monitor := NewResourceMonitor(initialWorkers)
+	monitor.currentWorkers = initialWorkers
+
+	// Adaptive semaphore that adjusts size
+	tokenSemaphore := make(chan struct{}, initialWorkers)
+
 	var wg sync.WaitGroup
 	errChan := make(chan error, len(tokens))
+	successCount := 0
+	failureCount := 0
+	var resultMu sync.Mutex
 
-	for _, token := range tokens {
+	// Ticker for resource monitoring
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	// Monitor goroutine
+	go func() {
+		for range ticker.C {
+			monitor.AdjustConcurrency()
+		}
+	}()
+
+	for idx, token := range tokens {
 		wg.Add(1)
-		go func(t models.TokenType) {
+		go func(t models.TokenType, index int) {
 			defer wg.Done()
 
-			// Acquire semaphore
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
+			// Periodically check and adjust concurrency
+			if index%100 == 0 {
+				currentWorkers := monitor.AdjustConcurrency()
+				// Adjust semaphore size if needed (drain and refill)
+				if currentWorkers != len(tokenSemaphore) {
+					log.Printf("🔄 Adjusting concurrency from %d to %d", len(tokenSemaphore), currentWorkers)
+				}
+			}
+
+			// Acquire token
+			tokenSemaphore <- struct{}{}
+			defer func() { <-tokenSemaphore }()
 
 			if err := fetchAndStoreTokenChain(t); err != nil {
 				errChan <- err
+				resultMu.Lock()
+				failureCount++
+				resultMu.Unlock()
+			} else {
+				resultMu.Lock()
+				successCount++
+				resultMu.Unlock()
 			}
-		}(token)
+
+			// Log progress every 1000 tokens
+			if (index+1)%1000 == 0 {
+				resultMu.Lock()
+				log.Printf("📈 Progress: %d/%d tokens processed (Success: %d, Failures: %d)",
+					index+1, len(tokens), successCount, failureCount)
+				resultMu.Unlock()
+			}
+
+			// Small adaptive delay to prevent node hammering
+			time.Sleep(5 * time.Millisecond)
+		}(token, idx)
 	}
 
 	// Wait for all goroutines to complete
@@ -999,41 +1113,84 @@ func FetchAllTokenChainFromFullNode() error {
 		log.Printf("⚠️ Completed with %d errors out of %d tokens", len(errs), len(tokens))
 	}
 
-	log.Println("✅ Finished fetching all token chains and storing block data")
+	log.Printf("✅ Finished fetching all token chains and storing block data (Success: %d, Failures: %d)",
+		successCount, failureCount)
 	return nil
 }
 
-// calculateOptimalWorkers determines concurrency based on CPU cores and memory
+// calculateOptimalWorkers determines initial concurrency based on CPU cores and memory
 func calculateOptimalWorkers() int {
 	numCPU := runtime.NumCPU()
 
-	// Conservative approach: use 2x CPU cores, capped at 32
-	// Adjust multiplier (1x, 2x, 4x) based on your workload and memory
-	workers := numCPU * 2
-	if workers > 32 {
-		workers = 32
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	totalMemMB := m.Sys / 1024 / 1024
+
+	// Conservative calculation based on available resources
+	// For 4GB+ systems: use more workers, for smaller systems use fewer
+	workers := numCPU
+
+	if totalMemMB < 2048 {
+		// Less than 2GB available - be conservative
+		workers = numCPU
+	} else if totalMemMB < 4096 {
+		// 2-4GB available
+		workers = numCPU * 2
+	} else {
+		// 4GB+ available
+		workers = numCPU * 3
 	}
-	if workers < 1 {
-		workers = 1
+
+	// Hard caps
+	if workers > 16 {
+		workers = 16
 	}
+	if workers < 2 {
+		workers = 2
+	}
+
+	log.Printf("📊 System Info - CPU Cores: %d, Available Memory: %dMB, Initial Workers: %d",
+		numCPU, totalMemMB, workers)
 
 	return workers
 }
 
-// fetchAndStoreTokenChain handles individual token chain syncing
+// fetchAndStoreTokenChain handles individual token chain syncing with retry logic
 func fetchAndStoreTokenChain(token models.TokenType) error {
 	apiURL := fmt.Sprintf("%s/api/de-exp/get-token-chain?tokenID=%s&tokenType=%s",
 		config.RubixNodeURL, token.TokenID, token.TokenType)
 
-	resp, err := http.Get(apiURL)
+	// Retry logic with exponential backoff
+	maxRetries := 3
+	var resp *http.Response
+	var err error
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		resp, err = http.Get(apiURL)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			break
+		}
+
+		if err != nil {
+			log.Printf("❌ Attempt %d: Error fetching chain for %s: %v", attempt+1, token.TokenID, err)
+		} else if resp.StatusCode != http.StatusOK {
+			log.Printf("❌ Attempt %d: Bad status %d for token %s", attempt+1, resp.StatusCode, token.TokenID)
+			resp.Body.Close()
+		}
+
+		if attempt < maxRetries-1 {
+			backoffTime := time.Duration(1<<uint(attempt)) * 500 * time.Millisecond
+			time.Sleep(backoffTime)
+		}
+	}
+
 	if err != nil {
-		log.Printf("❌ Error fetching chain for %s: %v", token.TokenID, err)
 		return err
 	}
+
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("❌ Bad status code %d for token %s", resp.StatusCode, token.TokenID)
 		return fmt.Errorf("bad status code: %d", resp.StatusCode)
 	}
 
@@ -1060,7 +1217,7 @@ func fetchAndStoreTokenChain(token models.TokenType) error {
 		return nil
 	}
 
-	// Process blocks
+	// Process blocks with controlled concurrency
 	if err := processAndStoreBlocks(token, blocks); err != nil {
 		return err
 	}
@@ -1070,11 +1227,10 @@ func fetchAndStoreTokenChain(token models.TokenType) error {
 
 // processAndStoreBlocks handles block classification and parallel storage
 func processAndStoreBlocks(token models.TokenType, blocks []interface{}) error {
-	// Determine optimal concurrency for block processing
+	// Use lower concurrency for block processing (DB write-heavy)
 	blockWorkers := calculateBlockWorkers(len(blocks))
 	blockSemaphore := make(chan struct{}, blockWorkers)
 	var wg sync.WaitGroup
-	errChan := make(chan error, len(blocks))
 
 	for _, blk := range blocks {
 		wg.Add(1)
@@ -1117,12 +1273,13 @@ func processAndStoreBlocks(token models.TokenType, blocks []interface{}) error {
 			default:
 				log.Printf("⚠️ Unknown block type %s for token %s", transType, token.TokenID)
 			}
+
+			// Small delay between block writes to reduce DB contention
+			time.Sleep(2 * time.Millisecond)
 		}(blk)
 	}
 
 	wg.Wait()
-	close(errChan)
-
 	return nil
 }
 
@@ -1130,14 +1287,14 @@ func processAndStoreBlocks(token models.TokenType, blocks []interface{}) error {
 func calculateBlockWorkers(blockCount int) int {
 	numCPU := runtime.NumCPU()
 
-	// Use lower concurrency for block processing to avoid DB contention
-	// 1x CPU cores for block DB writes, minimum 2, maximum 16
-	workers := numCPU
-	if workers > 16 {
-		workers = 16
+	// Lower concurrency for block processing (heavy on DB writes)
+	// 1x CPU cores for block DB writes, minimum 1, maximum 8
+	workers := numCPU / 2
+	if workers < 1 {
+		workers = 1
 	}
-	if workers < 2 {
-		workers = 2
+	if workers > 8 {
+		workers = 8
 	}
 
 	// Scale down if fewer blocks than workers
