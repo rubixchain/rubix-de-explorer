@@ -57,7 +57,6 @@ func GetTransferBlocksList(limit, page int) (model.TransactionsResponse, error) 
 	return response, nil
 }
 
-
 func GetTransferBlockInfoFromTxnID(hash string) (models.TransferBlocks, error) {
 	var block models.TransferBlocks
 
@@ -184,6 +183,7 @@ func GetBurntBlockList(limit, page int) (interface{}, error) {
 
 	// Fetch all blocks with pagination
 	if err := database.DB.
+		Order("epoch DESC").
 		Limit(int(limit)).
 		Offset(int(offset)).
 		Find(&blocks).Error; err != nil {
@@ -198,7 +198,7 @@ func GetBurntBlockList(limit, page int) (interface{}, error) {
 	// Wrap in response struct
 	response := model.BurntBlocksListResponse{
 		BurntBlocks: blocks,
-		Count : count,
+		Count:       count,
 	}
 
 	return response, nil
