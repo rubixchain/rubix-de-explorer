@@ -61,7 +61,8 @@ func UpdateRBTToken(tokenData interface{}) error {
 	}
 
 	var existingRBT models.RBT
-	result := database.DB.Where("token_id = ?", rbt.TokenID).First(&existingRBT)
+	// Query using the actual column name from schema: rbt_id (mapped from TokenID field)
+	result := database.DB.Where("rbt_id = ?", rbt.TokenID).First(&existingRBT)
 
 	isNewToken := errors.Is(result.Error, gorm.ErrRecordNotFound)
 
@@ -129,6 +130,7 @@ func UpdateFTToken(tokenData interface{}) error {
 	}
 
 	var existingFT models.FT
+	// Query using the actual column name from schema: ft_id (mapped from FtID field)
 	result := database.DB.Where("ft_id = ?", ft.TokenID).First(&existingFT)
 
 	isNewToken := errors.Is(result.Error, gorm.ErrRecordNotFound)
@@ -195,6 +197,7 @@ func UpdateNFTToken(tokenData interface{}) error {
 	}
 
 	var existingNFT models.NFT
+	// Query using the actual column name from schema: nft_id (mapped from TokenID field)
 	result := database.DB.Where("nft_id = ?", nft.TokenID).First(&existingNFT)
 
 	isNewToken := errors.Is(result.Error, gorm.ErrRecordNotFound)
@@ -258,6 +261,7 @@ func UpdateSCToken(tokenData interface{}) error {
 	}
 
 	var existingSC models.SmartContract
+	// Query using contract_id column (primary key in schema)
 	result := database.DB.Where("contract_id = ?", sc.SmartContractHash).First(&existingSC)
 
 	isNewToken := errors.Is(result.Error, gorm.ErrRecordNotFound)
