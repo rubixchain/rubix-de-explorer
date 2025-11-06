@@ -40,11 +40,13 @@ func UpdateTokens(tableName string, tokenData interface{}) {
 // UpdateRBTToken updates RBT token or creates it if not exists, updates token_type and DID tables
 func UpdateRBTToken(tokenData interface{}) error {
 	var rbt RBT
+	log.Printf("inside the updateRBT")
 	jsonBytes, err := json.Marshal(tokenData)
 	if err != nil {
 		log.Printf("❌ Failed to marshal RBT data: %v", err)
 		return err
 	}
+	log.Printf("inside the updateRBT")
 
 	if err := json.Unmarshal(jsonBytes, &rbt); err != nil {
 		log.Printf("❌ Failed to unmarshal RBT data: %v", err)
@@ -59,12 +61,14 @@ func UpdateRBTToken(tokenData interface{}) error {
 		BlockHeight: fmt.Sprintf("%d", rbt.BlockHeight),
 		TokenStatus: rbt.TokenStatus,
 	}
+	log.Printf("updateData", updateData)
 
 	var existingRBT models.RBT
 	// Query using the actual column name from schema: rbt_id (mapped from TokenID field)
 	result := database.DB.Where("rbt_id = ?", rbt.TokenID).First(&existingRBT)
 
 	isNewToken := errors.Is(result.Error, gorm.ErrRecordNotFound)
+	log.Printf("isNewToken", isNewToken)
 
 	// Upsert RBT token
 	if isNewToken {
