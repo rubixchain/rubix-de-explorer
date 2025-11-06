@@ -2,20 +2,23 @@ package services
 
 import (
 	"encoding/json"
+	"explorer-server/config"
 	"explorer-server/database"
 	"explorer-server/database/models"
 	"explorer-server/model"
 	"explorer-server/util"
 	"fmt"
+	"io/ioutil"
+	"net/http"
 )
 
-// GetTxnsCount returns the total number of Blocks in the database
+// GetTxnsCount returns total number of RBT records
 func GetTxnsCount() (int64, error) {
 	var count int64
 	if err := database.DB.Model(&models.RBT{}).Count(&count).Error; err != nil {
 		return 0, err
 	}
-	fmt.Printf("count", count)
+	fmt.Printf("Total RBT count: %d\n", count)
 	return count, nil
 }
 
@@ -23,37 +26,40 @@ func GetTransferBlocksList(limit, page int) (model.TransactionsResponse, error) 
 	var blocks []models.TransferBlocks
 	var response model.TransactionsResponse
 
-	// Calculate correct offset
 	offset := (page - 1) * limit
 
-	// Fetch paginated data
+	// Fetch paginated blocks
 	if err := database.DB.
+		Order("epoch DESC").
 		Limit(limit).
 		Offset(offset).
-		Order("epoch DESC"). // optional: keeps pagination consistent
 		Find(&blocks).Error; err != nil {
-		return model.TransactionsResponse{}, err
+		return response, err
 	}
 
 	// Count total records
 	var count int64
 	if err := database.DB.Model(&models.TransferBlocks{}).Count(&count).Error; err != nil {
-		return model.TransactionsResponse{}, err
+		return response, err
 	}
 
-	// Map DB model to response model
 	for _, b := range blocks {
-		tx := model.TransactionResponse{
+		if (b.Amount == nil || *b.Amount == 0) && b.TxnID != nil && *b.TxnID != "" {
+			if newAmt := fetchTxnAmountFromFullNode(*b.TxnID); newAmt != nil {
+				b.Amount = newAmt
+				database.DB.Model(&b).Update("amount", *newAmt)
+			}
+		}
+
+		response.TransactionsResponse = append(response.TransactionsResponse, model.TransactionResponse{
 			TxnHash:     deref(b.TxnID),
 			TxnType:     deref(b.TxnType),
 			Amount:      derefFloat(b.Amount),
 			SenderDID:   deref(b.SenderDID),
 			ReceiverDID: deref(b.ReceiverDID),
-			Epoch: b.Epoch,
-		}
-		response.TransactionsResponse = append(response.TransactionsResponse, tx)
+			Epoch:       b.Epoch,
+		})
 	}
-
 	response.Count = count
 	return response, nil
 }
@@ -61,37 +67,21 @@ func GetTransferBlocksList(limit, page int) (model.TransactionsResponse, error) 
 func GetTransferBlockInfoFromTxnID(hash string) (models.TransferBlocks, error) {
 	var block models.TransferBlocks
 
-	// Fetch block where block_hash matches
-	if err := database.DB.
-		Where("txn_id = ?", hash).
-		First(&block).Error; err != nil {
-		return models.TransferBlocks{}, err
+	if err := database.DB.Where("txn_id = ?", hash).First(&block).Error; err != nil {
+		return block, err
 	}
 
-	// Unmarshal JSON fields
-	var tokens []string
-	if err := json.Unmarshal(block.Tokens, &tokens); err != nil {
-		fmt.Println("Error unmarshaling tokens:", err)
+	// Fetch missing amount if needed
+	if (block.Amount == nil || *block.Amount == 0) && block.TxnID != nil && *block.TxnID != "" {
+		if newAmt := fetchTxnAmountFromFullNode(*block.TxnID); newAmt != nil {
+			block.Amount = newAmt
+			if err := database.DB.Model(&block).Update("amount", *newAmt).Error; err != nil {
+				fmt.Printf("⚠️ Failed to update amount in DB for txnID %s: %v\n", *block.TxnID, err)
+			} else {
+				fmt.Printf("✅ Updated amount %.6f for txnID %s\n", *newAmt, *block.TxnID)
+			}
+		}
 	}
-
-	var validatorMap map[string][]string
-	if err := json.Unmarshal(block.ValidatorPledgeMap, &validatorMap); err != nil {
-		fmt.Println("Error unmarshaling validator map:", err)
-	}
-
-	// Print nicely
-	fmt.Printf(
-		"BlockHash: %s\nSender: %s\nReceiver: %s\nTxnType: %s\nAmount: %v\nEpoch: %v\nTokens: %v\nValidatorPledgeMap: %v\nTxnID: %s\n",
-		block.BlockHash, // already string
-		derefStringPtr(block.SenderDID),
-		derefStringPtr(block.ReceiverDID),
-		derefStringPtr(block.TxnType),
-		derefFloatPtr(block.Amount),
-		derefInt64Ptr(block.Epoch),
-		tokens,
-		validatorMap,
-		derefStringPtr(block.TxnID),
-	)
 
 	return block, nil
 }
@@ -99,39 +89,70 @@ func GetTransferBlockInfoFromTxnID(hash string) (models.TransferBlocks, error) {
 func GetTransferBlockInfoFromBlockHash(hash string) (models.TransferBlocks, error) {
 	var block models.TransferBlocks
 
-	// Fetch block where block_hash matches
-	if err := database.DB.
-		Where("block_hash = ?", hash).
-		First(&block).Error; err != nil {
-		return models.TransferBlocks{}, err
+	if err := database.DB.Where("block_hash = ?", hash).First(&block).Error; err != nil {
+		return block, err
 	}
 
-	// Unmarshal JSON fields
-	var tokens []string
-	if err := json.Unmarshal(block.Tokens, &tokens); err != nil {
-		fmt.Println("Error unmarshaling tokens:", err)
+	if (block.Amount == nil || *block.Amount == 0) && block.TxnID != nil && *block.TxnID != "" {
+		apiURL := fmt.Sprintf("%s/api/de-exp/get-txn-amount-by-txnID?txnID=%s", config.RubixNodeURL, *block.TxnID)
+		resp, err := http.Get(apiURL)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			defer resp.Body.Close()
+			var result struct {
+				Status  bool   `json:"status"`
+				Message string `json:"message"`
+				Result  struct {
+					TransactionID    string  `json:"TransactionID"`
+					TransactionValue float64 `json:"TransactionValue"`
+					BlockHash        string  `json:"BlockHash"`
+				} `json:"result"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&result); err == nil && result.Status && result.Result.TransactionValue != 0 {
+				block.Amount = &result.Result.TransactionValue
+				database.DB.Model(&models.TransferBlocks{}).Where("txn_id = ?", block.TxnID).Update("amount", block.Amount)
+			}
+		}
 	}
-
-	var validatorMap map[string][]string
-	if err := json.Unmarshal(block.ValidatorPledgeMap, &validatorMap); err != nil {
-		fmt.Println("Error unmarshaling validator map:", err)
-	}
-
-	// Print nicely
-	fmt.Printf(
-		"BlockHash: %s\nSender: %s\nReceiver: %s\nTxnType: %s\nAmount: %v\nEpoch: %v\nTokens: %v\nValidatorPledgeMap: %v\nTxnID: %s\n",
-		block.BlockHash, // already string
-		derefStringPtr(block.SenderDID),
-		derefStringPtr(block.ReceiverDID),
-		derefStringPtr(block.TxnType),
-		derefFloatPtr(block.Amount),
-		derefInt64Ptr(block.Epoch),
-		tokens,
-		validatorMap,
-		derefStringPtr(block.TxnID),
-	)
 
 	return block, nil
+}
+
+func fetchTxnAmountFromFullNode(txnID string) *float64 {
+	url := fmt.Sprintf("%s/api/de-exp/get-txn-amount-by-txnID?txnID=%s", config.RubixNodeURL, txnID)
+	resp, err := http.Get(url)
+	if err != nil {
+		fmt.Printf("❌ Failed to call fullnode for txnID %s: %v\n", txnID, err)
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		fmt.Printf("⚠️ Fullnode API returned %d for txnID %s\n", resp.StatusCode, txnID)
+		return nil
+	}
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Printf("⚠️ Error reading response for txnID %s: %v\n", txnID, err)
+		return nil
+	}
+
+	var result struct {
+		Status  bool   `json:"status"`
+		Message string `json:"message"`
+		Result  struct {
+			TransactionID    string  `json:"TransactionID"`
+			TransactionValue float64 `json:"TransactionValue"`
+			BlockHash        string  `json:"BlockHash"`
+		} `json:"result"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil || !result.Status {
+		fmt.Printf("⚠️ Could not parse amount for txnID %s: %v\n", txnID, err)
+		return nil
+	}
+
+	return &result.Result.TransactionValue
 }
 
 func GetBlockType(txnId string) (int64, error) {

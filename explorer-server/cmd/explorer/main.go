@@ -42,6 +42,9 @@ func main() {
 	// insertDummyFTs()
 	// insertDummyAssetTypes() // 👈 Add this line
 
+	//Sync Missing amount field in transfer block table
+	go services.SyncMissingTxnAmounts()
+
 	RBTfetchErr := services.FetchAndStoreAllRBTsFromFullNodeDB()
 	if RBTfetchErr != nil {
 		log.Printf("Failed to call `FetchAndStoreAllRBTsFromFullNodeDB`, err: %v", RBTfetchErr)
