@@ -49,6 +49,7 @@ func GetTransferBlocksList(limit, page int) (model.TransactionsResponse, error) 
 			Amount:      derefFloat(b.Amount),
 			SenderDID:   deref(b.SenderDID),
 			ReceiverDID: deref(b.ReceiverDID),
+			Epoch: b.Epoch,
 		}
 		response.TransactionsResponse = append(response.TransactionsResponse, tx)
 	}
