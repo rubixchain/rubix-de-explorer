@@ -670,7 +670,7 @@ func StoreBurntBlock(blockMap map[string]interface{}) {
 				log.Printf("⚠️ Failed to load IST timezone: %v", err)
 				ist = time.FixedZone("IST", 5*3600+30*60) // fallback to fixed offset
 			}
-			
+
 			// Parse the time as IST, then convert to Unix epoch (which is always UTC)
 			if t, err := time.ParseInLocation("2006-01-02 15:04:05", match, ist); err == nil {
 				val := t.Unix()
@@ -1157,6 +1157,7 @@ func calculateOptimalWorkers() int {
 
 // fetchAndStoreTokenChain handles individual token chain syncing with retry logic
 func fetchAndStoreTokenChain(token models.TokenType) error {
+	fmt.Println("tokenInfo for getting tokenchain is:", token)
 	apiURL := fmt.Sprintf("%s/api/de-exp/get-token-chain?tokenID=%s&tokenType=%s",
 		config.RubixNodeURL, token.TokenID, token.TokenType)
 
