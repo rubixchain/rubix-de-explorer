@@ -68,6 +68,7 @@ func GetTokenChainFromTokenID(tokenID string) (map[string]interface{}, error) {
 	if err != nil {
 		return nil, fmt.Errorf("❌ error reading response for %s: %v", tokenID, err)
 	}
+	fmt.Println("RAW DATA:", string(body))
 
 	// Step 5: Decode JSON
 	var chainData map[string]interface{}
