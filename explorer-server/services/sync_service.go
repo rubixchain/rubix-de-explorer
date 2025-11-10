@@ -1160,7 +1160,7 @@ func fetchAndStoreTokenChain(token models.TokenType) error {
 	fmt.Println("tokenInfo for getting tokenchain is:", token)
 	apiURL := fmt.Sprintf("%s/api/de-exp/get-token-chain?tokenID=%s&tokenType=%s",
 		config.RubixNodeURL, token.TokenID, token.TokenType)
-
+	fmt.Println("API is:", apiURL)
 	// Retry logic with exponential backoff
 	maxRetries := 3
 	var resp *http.Response
