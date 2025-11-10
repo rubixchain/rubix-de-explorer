@@ -32,50 +32,49 @@ type TokenResponse struct {
 }
 
 type HolderResponse struct {
-	OwnerDID   string `json:"owner_did"`
-	TokenCount float64  `json:"token_count"`
+	OwnerDID   string  `json:"owner_did"`
+	TokenCount float64 `json:"token_count"`
 	// TotalTransactions int64 `json:"total_transactions"`
 }
 
 type HoldersResponse struct {
 	HoldersResponse []HolderResponse `json:"holders_response"`
-	Count int64 `json:"count"` 
+	Count           int64            `json:"count"`
 }
 
 type TransactionResponse struct {
-	TxnHash string    `json:"txn_hash"`
-	TxnType string    `json:"txn_type"`
-	Amount  float64   `json:"amount"`
-	Epoch   *int64 `json:"txn_time"`
-	SenderDID   string    `json:"sender_did"`
-	ReceiverDID string    `json:"receiver_did"`
+	TxnHash     string  `json:"txn_hash"`
+	TxnType     string  `json:"txn_type"`
+	Amount      float64 `json:"amount"`
+	Epoch       *int64  `json:"txn_time"`
+	SenderDID   string  `json:"sender_did"`
+	ReceiverDID string  `json:"receiver_did"`
 }
 
 type TransactionsResponse struct {
 	TransactionsResponse []TransactionResponse `json:"transactions_response"`
-	Count int64 `json:"count"`
+	Count                int64                 `json:"count"`
 }
 
 type SCBlocksListResponse struct {
-	SC_Blocks [] models.SC_Block `json:"sc_blocks"`
-	Count int64 `json:"count"`
+	SC_Blocks []models.SC_Block `json:"sc_blocks"`
+	Count     int64             `json:"count"`
 }
 
 type BurntBlocksListResponse struct {
-	BurntBlocks [] models.BurntBlocks `json:"burntblocks"`
-	Count int64 `json:"count"`
+	BurntBlocks []models.BurntBlocks `json:"burntblocks"`
+	Count       int64                `json:"count"`
 }
 
 type RBTListResponse struct {
 	Tokens []Token `json:"tokens"`
-	Count int64 `json:"count"`
+	Count  int64   `json:"count"`
 }
-
 
 // -----Token explorer response
 type RbtResponse struct {
-	RBT    models.RBT   `json:"rbt"`
-	Blocks Block `json:"block"`
+	RBT    models.RBT `json:"rbt"`
+	Blocks Block      `json:"block"`
 }
 
 type Block struct {
@@ -89,7 +88,14 @@ type TokenChainResponse struct {
 }
 
 type DIDResponse struct {
-	DID  models.DIDs   `json:"did"`
+	DID  models.DIDs  `json:"did"`
 	RBTs []models.RBT `json:"rbts"`
 	// Trasactions []TransactionResponse `json:"transactions"`
+}
+
+type FailedToSyncTokenDetailsInfo struct {
+	TokenID   string `gorm:"column:token_id;primaryKey"` // `gorm:"column:token;primaryKey"`
+	TokenType int    `gorm:"column:token_type"`
+	Did       string `gorm:"column:did"`
+	AssetType int    `gorm:"column:asset_type"`
 }

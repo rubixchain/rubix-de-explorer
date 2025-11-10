@@ -9,8 +9,9 @@ import (
 
 func UpdateTokensHandler(w http.ResponseWriter, r *http.Request) {
 	var payload struct {
-		Table string      `json:"table"`
-		Data  interface{} `json:"data"`
+		Table     string      `json:"table"`
+		Data      interface{} `json:"data"`
+		Operation string      `json:"operation"` // NEW: CREATE, UPDATE, DELETE
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -18,8 +19,8 @@ func UpdateTokensHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("✅ Received token update from fullnode (table: %s)", payload.Table)
-	services.UpdateTokens(payload.Table, payload.Data)
+	log.Printf("✅ Received token %s from fullnode (table: %s)", payload.Operation, payload.Table)
+	services.UpdateTokens(payload.Table, payload.Data, payload.Operation)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

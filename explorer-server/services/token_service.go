@@ -5,6 +5,7 @@ import (
 	"errors"
 	"explorer-server/database"
 	"explorer-server/database/models"
+	"explorer-server/model"
 	"fmt"
 	"log"
 	"math"
@@ -14,39 +15,47 @@ import (
 )
 
 // UpdateTokens routes token updates to the appropriate handler
-func UpdateTokens(tableName string, tokenData interface{}) {
+func UpdateTokens(tableName string, tokenData interface{}, operation string) {
 	switch tableName {
 	case "FullnodeRBTtable":
-		log.Println("Processing RBT token update")
-		UpdateRBTToken(tokenData)
+		log.Printf("Processing RBT token %s", operation)
+		UpdateRBTToken(tokenData, operation)
 
 	case "FullnodeFTtable":
-		log.Println("Processing FT token update")
-		UpdateFTToken(tokenData)
+		log.Printf("Processing FT token %s", operation)
+		UpdateFTToken(tokenData, operation)
 
 	case "FullnodeNFTtable":
-		log.Println("Processing NFT token update")
-		UpdateNFTToken(tokenData)
+		log.Printf("Processing NFT token %s", operation)
+		UpdateNFTToken(tokenData, operation)
 
 	case "FullnodeSCtable":
-		log.Println("Processing SmartContract update")
-		UpdateSCToken(tokenData)
+		log.Printf("Processing SmartContract %s", operation)
+		UpdateSCToken(tokenData, operation)
+
+	case "FullnodeFailedToSyncTokens":
+		log.Printf("Processing Failed Token %s", operation)
+		UpdateFailedTokens(tokenData, operation)
 
 	default:
 		log.Printf("⚠️ Unknown token table: %s\n", tableName)
 	}
 }
 
-// UpdateRBTToken updates RBT token or creates it if not exists, updates token_type and DID tables
-func UpdateRBTToken(tokenData interface{}) error {
+// ========== RBT Token Operations ==========
+
+// UpdateRBTToken handles CREATE and UPDATE operations for RBT tokens
+func UpdateRBTToken(tokenData interface{}, operation string) error {
+	if operation == "DELETE" {
+		return deleteRBTToken(tokenData)
+	}
+
 	var rbt RBT
-	log.Printf("inside the updateRBT")
 	jsonBytes, err := json.Marshal(tokenData)
 	if err != nil {
 		log.Printf("❌ Failed to marshal RBT data: %v", err)
 		return err
 	}
-	log.Printf("inside the updateRBT")
 
 	if err := json.Unmarshal(jsonBytes, &rbt); err != nil {
 		log.Printf("❌ Failed to unmarshal RBT data: %v", err)
@@ -61,14 +70,11 @@ func UpdateRBTToken(tokenData interface{}) error {
 		BlockHeight: fmt.Sprintf("%d", rbt.BlockHeight),
 		TokenStatus: rbt.TokenStatus,
 	}
-	log.Printf("updateData", updateData)
 
 	var existingRBT models.RBT
-	// Query using the actual column name from schema: rbt_id (mapped from TokenID field)
 	result := database.DB.Where("rbt_id = ?", rbt.TokenID).First(&existingRBT)
 
 	isNewToken := errors.Is(result.Error, gorm.ErrRecordNotFound)
-	log.Printf("isNewToken", isNewToken)
 
 	// Upsert RBT token
 	if isNewToken {
@@ -108,8 +114,50 @@ func UpdateRBTToken(tokenData interface{}) error {
 	return nil
 }
 
-// UpdateFTToken updates FT token or creates it if not exists, updates token_type and DID tables
-func UpdateFTToken(tokenData interface{}) error {
+// deleteRBTToken handles DELETE operation for RBT tokens
+func deleteRBTToken(tokenData interface{}) error {
+	deletePayload := tokenData.(map[string]interface{})
+	tokenID := deletePayload["token_id"].(string)
+
+	var rbt models.RBT
+	result := database.DB.Where("rbt_id = ?", tokenID).First(&rbt)
+
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		log.Printf("⚠️ RBT token not found for deletion: %s", tokenID)
+		return nil
+	} else if result.Error != nil {
+		log.Printf("❌ Error querying RBT %s: %v", tokenID, result.Error)
+		return result.Error
+	}
+
+	// Delete the RBT token
+	if err := database.DB.Delete(&rbt).Error; err != nil {
+		log.Printf("❌ Failed to delete RBT %s: %v", tokenID, err)
+		return err
+	}
+
+	// Update DID table - subtract the token value
+	if err := decrementDIDForRBT(rbt.OwnerDID, rbt.TokenValue); err != nil {
+		log.Printf("⚠️ Failed to decrement DID %s: %v", rbt.OwnerDID, err)
+	}
+
+	// Delete token_type entry
+	if err := database.DB.Where("token_id = ?", tokenID).Delete(&models.TokenType{}).Error; err != nil {
+		log.Printf("⚠️ Failed to delete token_type for %s: %v", tokenID, err)
+	}
+
+	log.Printf("✅ RBT token deleted: %s", tokenID)
+	return nil
+}
+
+// ========== FT Token Operations ==========
+
+// UpdateFTToken handles CREATE and UPDATE operations for FT tokens
+func UpdateFTToken(tokenData interface{}, operation string) error {
+	if operation == "DELETE" {
+		return deleteFTToken(tokenData)
+	}
+
 	var ft FT
 	jsonBytes, err := json.Marshal(tokenData)
 	if err != nil {
@@ -134,7 +182,6 @@ func UpdateFTToken(tokenData interface{}) error {
 	}
 
 	var existingFT models.FT
-	// Query using the actual column name from schema: ft_id (mapped from FtID field)
 	result := database.DB.Where("ft_id = ?", ft.TokenID).First(&existingFT)
 
 	isNewToken := errors.Is(result.Error, gorm.ErrRecordNotFound)
@@ -176,8 +223,50 @@ func UpdateFTToken(tokenData interface{}) error {
 	return nil
 }
 
-// UpdateNFTToken updates NFT token or creates it if not exists, updates token_type and DID tables
-func UpdateNFTToken(tokenData interface{}) error {
+// deleteFTToken handles DELETE operation for FT tokens
+func deleteFTToken(tokenData interface{}) error {
+	deletePayload := tokenData.(map[string]interface{})
+	tokenID := deletePayload["token_id"].(string)
+
+	var ft models.FT
+	result := database.DB.Where("ft_id = ?", tokenID).First(&ft)
+
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		log.Printf("⚠️ FT token not found for deletion: %s", tokenID)
+		return nil
+	} else if result.Error != nil {
+		log.Printf("❌ Error querying FT %s: %v", tokenID, result.Error)
+		return result.Error
+	}
+
+	// Delete the FT token
+	if err := database.DB.Delete(&ft).Error; err != nil {
+		log.Printf("❌ Failed to delete FT %s: %v", tokenID, err)
+		return err
+	}
+
+	// Update DID table - decrement count
+	if err := decrementDIDForFT(ft.OwnerDID); err != nil {
+		log.Printf("⚠️ Failed to decrement DID %s: %v", ft.OwnerDID, err)
+	}
+
+	// Delete token_type entry
+	if err := database.DB.Where("token_id = ?", tokenID).Delete(&models.TokenType{}).Error; err != nil {
+		log.Printf("⚠️ Failed to delete token_type for %s: %v", tokenID, err)
+	}
+
+	log.Printf("✅ FT token deleted: %s", tokenID)
+	return nil
+}
+
+// ========== NFT Token Operations ==========
+
+// UpdateNFTToken handles CREATE and UPDATE operations for NFT tokens
+func UpdateNFTToken(tokenData interface{}, operation string) error {
+	if operation == "DELETE" {
+		return deleteNFTToken(tokenData)
+	}
+
 	var nft NFT
 	jsonBytes, err := json.Marshal(tokenData)
 	if err != nil {
@@ -201,7 +290,6 @@ func UpdateNFTToken(tokenData interface{}) error {
 	}
 
 	var existingNFT models.NFT
-	// Query using the actual column name from schema: nft_id (mapped from TokenID field)
 	result := database.DB.Where("nft_id = ?", nft.TokenID).First(&existingNFT)
 
 	isNewToken := errors.Is(result.Error, gorm.ErrRecordNotFound)
@@ -241,8 +329,50 @@ func UpdateNFTToken(tokenData interface{}) error {
 	return nil
 }
 
-// UpdateSCToken updates Smart Contract or creates it if not exists, updates token_type and DID tables
-func UpdateSCToken(tokenData interface{}) error {
+// deleteNFTToken handles DELETE operation for NFT tokens
+func deleteNFTToken(tokenData interface{}) error {
+	deletePayload := tokenData.(map[string]interface{})
+	tokenID := deletePayload["token_id"].(string)
+
+	var nft models.NFT
+	result := database.DB.Where("nft_id = ?", tokenID).First(&nft)
+
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		log.Printf("⚠️ NFT token not found for deletion: %s", tokenID)
+		return nil
+	} else if result.Error != nil {
+		log.Printf("❌ Error querying NFT %s: %v", tokenID, result.Error)
+		return result.Error
+	}
+
+	// Delete the NFT token
+	if err := database.DB.Delete(&nft).Error; err != nil {
+		log.Printf("❌ Failed to delete NFT %s: %v", tokenID, err)
+		return err
+	}
+
+	// Update DID table - decrement count
+	if err := decrementDIDForNFT(nft.OwnerDID); err != nil {
+		log.Printf("⚠️ Failed to decrement DID %s: %v", nft.OwnerDID, err)
+	}
+
+	// Delete token_type entry
+	if err := database.DB.Where("token_id = ?", tokenID).Delete(&models.TokenType{}).Error; err != nil {
+		log.Printf("⚠️ Failed to delete token_type for %s: %v", tokenID, err)
+	}
+
+	log.Printf("✅ NFT token deleted: %s", tokenID)
+	return nil
+}
+
+// ========== Smart Contract Operations ==========
+
+// UpdateSCToken handles CREATE and UPDATE operations for Smart Contracts
+func UpdateSCToken(tokenData interface{}, operation string) error {
+	if operation == "DELETE" {
+		return deleteSCToken(tokenData)
+	}
+
 	var sc SC
 	jsonBytes, err := json.Marshal(tokenData)
 	if err != nil {
@@ -265,7 +395,6 @@ func UpdateSCToken(tokenData interface{}) error {
 	}
 
 	var existingSC models.SmartContract
-	// Query using contract_id column (primary key in schema)
 	result := database.DB.Where("contract_id = ?", sc.SmartContractHash).First(&existingSC)
 
 	isNewToken := errors.Is(result.Error, gorm.ErrRecordNotFound)
@@ -305,13 +434,101 @@ func UpdateSCToken(tokenData interface{}) error {
 	return nil
 }
 
-// Helper function to update DID table for RBT tokens
+// deleteSCToken handles DELETE operation for Smart Contracts
+func deleteSCToken(tokenData interface{}) error {
+	deletePayload := tokenData.(map[string]interface{})
+	contractHash := deletePayload["smart_contract_hash"].(string)
+
+	var sc models.SmartContract
+	result := database.DB.Where("contract_id = ?", contractHash).First(&sc)
+
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		log.Printf("⚠️ Smart Contract not found for deletion: %s", contractHash)
+		return nil
+	} else if result.Error != nil {
+		log.Printf("❌ Error querying SC %s: %v", contractHash, result.Error)
+		return result.Error
+	}
+
+	// Delete the Smart Contract
+	if err := database.DB.Delete(&sc).Error; err != nil {
+		log.Printf("❌ Failed to delete SC %s: %v", contractHash, err)
+		return err
+	}
+
+	// Update DID table - decrement count
+	if err := decrementDIDForSC(sc.DeployerDID); err != nil {
+		log.Printf("⚠️ Failed to decrement DID %s: %v", sc.DeployerDID, err)
+	}
+
+	// Delete token_type entry
+	if err := database.DB.Where("token_id = ?", contractHash).Delete(&models.TokenType{}).Error; err != nil {
+		log.Printf("⚠️ Failed to delete token_type for SC %s: %v", contractHash, err)
+	}
+
+	log.Printf("✅ Smart Contract deleted: %s", contractHash)
+	return nil
+}
+
+// ========== Failed Tokens Operations ==========
+
+// UpdateFailedTokens handles CREATE and DELETE operations for Failed Tokens
+func UpdateFailedTokens(tokenData interface{}, operation string) error {
+	if operation == "DELETE" {
+		return deleteFailedToken(tokenData)
+	}
+
+	// For CREATE operation
+	var failedToken model.FailedToSyncTokenDetailsInfo
+	jsonBytes, err := json.Marshal(tokenData)
+	if err != nil {
+		log.Printf("❌ Failed to marshal failed token data: %v", err)
+		return err
+	}
+
+	if err := json.Unmarshal(jsonBytes, &failedToken); err != nil {
+		log.Printf("❌ Failed to unmarshal failed token data: %v", err)
+		return err
+	}
+
+	log.Printf("✅ Failed token recorded: %s", failedToken.TokenID)
+	return nil
+}
+
+// deleteFailedToken handles DELETE operation for Failed Tokens
+func deleteFailedToken(tokenData interface{}) error {
+	deletePayload := tokenData.(map[string]interface{})
+	tokenID := deletePayload["token_id"].(string)
+
+	var failedToken model.FailedToSyncTokenDetailsInfo
+
+	result := database.DB.Where("token_id = ?", tokenID).First(&failedToken)
+
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		log.Printf("⚠️ Failed token not found for deletion: %s", tokenID)
+		return nil
+	} else if result.Error != nil {
+		log.Printf("❌ Error querying failed token %s: %v", tokenID, result.Error)
+		return result.Error
+	}
+
+	// Delete the failed token entry
+	if err := database.DB.Delete(&failedToken).Error; err != nil {
+		log.Printf("❌ Failed to delete failed token %s: %v", tokenID, err)
+		return err
+	}
+
+	log.Printf("✅ Failed token deleted: %s", tokenID)
+	return nil
+}
+
+// ========== DID Update Helpers (Increment) ==========
+
 func updateDIDForRBT(ownerDID string, tokenValue float64, isNewToken bool) error {
 	var existing models.DIDs
 	err := database.DB.First(&existing, "did = ?", ownerDID).Error
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		// Create new DID entry
 		newDID := models.DIDs{
 			DID:       ownerDID,
 			CreatedAt: time.Now(),
@@ -324,7 +541,6 @@ func updateDIDForRBT(ownerDID string, tokenValue float64, isNewToken bool) error
 	} else if err != nil {
 		return err
 	} else {
-		// Update existing DID entry
 		if isNewToken {
 			existing.TotalRBTs += tokenValue
 		}
@@ -338,13 +554,11 @@ func updateDIDForRBT(ownerDID string, tokenValue float64, isNewToken bool) error
 	return nil
 }
 
-// Helper function to update DID table for FT tokens
 func updateDIDForFT(ownerDID string, isNewToken bool) error {
 	var existing models.DIDs
 	err := database.DB.First(&existing, "did = ?", ownerDID).Error
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		// Create new DID entry
 		newDID := models.DIDs{
 			DID:       ownerDID,
 			CreatedAt: time.Now(),
@@ -357,26 +571,23 @@ func updateDIDForFT(ownerDID string, isNewToken bool) error {
 	} else if err != nil {
 		return err
 	} else {
-		// Update existing DID entry
 		if isNewToken {
 			existing.TotalFTs += 1
 		}
 		if err := database.DB.Save(&existing).Error; err != nil {
 			return err
 		}
-		log.Printf("✅ Updated DID entry for %s, new total FTs: %f", ownerDID, existing.TotalFTs)
+		log.Printf("✅ Updated DID entry for %s, new total FTs: %d", ownerDID, existing.TotalFTs)
 	}
 
 	return nil
 }
 
-// Helper function to update DID table for NFT tokens
 func updateDIDForNFT(ownerDID string, isNewToken bool) error {
 	var existing models.DIDs
 	err := database.DB.First(&existing, "did = ?", ownerDID).Error
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		// Create new DID entry
 		newDID := models.DIDs{
 			DID:       ownerDID,
 			CreatedAt: time.Now(),
@@ -389,7 +600,6 @@ func updateDIDForNFT(ownerDID string, isNewToken bool) error {
 	} else if err != nil {
 		return err
 	} else {
-		// Update existing DID entry
 		if isNewToken {
 			existing.TotalNFTs += 1
 		}
@@ -402,13 +612,11 @@ func updateDIDForNFT(ownerDID string, isNewToken bool) error {
 	return nil
 }
 
-// Helper function to update DID table for Smart Contracts
 func updateDIDForSC(deployerDID string, isNewToken bool) error {
 	var existing models.DIDs
 	err := database.DB.First(&existing, "did = ?", deployerDID).Error
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		// Create new DID entry
 		newDID := models.DIDs{
 			DID:       deployerDID,
 			CreatedAt: time.Now(),
@@ -421,7 +629,6 @@ func updateDIDForSC(deployerDID string, isNewToken bool) error {
 	} else if err != nil {
 		return err
 	} else {
-		// Update existing DID entry
 		if isNewToken {
 			existing.TotalSC += 1
 		}
@@ -430,6 +637,105 @@ func updateDIDForSC(deployerDID string, isNewToken bool) error {
 		}
 		log.Printf("✅ Updated DID entry for %s, new total SCs: %d", deployerDID, existing.TotalSC)
 	}
+
+	return nil
+}
+
+// ========== DID Update Helpers (Decrement for Deletions) ==========
+
+func decrementDIDForRBT(ownerDID string, tokenValue float64) error {
+	var existing models.DIDs
+	err := database.DB.First(&existing, "did = ?", ownerDID).Error
+
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		log.Printf("⚠️ DID entry not found for %s", ownerDID)
+		return nil
+	} else if err != nil {
+		return err
+	}
+
+	existing.TotalRBTs -= tokenValue
+	existing.TotalRBTs = math.Round(existing.TotalRBTs*1000) / 1000
+	if existing.TotalRBTs < 0 {
+		existing.TotalRBTs = 0
+	}
+
+	if err := database.DB.Save(&existing).Error; err != nil {
+		return err
+	}
+	log.Printf("✅ Decremented DID entry for %s, new total RBTs: %f", ownerDID, existing.TotalRBTs)
+
+	return nil
+}
+
+func decrementDIDForFT(ownerDID string) error {
+	var existing models.DIDs
+	err := database.DB.First(&existing, "did = ?", ownerDID).Error
+
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		log.Printf("⚠️ DID entry not found for %s", ownerDID)
+		return nil
+	} else if err != nil {
+		return err
+	}
+
+	existing.TotalFTs -= 1
+	if existing.TotalFTs < 0 {
+		existing.TotalFTs = 0
+	}
+
+	if err := database.DB.Save(&existing).Error; err != nil {
+		return err
+	}
+	log.Printf("✅ Decremented DID entry for %s, new total FTs: %d", ownerDID, existing.TotalFTs)
+
+	return nil
+}
+
+func decrementDIDForNFT(ownerDID string) error {
+	var existing models.DIDs
+	err := database.DB.First(&existing, "did = ?", ownerDID).Error
+
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		log.Printf("⚠️ DID entry not found for %s", ownerDID)
+		return nil
+	} else if err != nil {
+		return err
+	}
+
+	existing.TotalNFTs -= 1
+	if existing.TotalNFTs < 0 {
+		existing.TotalNFTs = 0
+	}
+
+	if err := database.DB.Save(&existing).Error; err != nil {
+		return err
+	}
+	log.Printf("✅ Decremented DID entry for %s, new total NFTs: %d", ownerDID, existing.TotalNFTs)
+
+	return nil
+}
+
+func decrementDIDForSC(deployerDID string) error {
+	var existing models.DIDs
+	err := database.DB.First(&existing, "did = ?", deployerDID).Error
+
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		log.Printf("⚠️ DID entry not found for %s", deployerDID)
+		return nil
+	} else if err != nil {
+		return err
+	}
+
+	existing.TotalSC -= 1
+	if existing.TotalSC < 0 {
+		existing.TotalSC = 0
+	}
+
+	if err := database.DB.Save(&existing).Error; err != nil {
+		return err
+	}
+	log.Printf("✅ Decremented DID entry for %s, new total SCs: %d", deployerDID, existing.TotalSC)
 
 	return nil
 }
