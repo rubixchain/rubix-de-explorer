@@ -28,12 +28,12 @@ func GetDIDHoldersList(limit, page int) (interface{}, error) {
 	offset := (page - 1) * limit
 
 	// Fetch paginated DIDs ordered by TotalRBTs descending
-	if err := database.DB.Order("total_rbts desc").
-		Limit(limit).
-		Offset(offset).
-		Find(&dids).Error; err != nil {
-		return nil, err
-	}
+	if err := database.DB.Where("address IS NOT NULL AND address != 0").
+	Order("total_rbts desc").
+	Limit(limit).Offset(offset).
+	Find(&dids).Error; err != nil {
+    return nil, err
+}
 
 	// Map to response format
 	holders := make([]model.HolderResponse, len(dids))
