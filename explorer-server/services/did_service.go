@@ -28,7 +28,7 @@ func GetDIDHoldersList(limit, page int) (interface{}, error) {
 	offset := (page - 1) * limit
 
 	// Fetch paginated DIDs ordered by TotalRBTs descending
-	if err := database.DB.Where("owner_did IS NOT NULL AND owner_did != '' AND owner_did != '0'").Order("total_rbts desc").Limit(limit).Offset(offset).Find(&dids).Error; err != nil {
+	if err := database.DB.Where("owner_did IS NOT NULL AND owner_did != '0'").Order("total_rbts desc").Limit(limit).Offset(offset).Find(&dids).Error; err != nil {
     return nil, err
 }
 	// Map to response format
