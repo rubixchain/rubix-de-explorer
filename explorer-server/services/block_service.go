@@ -31,7 +31,7 @@ func GetTransferBlocksList(limit, page int) (model.TransactionsResponse, error) 
 
 	// Fetch paginated blocks
 	if err := database.DB.
-	    Where("epoch IS NOT NULL AND epoch != 0").
+		Where("epoch IS NOT NULL AND epoch <> 0").
 		Order("epoch DESC").
 		Limit(limit).
 		Offset(offset).
