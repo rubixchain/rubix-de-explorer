@@ -40,10 +40,13 @@ func GetTransferBlocksList(limit, page int) (model.TransactionsResponse, error) 
 	}
 
 	// Count total records
-	var count int64
-	if err := database.DB.Model(&models.TransferBlocks{}).Count(&count).Error; err != nil {
-		return response, err
-	}
+var count int64
+if err := database.DB.
+    Model(&models.TransferBlocks{}).
+    Where("epoch IS NOT NULL AND epoch <> 0").
+    Count(&count).Error; err != nil {
+    return response, err
+}
 
 	for _, b := range blocks {
 		if (b.Amount == nil || *b.Amount == 0) && b.TxnID != nil && *b.TxnID != "" {
