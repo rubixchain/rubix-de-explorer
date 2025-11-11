@@ -16,7 +16,7 @@ import (
 // GetTxnsCount returns total number of RBT records
 func GetTxnsCount() (int64, error) {
 	var count int64
-	if err := database.DB.Model(&models.RBT{}).Count(&count).Error; err != nil {
+	if err := database.DB.Model(&models.TransferBlocks{}).Count(&count).Error; err != nil {
 		return 0, err
 	}
 	fmt.Printf("Total RBT count: %d\n", count)
