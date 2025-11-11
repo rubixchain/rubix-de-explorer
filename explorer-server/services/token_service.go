@@ -87,7 +87,7 @@ func UpdateRBTToken(tokenData interface{}, operation string) error {
 		log.Printf("❌ Error querying RBT %s: %v", rbt.TokenID, result.Error)
 		return result.Error
 	} else {
-		if err := database.DB.Model(&existingRBT).Updates(updateData).Error; err != nil {
+		if err := database.DB.Where("rbt_id = ?", rbt.TokenID).Updates(updateData).Error; err != nil {
 			log.Printf("❌ Failed to update RBT %s: %v", rbt.TokenID, err)
 			return err
 		}
@@ -196,7 +196,7 @@ func UpdateFTToken(tokenData interface{}, operation string) error {
 		log.Printf("❌ Error querying FT %s: %v", ft.TokenID, result.Error)
 		return result.Error
 	} else {
-		if err := database.DB.Model(&existingFT).Updates(updateData).Error; err != nil {
+		if err := database.DB.Where("ft_id = ?", ft.TokenID).Updates(updateData).Error; err != nil {
 			log.Printf("❌ Failed to update FT %s: %v", ft.TokenID, err)
 			return err
 		}
@@ -304,7 +304,7 @@ func UpdateNFTToken(tokenData interface{}, operation string) error {
 		log.Printf("❌ Error querying NFT %s: %v", nft.TokenID, result.Error)
 		return result.Error
 	} else {
-		if err := database.DB.Model(&existingNFT).Updates(updateData).Error; err != nil {
+		if err := database.DB.Where("nft_id = ?", nft.TokenID).Updates(updateData).Error; err != nil {
 			log.Printf("❌ Failed to update NFT %s: %v", nft.TokenID, err)
 			return err
 		}
@@ -409,7 +409,7 @@ func UpdateSCToken(tokenData interface{}, operation string) error {
 		log.Printf("❌ Error querying SC %s: %v", sc.SmartContractHash, result.Error)
 		return result.Error
 	} else {
-		if err := database.DB.Model(&existingSC).Updates(updateData).Error; err != nil {
+		if err := database.DB.Where("contract_id = ?", sc.SmartContractHash).Updates(updateData).Error; err != nil {
 			log.Printf("❌ Failed to update SC %s: %v", sc.SmartContractHash, err)
 			return err
 		}
