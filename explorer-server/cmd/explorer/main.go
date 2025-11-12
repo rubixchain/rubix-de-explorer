@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
+	"sync"
 	"syscall"
 	"time"
 
@@ -20,6 +22,20 @@ import (
 
 func main() {
 	startTime := time.Now()
+	
+	// Get total CPU cores
+	totalCores := runtime.NumCPU()
+	log.Printf("Detected %d CPU cores\n", totalCores)
+	
+	// Reserve 1 core for server, rest for syncing
+	syncCores := totalCores - 1
+	if syncCores < 1 {
+		syncCores = 1 // Minimum 1 core for syncing
+	}
+	
+	// Set GOMAXPROCS to use all cores
+	runtime.GOMAXPROCS(totalCores)
+	log.Printf("Using %d cores total: 1 for server, %d for data syncing\n", totalCores, syncCores)
 	log.Printf("Starting Explorer Server at %s\n", startTime.Format(time.RFC1123))
 
 	// Load environment variables
@@ -59,14 +75,14 @@ func main() {
 		}
 	}()
 
-	// Start initial sync IN BACKGROUND (non-blocking)
+	// Start initial sync IN BACKGROUND (non-blocking) with parallel processing
 	go func() {
 		time.Sleep(2 * time.Second) // Let server boot first
-		syncData("Initial Sync (Startup)")
+		syncData("Initial Sync (Startup)", syncCores)
 	}()
 
 	// Start periodic sync scheduler
-	go startPeriodicSync()
+	go startPeriodicSync(syncCores)
 
 	// Graceful shutdown
 	sigChan := make(chan os.Signal, 1)
@@ -92,7 +108,7 @@ func main() {
 }
 
 // startPeriodicSync runs syncData every 3 hours in background
-func startPeriodicSync() {
+func startPeriodicSync(maxWorkers int) {
 	log.Println("Periodic sync scheduler started (every 3 hours)")
 
 	ticker := time.NewTicker(3 * time.Hour)
@@ -101,38 +117,57 @@ func startPeriodicSync() {
 	for t := range ticker.C {
 		go func(triggerTime time.Time) {
 			log.Printf("Scheduled sync triggered at %s\n", triggerTime.Format(time.RFC1123))
-			syncData("Scheduled Sync")
+			syncData("Scheduled Sync", maxWorkers)
 		}(t)
 	}
 }
 
-// syncData performs all data fetches with detailed timing and error logging
-func syncData(syncType string) {
+// syncData performs all data fetches in parallel using available cores
+func syncData(syncType string, maxWorkers int) {
 	syncStart := time.Now()
-	log.Printf("=== %s STARTED at %s ===\n", syncType, syncStart.Format(time.RFC1123))
+	log.Printf("=== %s STARTED at %s (using %d workers) ===\n", syncType, syncStart.Format(time.RFC1123), maxWorkers)
 
 	var errCount int
+	var mu sync.Mutex // Protect errCount
+	var wg sync.WaitGroup
 
-	// Helper to log each fetch with timing
+	// Semaphore to limit concurrent workers
+	semaphore := make(chan struct{}, maxWorkers)
+
+	// Helper to log each fetch with timing (parallel with worker limit)
 	fetchWithLog := func(name string, fn func() error) {
-		start := time.Now()
-		err := fn()
-		duration := time.Since(start)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			
+			// Acquire semaphore (blocks if maxWorkers already running)
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }() // Release semaphore
+			
+			start := time.Now()
+			err := fn()
+			duration := time.Since(start)
 
-		if err != nil {
-			log.Printf("  [Failed] %s | Duration: %s | Error: %v\n", name, duration.Round(time.Millisecond), err)
-			errCount++
-		} else {
-			log.Printf("  [Success] %s | Duration: %s\n", name, duration.Round(time.Millisecond))
-		}
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				log.Printf("  [Failed] %s | Duration: %s | Error: %v\n", name, duration.Round(time.Millisecond), err)
+				errCount++
+			} else {
+				log.Printf("  [Success] %s | Duration: %s\n", name, duration.Round(time.Millisecond))
+			}
+		}()
 	}
 
-	// Run all syncs (still sequential, but in background)
+	// Run all syncs IN PARALLEL (limited by maxWorkers)
 	fetchWithLog("FetchAndStoreAllRBTsFromFullNodeDB", services.FetchAndStoreAllRBTsFromFullNodeDB)
 	fetchWithLog("FetchAndStoreAllFTsFromFullNodeDB", services.FetchAndStoreAllFTsFromFullNodeDB)
 	fetchWithLog("FetchAndStoreAllNFTsFromFullNodeDB", services.FetchAndStoreAllNFTsFromFullNodeDB)
 	fetchWithLog("FetchAndStoreAllSCsFromFullNodeDB", services.FetchAndStoreAllSCsFromFullNodeDB)
 	fetchWithLog("FetchAllTokenChainFromFullNode", services.FetchAllTokenChainFromFullNode)
+
+	// Wait for all fetches to complete
+	wg.Wait()
 
 	totalDuration := time.Since(syncStart)
 	log.Printf("=== %s COMPLETED in %s | Failed: %d ===\n",
