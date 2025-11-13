@@ -22,10 +22,11 @@ import (
 )
 
 const (
-	RBTType = "RBT"
-	FTType  = "FT"
-	NFTType = "NFT"
-	SCType  = "SC"
+	RBTType  = "RBT"
+	PartType = "PART"
+	FTType   = "FT"
+	NFTType  = "NFT"
+	SCType   = "SC"
 )
 
 // These structs are ONLY for receiving API responses
