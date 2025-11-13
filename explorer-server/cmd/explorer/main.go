@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -62,7 +61,7 @@ func main() {
 
 	// Create HTTP server
 	srv := &http.Server{
-		Addr:    fmt.Sprintf(":%s", port),
+		Addr:"0.0.0.0:" + port, 
 		Handler: handler,
 	}
 
@@ -109,9 +108,9 @@ func main() {
 
 // startPeriodicSync runs syncData every 3 hours in background
 func startPeriodicSync(maxWorkers int) {
-	log.Println("Periodic sync scheduler started (every 3 hours)")
+	log.Println("Periodic sync scheduler started (every 12 hours)")
 
-	ticker := time.NewTicker(3 * time.Hour)
+	ticker := time.NewTicker(12 * time.Hour)
 	defer ticker.Stop()
 
 	for t := range ticker.C {
