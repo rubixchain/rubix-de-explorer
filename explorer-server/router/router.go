@@ -12,7 +12,11 @@ func NewRouter() *mux.Router {
 	r := mux.NewRouter()
 
 	// Health and database routes
-	// r.HandleFunc("/api/health", handlers.HealthHandler).Methods(http.MethodGet)
+	r.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(http.StatusOK)
+    w.Write([]byte(`{"status":"ok"}`))
+}).Methods("GET")
 	// r.HandleFunc("/api/database/stats", handlers.DatabaseStatsHandler).Methods(http.MethodGet)
 
 	// Database-powered API routes (primary endpoints)
