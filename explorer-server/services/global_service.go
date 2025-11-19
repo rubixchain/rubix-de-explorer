@@ -70,8 +70,8 @@ func GetTokenChainFromTokenID(tokenID string) (map[string]interface{}, error) {
 	apiURL := fmt.Sprintf("%s/api/de-exp/get-token-chain?tokenID=%s&tokenType=%s",
 		config.RubixNodeURL, tokenID, tokenType)
 
-	// Step 4: Call the API
-	resp, err := http.Get(apiURL)
+	// Step 4: Call the API using insecure TLS client
+	resp, err := insecureHTTPClient.Get(apiURL)
 	if err != nil {
 		return nil, fmt.Errorf("❌ error fetching token chain for %s: %v", tokenID, err)
 	}
@@ -93,6 +93,7 @@ func GetTokenChainFromTokenID(tokenID string) (map[string]interface{}, error) {
 	// Step 7: Return the full token chain response
 	return chainData, nil
 }
+
 
 // Fetches all blocks from a given token chain with pagination
 func GetTokenBlocksFromTokenID(tokenID string, page int, limit int) ([]map[string]interface{}, int, error) {
@@ -120,7 +121,7 @@ func GetTokenBlocksFromTokenID(tokenID string, page int, limit int) ([]map[strin
 		config.RubixNodeURL, tokenID, tokenType)
 
 	// Step 4: Fetch data
-	resp, err := http.Get(apiURL)
+	resp, err := insecureHTTPClient.Get(apiURL)
 	if err != nil {
 		return nil, 0, fmt.Errorf("❌ error fetching token chain for %s: %v", tokenID, err)
 	}
