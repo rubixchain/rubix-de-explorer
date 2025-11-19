@@ -1052,6 +1052,9 @@ func fetchAndStoreTokenChain(token models.TokenType) error {
 	if err != nil {
 		return err
 	}
+	if resp == nil {
+    return fmt.Errorf("nil response received from node for token %s", token.TokenID)
+}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("bad status code: %d", resp.StatusCode)
