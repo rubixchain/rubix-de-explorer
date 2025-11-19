@@ -112,7 +112,11 @@ type GetSCListResponse struct {
 
 var insecureHTTPClient = &http.Client{
     Transport: &http.Transport{
-        TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+        TLSClientConfig: &tls.Config{
+            InsecureSkipVerify: true,
+        },
+        // 🔥 IMPORTANT: Disable HTTP/2 so Go does NOT enforce TLS validation
+        TLSNextProto: map[string]func(string, *tls.Conn) http.RoundTripper{},
     },
 }
 
