@@ -1021,7 +1021,6 @@ func fetchAndStoreTokenChain(token models.TokenType) error {
 	fmt.Println("tokenInfo for getting tokenchain is:", token)
 	apiURL := fmt.Sprintf("%s/api/de-exp/get-token-chain?tokenID=%s&tokenType=%s",
 		config.RubixNodeURL, token.TokenID, token.TokenType)
-	fmt.Println("test : API is:", apiURL)
 
 
 	// Retry logic with exponential backoff
@@ -1030,7 +1029,6 @@ func fetchAndStoreTokenChain(token models.TokenType) error {
 	var err error
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		fmt.Printf("Attempt %d to fetch token chain for %s\n", attempt+1, token.TokenID)
 		resp, err := insecureHTTPClient.Get(apiURL)
         print("testing-02:", resp)
 		if err == nil && resp.StatusCode == http.StatusOK {
