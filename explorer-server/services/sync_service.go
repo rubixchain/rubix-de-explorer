@@ -1,6 +1,7 @@
 package services
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"explorer-server/config"
@@ -12,10 +13,10 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"reflect"
 	"regexp"
 	"strconv"
 	"time"
-	"crypto/tls"
 
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
@@ -115,8 +116,9 @@ var insecureHTTPClient = &http.Client{
         TLSClientConfig: &tls.Config{
             InsecureSkipVerify: true,
         },
-        // 🔥 IMPORTANT: Disable HTTP/2 so Go does NOT enforce TLS validation
-        TLSNextProto: map[string]func(string, *tls.Conn) http.RoundTripper{},
+        // Disable HTTP/2 (Go otherwise forces TLS verification again)
+        ForceAttemptHTTP2: false,
+        TLSNextProto:      map[string]func(string, *tls.Conn) http.RoundTripper{},
     },
 }
 
@@ -978,13 +980,14 @@ func FetchAllTokenChainFromFullNode() error {
 		return nil
 	}
 
-	log.Printf("ℹ️ Starting sync for %d tokens", len(tokens))
+	log.Printf("ℹ️ Starting sync for %d tokens", tokens)
 
 	successCount := 0
 	failureCount := 0
 	var errs []error
 
 	for idx, token := range tokens {
+		fmt.Printf("🔄 Syncing token %d/%d: ID=%s, Type=%s\n",)
 		if err := fetchAndStoreTokenChain(token); err != nil {
 			errs = append(errs, err)
 			failureCount++
@@ -1018,7 +1021,8 @@ func fetchAndStoreTokenChain(token models.TokenType) error {
 	fmt.Println("tokenInfo for getting tokenchain is:", token)
 	apiURL := fmt.Sprintf("%s/api/de-exp/get-token-chain?tokenID=%s&tokenType=%s",
 		config.RubixNodeURL, token.TokenID, token.TokenType)
-	fmt.Println("API is:", apiURL)
+	fmt.Println("test : API is:", apiURL)
+
 
 	// Retry logic with exponential backoff
 	maxRetries := 3
@@ -1026,8 +1030,11 @@ func fetchAndStoreTokenChain(token models.TokenType) error {
 	var err error
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
+		fmt.Printf("Attempt %d to fetch token chain for %s\n", attempt+1, token.TokenID)
 		resp, err := insecureHTTPClient.Get(apiURL)
+
 		if err == nil && resp.StatusCode == http.StatusOK {
+			fmt.Printf("✅ Successfully fetched chain for %s on attempt %d\n", token.TokenID, attempt+1)
 			break
 		}
 
@@ -1047,9 +1054,7 @@ func fetchAndStoreTokenChain(token models.TokenType) error {
 	if err != nil {
 		return err
 	}
-
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("bad status code: %d", resp.StatusCode)
 	}
@@ -1067,20 +1072,52 @@ func fetchAndStoreTokenChain(token models.TokenType) error {
 	}
 
 	// Extract blocks
-	var blocks []interface{}
-	if b, ok := chainData["TokenChainData"].([]interface{}); ok {
-		blocks = b
-	} else if b, ok := chainData["blocks"].([]interface{}); ok {
-		blocks = b
-	} else {
-		log.Printf("⚠️ No blocks found for token %s", token.TokenID)
-		return nil
-	}
+	// var blocks []interface{}
+	// if b, ok := chainData["TokenChainData"].([]interface{}); ok {
+	// 	blocks = b
+	// } else if b, ok := chainData["blocks"].([]interface{}); ok {
+	// 	blocks = b
+	// } else {
+	// 	log.Printf("⚠️ No blocks found for token %s", token.TokenID)
+	// 	return nil
+	// }
 
-	// Process blocks sequentially
-	if err := processAndStoreBlocks(token, blocks); err != nil {
-		return err
-	}
+	// // Process blocks sequentially
+	// if err := processAndStoreBlocks(token, blocks); err != nil {
+	// 	return err
+	// }
+
+	// Check if API returned an error
+if status, ok := chainData["status"].(bool); ok && !status {
+	log.Printf("❌ API returned error for token %s: %v", token.TokenID, chainData["message"])
+	return nil
+}
+
+// Extract blocks safely
+var blocks []interface{}
+fmt.Printf("testing-1 is:%v", chainData)
+if b, ok := chainData["TokenChainData"].([]interface{}); ok {
+	blocks = b
+} else if b, ok := chainData["blocks"].([]interface{}); ok {
+	blocks = b
+} else {
+	log.Printf("⚠️ No block array found for token %s (keys: %v)", token.TokenID, reflect.ValueOf(chainData).MapKeys())
+	return nil
+}
+
+// Defensive guard: prevent nil slice crashes
+if blocks == nil || len(blocks) == 0 {
+	log.Printf("⚠️ Empty or nil block list for token %s", token.TokenID)
+	return nil
+}
+
+fmt.Printf("tested", len(blocks), token.TokenID, blocks)
+
+// Process blocks sequentially
+if err := processAndStoreBlocks(token, blocks); err != nil {
+	return err
+}
+
 
 	return nil
 }
