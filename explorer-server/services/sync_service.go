@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strconv"
 	"time"
+	"crypto/tls"
 
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
@@ -109,13 +110,25 @@ type GetSCListResponse struct {
 	Result  []SC   `json:"result"`
 }
 
+var insecureHTTPClient = &http.Client{
+    Transport: &http.Transport{
+        TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+    },
+}
+
 // FetchAndStoreAllRBTsFromFullNodeDB fetches RBTs from full node API and stores them
 func FetchAndStoreAllRBTsFromFullNodeDB() error {
 	apiURL := config.RubixNodeURL + "/api/de-exp/get-rbt-list"
 
 	log.Println("📡 Fetching RBT list from:", apiURL)
 
-	resp, err := http.Get(apiURL)
+	// 🔥 Disable TLS verification for this request ONLY
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	client := &http.Client{Transport: tr}
+
+	resp, err := client.Get(apiURL)
 	if err != nil {
 		return fmt.Errorf("failed to call get-rbt-list API: %w", err)
 	}
@@ -125,7 +138,7 @@ func FetchAndStoreAllRBTsFromFullNodeDB() error {
 		return fmt.Errorf("API returned non-200 status: %d", resp.StatusCode)
 	}
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
@@ -147,12 +160,13 @@ func FetchAndStoreAllRBTsFromFullNodeDB() error {
 	return nil
 }
 
+
 func FetchAndStoreAllFTsFromFullNodeDB() error {
 	apiURL := config.RubixNodeURL + "/api/de-exp/get-ft-list"
 
 	log.Println("📡 Fetching FT list from:", apiURL)
 
-	resp, err := http.Get(apiURL)
+	resp, err := insecureHTTPClient.Get(apiURL)
 	if err != nil {
 		return fmt.Errorf("failed to call get-ft-list API: %w", err)
 	}
@@ -189,7 +203,7 @@ func FetchAndStoreAllNFTsFromFullNodeDB() error {
 
 	log.Println("📡 Fetching NFT list from:", apiURL)
 
-	resp, err := http.Get(apiURL)
+	resp, err := insecureHTTPClient.Get(apiURL)
 	if err != nil {
 		return fmt.Errorf("failed to call get-nft-list API: %w", err)
 	}
@@ -226,7 +240,7 @@ func FetchAndStoreAllSCsFromFullNodeDB() error {
 
 	log.Println("📡 Fetching SC list from:", apiURL)
 
-	resp, err := http.Get(apiURL)
+	resp, err := insecureHTTPClient.Get(apiURL)
 	if err != nil {
 		return fmt.Errorf("failed to call get-smart-contract-list API: %w", err)
 	}
@@ -980,7 +994,7 @@ func FetchAllTokenChainFromFullNode() error {
 				idx+1, len(tokens), successCount, failureCount)
 		}
 
-		// Small delay to prevent node hammering
+		// Prevent hammering the node
 		time.Sleep(5 * time.Millisecond)
 	}
 
@@ -990,8 +1004,10 @@ func FetchAllTokenChainFromFullNode() error {
 
 	log.Printf("✅ Finished fetching all token chains and storing block data (Success: %d, Failures: %d)",
 		successCount, failureCount)
+
 	return nil
 }
+
 
 // fetchAndStoreTokenChain handles individual token chain syncing with retry logic
 func fetchAndStoreTokenChain(token models.TokenType) error {
