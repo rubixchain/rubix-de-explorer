@@ -102,11 +102,18 @@ func GetTransferBlockInfoFromBlockHash(hash string) (models.TransferBlocks, erro
 		return block, err
 	}
 
+	// If amount is missing, fetch it from fullnode
 	if (block.Amount == nil || *block.Amount == 0) && block.TxnID != nil && *block.TxnID != "" {
-		apiURL := fmt.Sprintf("%s/api/de-exp/get-txn-amount-by-txnID?txnID=%s", config.RubixNodeURL, *block.TxnID)
-		resp, err := http.Get(apiURL)
+
+		apiURL := fmt.Sprintf("%s/api/de-exp/get-txn-amount-by-txnID?txnID=%s",
+			config.RubixNodeURL, *block.TxnID,
+		)
+
+		// 🔥 TLS verification disabled
+		resp, err := insecureHTTPClient.Get(apiURL)
 		if err == nil && resp.StatusCode == http.StatusOK {
 			defer resp.Body.Close()
+
 			var result struct {
 				Status  bool   `json:"status"`
 				Message string `json:"message"`
@@ -116,9 +123,16 @@ func GetTransferBlockInfoFromBlockHash(hash string) (models.TransferBlocks, erro
 					BlockHash        string  `json:"BlockHash"`
 				} `json:"result"`
 			}
-			if err := json.NewDecoder(resp.Body).Decode(&result); err == nil && result.Status && result.Result.TransactionValue != 0 {
-				block.Amount = &result.Result.TransactionValue
-				database.DB.Model(&models.TransferBlocks{}).Where("txn_id = ?", block.TxnID).Update("amount", block.Amount)
+
+			if err := json.NewDecoder(resp.Body).Decode(&result); err == nil && result.Status {
+				if result.Result.TransactionValue != 0 {
+					block.Amount = &result.Result.TransactionValue
+
+					database.DB.
+						Model(&models.TransferBlocks{}).
+						Where("txn_id = ?", block.TxnID).
+						Update("amount", block.Amount)
+				}
 			}
 		}
 	}
@@ -127,8 +141,12 @@ func GetTransferBlockInfoFromBlockHash(hash string) (models.TransferBlocks, erro
 }
 
 func fetchTxnAmountFromFullNode(txnID string) *float64 {
-	url := fmt.Sprintf("%s/api/de-exp/get-txn-amount-by-txnID?txnID=%s", config.RubixNodeURL, txnID)
-	resp, err := http.Get(url)
+	url := fmt.Sprintf("%s/api/de-exp/get-txn-amount-by-txnID?txnID=%s",
+		config.RubixNodeURL, txnID,
+	)
+
+	// 🔥 TLS verification disabled
+	resp, err := insecureHTTPClient.Get(url)
 	if err != nil {
 		fmt.Printf("❌ Failed to call fullnode for txnID %s: %v\n", txnID, err)
 		return nil
@@ -163,6 +181,7 @@ func fetchTxnAmountFromFullNode(txnID string) *float64 {
 
 	return &result.Result.TransactionValue
 }
+
 
 func GetBlockType(txnId string) (int64, error) {
 	var blockType int64
