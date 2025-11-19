@@ -1022,7 +1022,7 @@ func fetchAndStoreTokenChain(token models.TokenType) error {
 	var err error
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		resp, err = http.Get(apiURL)
+		resp, err := insecureHTTPClient.Get(apiURL)
 		if err == nil && resp.StatusCode == http.StatusOK {
 			break
 		}
