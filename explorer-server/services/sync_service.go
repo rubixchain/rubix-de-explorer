@@ -112,14 +112,14 @@ type GetSCListResponse struct {
 }
 
 var insecureHTTPClient = &http.Client{
-    Transport: &http.Transport{
-        TLSClientConfig: &tls.Config{
-            InsecureSkipVerify: true,
-        },
-        // Disable HTTP/2 (Go otherwise forces TLS verification again)
-        ForceAttemptHTTP2: false,
-        TLSNextProto:      map[string]func(string, *tls.Conn) http.RoundTripper{},
-    },
+	Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
+		// Disable HTTP/2 (Go otherwise forces TLS verification again)
+		ForceAttemptHTTP2: false,
+		TLSNextProto:      map[string]func(string, *tls.Conn) http.RoundTripper{},
+	},
 }
 
 // FetchAndStoreAllRBTsFromFullNodeDB fetches RBTs from full node API and stores them
@@ -165,7 +165,6 @@ func FetchAndStoreAllRBTsFromFullNodeDB() error {
 	log.Printf("✅ Successfully fetched and stored %d RBTs\n", len(apiResp.Result))
 	return nil
 }
-
 
 func FetchAndStoreAllFTsFromFullNodeDB() error {
 	apiURL := config.RubixNodeURL + "/api/de-exp/get-ft-list"
@@ -963,8 +962,6 @@ func sliceStringPtr(v interface{}) *[]string {
 	return &strs
 }
 
-/// sequential token chain fetching
-
 // FetchAllTokenChainFromFullNode syncs token chains sequentially
 func FetchAllTokenChainFromFullNode() error {
 	var tokens []models.TokenType
@@ -980,14 +977,18 @@ func FetchAllTokenChainFromFullNode() error {
 		return nil
 	}
 
-	log.Printf("ℹ️ Starting sync for %d tokens", tokens)
+	log.Printf("ℹ️ Starting sync for %d tokens", len(tokens))
 
 	successCount := 0
 	failureCount := 0
 	var errs []error
 
 	for idx, token := range tokens {
-		fmt.Printf("🔄 Syncing token %d/%d: ID=%s, Type=%s\n",)
+
+		// 🟢 FIXED: Added missing variables in printf
+		fmt.Printf("🔄 Syncing token %d/%d: ID=%s, Type=%s\n",
+			idx+1, len(tokens), token.TokenID, token.TokenType)
+
 		if err := fetchAndStoreTokenChain(token); err != nil {
 			errs = append(errs, err)
 			failureCount++
@@ -1015,13 +1016,11 @@ func FetchAllTokenChainFromFullNode() error {
 	return nil
 }
 
-
 // fetchAndStoreTokenChain handles individual token chain syncing with retry logic
 func fetchAndStoreTokenChain(token models.TokenType) error {
 	fmt.Println("tokenInfo for getting tokenchain is:", token)
 	apiURL := fmt.Sprintf("%s/api/de-exp/get-token-chain?tokenID=%s&tokenType=%s",
 		config.RubixNodeURL, token.TokenID, token.TokenType)
-
 
 	// Retry logic with exponential backoff
 	maxRetries := 3
@@ -1030,7 +1029,7 @@ func fetchAndStoreTokenChain(token models.TokenType) error {
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		resp, err := insecureHTTPClient.Get(apiURL)
-        print("testing-02:", resp)
+		print("testing-02:", resp)
 		if err == nil && resp.StatusCode == http.StatusOK {
 			fmt.Printf("✅ Successfully fetched chain for %s on attempt %d\n", token.TokenID, attempt+1)
 			break
@@ -1053,8 +1052,8 @@ func fetchAndStoreTokenChain(token models.TokenType) error {
 		return err
 	}
 	if resp == nil {
-    return fmt.Errorf("nil response received from node for token %s", token.TokenID)
-}
+		return fmt.Errorf("nil response received from node for token %s", token.TokenID)
+	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("bad status code: %d", resp.StatusCode)
@@ -1089,36 +1088,35 @@ func fetchAndStoreTokenChain(token models.TokenType) error {
 	// }
 
 	// Check if API returned an error
-if status, ok := chainData["status"].(bool); ok && !status {
-	log.Printf("❌ API returned error for token %s: %v", token.TokenID, chainData["message"])
-	return nil
-}
+	if status, ok := chainData["status"].(bool); ok && !status {
+		log.Printf("❌ API returned error for token %s: %v", token.TokenID, chainData["message"])
+		return nil
+	}
 
-// Extract blocks safely
-var blocks []interface{}
-fmt.Printf("testing-1 is:%v", chainData)
-if b, ok := chainData["TokenChainData"].([]interface{}); ok {
-	blocks = b
-} else if b, ok := chainData["blocks"].([]interface{}); ok {
-	blocks = b
-} else {
-	log.Printf("⚠️ No block array found for token %s (keys: %v)", token.TokenID, reflect.ValueOf(chainData).MapKeys())
-	return nil
-}
+	// Extract blocks safely
+	var blocks []interface{}
+	fmt.Printf("testing-1 is:%v", chainData)
+	if b, ok := chainData["TokenChainData"].([]interface{}); ok {
+		blocks = b
+	} else if b, ok := chainData["blocks"].([]interface{}); ok {
+		blocks = b
+	} else {
+		log.Printf("⚠️ No block array found for token %s (keys: %v)", token.TokenID, reflect.ValueOf(chainData).MapKeys())
+		return nil
+	}
 
-// Defensive guard: prevent nil slice crashes
-if blocks == nil || len(blocks) == 0 {
-	log.Printf("⚠️ Empty or nil block list for token %s", token.TokenID)
-	return nil
-}
+	// Defensive guard: prevent nil slice crashes
+	if blocks == nil || len(blocks) == 0 {
+		log.Printf("⚠️ Empty or nil block list for token %s", token.TokenID)
+		return nil
+	}
 
-fmt.Printf("tested", len(blocks), token.TokenID, blocks)
+	fmt.Printf("tested", len(blocks), token.TokenID, blocks)
 
-// Process blocks sequentially
-if err := processAndStoreBlocks(token, blocks); err != nil {
-	return err
-}
-
+	// Process blocks sequentially
+	if err := processAndStoreBlocks(token, blocks); err != nil {
+		return err
+	}
 
 	return nil
 }
