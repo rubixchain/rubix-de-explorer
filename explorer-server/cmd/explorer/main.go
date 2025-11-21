@@ -7,14 +7,12 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
-	"sync"
 	"syscall"
 	"time"
 
 	"explorer-server/database"
 	"explorer-server/handlers"
 	"explorer-server/router"
-	"explorer-server/services"
 
 	"github.com/joho/godotenv"
 	"github.com/rs/cors"
@@ -146,55 +144,55 @@ func syncData(syncType string, maxWorkers int) {
 	syncStart := time.Now()
 	log.Printf("=== %s STARTED at %s (using %d workers) ===\n", syncType, syncStart.Format(time.RFC1123), maxWorkers)
 
-	var errCount int
-	var mu sync.Mutex // Protect errCount
-	var wg sync.WaitGroup
+	// var errCount int
+	// var mu sync.Mutex // Protect errCount
+	// var wg sync.WaitGroup
 
-	// Semaphore to limit concurrent workers
-	semaphore := make(chan struct{}, maxWorkers)
+	// // Semaphore to limit concurrent workers
+	// semaphore := make(chan struct{}, maxWorkers)
 
-	// Helper to log each fetch with timing (parallel with worker limit)
-	fetchWithLog := func(name string, fn func() error) {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	// // Helper to log each fetch with timing (parallel with worker limit)
+	// fetchWithLog := func(name string, fn func() error) {
+	// 	wg.Add(1)
+	// 	go func() {
+	// 		defer wg.Done()
 
-			// Acquire semaphore (blocks if maxWorkers already running)
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }() // Release semaphore
+	// 		// Acquire semaphore (blocks if maxWorkers already running)
+	// 		semaphore <- struct{}{}
+	// 		defer func() { <-semaphore }() // Release semaphore
 
-			start := time.Now()
-			err := fn()
-			duration := time.Since(start)
+	// 		start := time.Now()
+	// 		err := fn()
+	// 		duration := time.Since(start)
 
-			mu.Lock()
-			defer mu.Unlock()
-			if err != nil {
-				log.Printf("  [Failed] %s | Duration: %s | Error: %v\n", name, duration.Round(time.Millisecond), err)
-				errCount++
-			} else {
-				log.Printf("  [Success] %s | Duration: %s\n", name, duration.Round(time.Millisecond))
-			}
-		}()
-	}
+	// 		mu.Lock()
+	// 		defer mu.Unlock()
+	// 		if err != nil {
+	// 			log.Printf("  [Failed] %s | Duration: %s | Error: %v\n", name, duration.Round(time.Millisecond), err)
+	// 			errCount++
+	// 		} else {
+	// 			log.Printf("  [Success] %s | Duration: %s\n", name, duration.Round(time.Millisecond))
+	// 		}
+	// 	}()
+	// }
 
-	// Run all syncs IN PARALLEL (limited by maxWorkers)
-	fetchWithLog("FetchAndStoreAllRBTsFromFullNodeDB", services.FetchAndStoreAllRBTsFromFullNodeDB)
-	fetchWithLog("FetchAndStoreAllFTsFromFullNodeDB", services.FetchAndStoreAllFTsFromFullNodeDB)
-	fetchWithLog("FetchAndStoreAllNFTsFromFullNodeDB", services.FetchAndStoreAllNFTsFromFullNodeDB)
-	fetchWithLog("FetchAndStoreAllSCsFromFullNodeDB", services.FetchAndStoreAllSCsFromFullNodeDB)
-	fetchWithLog("FetchAllTokenChainFromFullNode", services.FetchAllTokenChainFromFullNode)
+	// // Run all syncs IN PARALLEL (limited by maxWorkers)
+	// fetchWithLog("FetchAndStoreAllRBTsFromFullNodeDB", services.FetchAndStoreAllRBTsFromFullNodeDB)
+	// fetchWithLog("FetchAndStoreAllFTsFromFullNodeDB", services.FetchAndStoreAllFTsFromFullNodeDB)
+	// fetchWithLog("FetchAndStoreAllNFTsFromFullNodeDB", services.FetchAndStoreAllNFTsFromFullNodeDB)
+	// fetchWithLog("FetchAndStoreAllSCsFromFullNodeDB", services.FetchAndStoreAllSCsFromFullNodeDB)
+	// fetchWithLog("FetchAllTokenChainFromFullNode", services.FetchAllTokenChainFromFullNode)
 
-	// Wait for all fetches to complete
-	wg.Wait()
+	// // Wait for all fetches to complete
+	// wg.Wait()
 
-	totalDuration := time.Since(syncStart)
-	log.Printf("=== %s COMPLETED in %s | Failed: %d ===\n",
-		syncType, totalDuration.Round(time.Millisecond), errCount)
+	// totalDuration := time.Since(syncStart)
+	// log.Printf("=== %s COMPLETED in %s | Failed: %d ===\n",
+	// 	syncType, totalDuration.Round(time.Millisecond), errCount)
 
-	if errCount == 0 {
-		log.Println("✅ All data synced successfully!")
-	} else {
-		log.Printf("⚠️ Sync completed with %d error(s). Check logs above.\n", errCount)
-	}
+	// if errCount == 0 {
+	// 	log.Println("✅ All data synced successfully!")
+	// } else {
+	// 	log.Printf("⚠️ Sync completed with %d error(s). Check logs above.\n", errCount)
+	// }
 }
