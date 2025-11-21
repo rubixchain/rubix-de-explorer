@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"explorer-server/database"
+	"explorer-server/handlers"
 	"explorer-server/router"
 	"explorer-server/services"
 
@@ -21,17 +22,17 @@ import (
 
 func main() {
 	startTime := time.Now()
-	
+
 	// Get total CPU cores
 	totalCores := runtime.NumCPU()
 	log.Printf("Detected %d CPU cores\n", totalCores)
-	
+
 	// Reserve 1 core for server, rest for syncing
 	syncCores := totalCores - 1
 	if syncCores < 1 {
 		syncCores = 1 // Minimum 1 core for syncing
 	}
-	
+
 	// Set GOMAXPROCS to use all cores
 	runtime.GOMAXPROCS(totalCores)
 	log.Printf("Using %d cores total: 1 for server, %d for data syncing\n", totalCores, syncCores)
@@ -49,6 +50,10 @@ func main() {
 	database.ConnectAndMigrate(false)
 	log.Println("PostgreSQL connected and migrated")
 
+	// Initialize notification queue BEFORE starting server
+	notificationQueue := handlers.InitNotificationQueue(8)
+	log.Println("✅ Notification queue initialized with 8 workers")
+
 	// Setup router
 	r := router.NewRouter()
 	handler := cors.Default().Handler(r)
@@ -61,8 +66,11 @@ func main() {
 
 	// Create HTTP server
 	srv := &http.Server{
-		Addr:"0.0.0.0:" + port, 
-		Handler: handler,
+		Addr:           "0.0.0.0:" + port,
+		Handler:        handler,
+		ReadTimeout:    15 * time.Second,
+		WriteTimeout:   15 * time.Second,
+		MaxHeaderBytes: 1 << 20,
 	}
 
 	// Start server IMMEDIATELY in goroutine
@@ -91,22 +99,34 @@ func main() {
 	shutdownStart := time.Now()
 	log.Printf("Shutdown signal received at %s\n", shutdownStart.Format(time.RFC1123))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
+	// Shutdown sequence: HTTP -> Queue -> Database
 
-	if err := srv.Shutdown(ctx); err != nil {
+	// 1. Stop accepting new HTTP requests (10 second timeout)
+	httpCtx, httpCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer httpCancel()
+
+	if err := srv.Shutdown(httpCtx); err != nil {
 		log.Printf("Server forced to shutdown: %v", err)
 	} else {
-		log.Println("HTTP server stopped gracefully")
+		log.Println("✅ HTTP server stopped gracefully")
 	}
 
+	// 2. Drain notification queue (60 second timeout for pending tasks)
+	log.Println("🛑 Draining notification queue...")
+	queueCtx, queueCancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer queueCancel()
+	notificationQueue.Shutdown(queueCtx)
+	log.Println("✅ Notification queue drained")
+
+	// 3. Close database connections
 	database.CloseDB()
-	log.Printf("Database connection closed\n")
+	log.Println("✅ Database connection closed")
+
 	log.Printf("Server shutdown complete in %s\n", time.Since(shutdownStart).Round(time.Millisecond))
 	log.Printf("Total uptime: %s\n", time.Since(startTime).Round(time.Second))
 }
 
-// startPeriodicSync runs syncData every 3 hours in background
+// startPeriodicSync runs syncData every 12 hours in background
 func startPeriodicSync(maxWorkers int) {
 	log.Println("Periodic sync scheduler started (every 12 hours)")
 
@@ -138,11 +158,11 @@ func syncData(syncType string, maxWorkers int) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			
+
 			// Acquire semaphore (blocks if maxWorkers already running)
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }() // Release semaphore
-			
+
 			start := time.Now()
 			err := fn()
 			duration := time.Since(start)
@@ -173,8 +193,8 @@ func syncData(syncType string, maxWorkers int) {
 		syncType, totalDuration.Round(time.Millisecond), errCount)
 
 	if errCount == 0 {
-		log.Println("All data synced successfully!")
+		log.Println("✅ All data synced successfully!")
 	} else {
-		log.Printf("Sync completed with %d error(s). Check logs above.\n", errCount)
+		log.Printf("⚠️ Sync completed with %d error(s). Check logs above.\n", errCount)
 	}
 }

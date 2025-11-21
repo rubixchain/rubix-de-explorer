@@ -33,9 +33,9 @@ func UpdateTokens(tableName string, tokenData interface{}, operation string) {
 		log.Printf("Processing SmartContract %s", operation)
 		UpdateSCToken(tokenData, operation)
 
-	case "FullnodeFailedToSyncTokens":
-		log.Printf("Processing Failed Token %s", operation)
-		UpdateFailedTokens(tokenData, operation)
+	// case "FullnodeFailedToSyncTokens":
+	// 	log.Printf("Processing Failed Token %s", operation)
+	// 	UpdateFailedTokens(tokenData, operation)
 
 	default:
 		log.Printf("⚠️ Unknown token table: %s\n", tableName)
