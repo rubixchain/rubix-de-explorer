@@ -8,7 +8,7 @@ import (
 	"explorer-server/database/models"
 	"fmt"
 	"io"
-	// "net/http"
+	"net/http"
 	"strings"
 )
 
@@ -30,9 +30,8 @@ var transactionTypeNames = map[string]string{
 }
 
 func GetAssetType(id string) (string, error) {
-	var asset models.TokenType // assuming this matches your table structure
+	var asset models.TokenType
 
-	// Fetch asset by ID
 	result := database.DB.Where("token_id = ?", id).First(&asset)
 	if result.Error != nil {
 		return "", fmt.Errorf("failed to fetch asset type: %w", result.Error)
@@ -53,47 +52,49 @@ func GetTokenChainFromTokenID(tokenID string) (map[string]interface{}, error) {
 		return nil, fmt.Errorf("❌ failed to get token type from asset table: %v", err)
 	}
 
-	// Step 2: Check if token type is RBT and get token value
+	// Step 2: For RBT, check value and possibly use PART
 	if strings.ToUpper(tokenType) == "RBT" {
 		rbt, err := GetRBTInfoFromRBTID(tokenID)
 		if err != nil {
 			return nil, fmt.Errorf("❌ failed to get RBT from RBT table: %v", err)
 		}
 
-		// If token value is less than 1, change token type to PART
 		if rbt.TokenValue < 1.0 {
 			tokenType = PartType
 		}
 	}
 
-	// Step 3: Build full node API URL
 	apiURL := fmt.Sprintf("%s/api/de-exp/get-token-chain?tokenID=%s&tokenType=%s",
 		config.RubixNodeURL, tokenID, tokenType)
 
-	// Step 4: Call the API using insecure TLS client
-	resp, err := insecureHTTPClient.Get(apiURL)
+	client := GetNodeHTTPClient()
+	release := acquireNodeSlot()
+	defer release()
+
+	resp, err := client.Get(apiURL)
 	if err != nil {
 		return nil, fmt.Errorf("❌ error fetching token chain for %s: %v", tokenID, err)
 	}
 	defer resp.Body.Close()
 
-	// Step 5: Read response
+	if resp.StatusCode != http.StatusOK {
+		io.Copy(io.Discard, resp.Body)
+		return nil, fmt.Errorf("❌ fullnode returned status %d for token %s", resp.StatusCode, tokenID)
+	}
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("❌ error reading response for %s: %v", tokenID, err)
 	}
 	fmt.Println("RAW DATA:", string(body))
 
-	// Step 6: Decode JSON
 	var chainData map[string]interface{}
 	if err := json.Unmarshal(body, &chainData); err != nil {
 		return nil, fmt.Errorf("❌ error decoding JSON for %s: %v", tokenID, err)
 	}
 
-	// Step 7: Return the full token chain response
 	return chainData, nil
 }
-
 
 // Fetches all blocks from a given token chain with pagination
 func GetTokenBlocksFromTokenID(tokenID string, page int, limit int) ([]map[string]interface{}, int, error) {
@@ -103,36 +104,41 @@ func GetTokenBlocksFromTokenID(tokenID string, page int, limit int) ([]map[strin
 		return nil, 0, fmt.Errorf("❌ failed to get token type from asset table: %v", err)
 	}
 
-	// Step 2: Check if token type is RBT and get token value
+	// Step 2: For RBT, check value and possibly use PART
 	if strings.ToUpper(tokenType) == "RBT" {
 		rbt, err := GetRBTInfoFromRBTID(tokenID)
 		if err != nil {
 			return nil, 0, fmt.Errorf("❌ failed to get RBT from RBT table: %v", err)
 		}
 
-		// If token value is less than 1, change token type to PART
 		if rbt.TokenValue < 1.0 {
 			tokenType = PartType
 		}
 	}
 
-	// Step 3: Build API URL
 	apiURL := fmt.Sprintf("%s/api/de-exp/get-token-chain?tokenID=%s&tokenType=%s",
 		config.RubixNodeURL, tokenID, tokenType)
 
-	// Step 4: Fetch data
-	resp, err := insecureHTTPClient.Get(apiURL)
+	client := GetNodeHTTPClient()
+	release := acquireNodeSlot()
+	defer release()
+
+	resp, err := client.Get(apiURL)
 	if err != nil {
 		return nil, 0, fmt.Errorf("❌ error fetching token chain for %s: %v", tokenID, err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		io.Copy(io.Discard, resp.Body)
+		return nil, 0, fmt.Errorf("❌ fullnode returned status %d for token %s", resp.StatusCode, tokenID)
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, 0, fmt.Errorf("❌ error reading response for %s: %v", tokenID, err)
 	}
 
-	// Step 5: Decode JSON
 	var chainData map[string]interface{}
 	if err := json.Unmarshal(body, &chainData); err != nil {
 		return nil, 0, fmt.Errorf("❌ error decoding JSON for %s: %v", tokenID, err)
@@ -193,7 +199,6 @@ func GetTokenBlocksFromTokenID(tokenID string, page int, limit int) ([]map[strin
 		return nil, 0, fmt.Errorf("❌ no valid token chain blocks found for %s", tokenID)
 	}
 
-	// Step 6: Standard pagination logic
 	if page < 1 {
 		page = 1
 	}
