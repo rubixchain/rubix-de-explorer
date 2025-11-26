@@ -2,12 +2,12 @@ package handlers
 
 import (
 	"encoding/json"
-	"fmt"
+	"explorer-server/services"
 	"log"
 	"net/http"
 )
 
-// UpdateTokensHandler - ASYNC (queues instead of blocking)
+// TOKEN UPDATE (High Priority) → Worker Pool
 func UpdateTokensHandler(w http.ResponseWriter, r *http.Request) {
 	var payload struct {
 		Table     string      `json:"table"`
@@ -20,16 +20,14 @@ func UpdateTokensHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("📝 Received token %s from fullnode (table: %s), queueing for processing", payload.Operation, payload.Table)
+	log.Printf("📥 Received token %s for table %s — queueing", payload.Operation, payload.Table)
 
-	queue := GetQueue()
-	if err := queue.EnqueueTokenUpdate(payload.Table, payload.Data, payload.Operation); err != nil {
-		http.Error(w, fmt.Sprintf("Queue error: %v", err), http.StatusServiceUnavailable)
-		log.Printf("❌ Failed to enqueue token: %v", err)
-		return
+	ok := services.EnqueueTokenUpdateTask(payload.Table, payload.Data, payload.Operation)
+	if !ok {
+		log.Println("⚠️ Token worker queue full — executing token update inline")
+		services.UpdateTokens(payload.Table, payload.Data, payload.Operation)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status": "queued", "message": "Token update accepted for processing"}`))
+	w.Write([]byte(`{"status":"queued","message":"Token update accepted"}`))
 }

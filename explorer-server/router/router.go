@@ -1,8 +1,9 @@
 package router
 
 import (
-	"explorer-server/handlers"
 	"net/http"
+
+	"explorer-server/handlers"
 
 	"github.com/gorilla/mux"
 )
@@ -11,14 +12,13 @@ import (
 func NewRouter() *mux.Router {
 	r := mux.NewRouter()
 
-	// Health and database routes
+	// Health
 	r.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ok"}`))
 	}).Methods("GET")
 
-	// Database-powered API routes (primary endpoints)
 	r.HandleFunc("/api/allrbtcount", handlers.GetRBTCountHandler).Methods(http.MethodGet)
 	r.HandleFunc("/api/allftcount", handlers.GetFTCountHandler).Methods(http.MethodGet)
 	r.HandleFunc("/api/alldidcount", handlers.GetDIDCountHandler).Methods(http.MethodGet)
@@ -47,11 +47,11 @@ func NewRouter() *mux.Router {
 	r.HandleFunc("/api/burnttxn-info", handlers.GetBurntTxnInfoFromTxnHash).Methods(http.MethodGet)
 	r.HandleFunc("/api/ftholdings", handlers.GetFtHoldingList).Methods(http.MethodGet)
 
-	// Notification endpoints - ASYNC PROCESSING
+	// ==== New async notification endpoints ====
 	r.HandleFunc("/api/block-update", handlers.UpdateBlocksHandler).Methods(http.MethodPost)
 	r.HandleFunc("/api/token-update", handlers.UpdateTokensHandler).Methods(http.MethodPost)
 
-	// Queue status endpoint for monitoring
+	// Worker pool / queue status (for monitoring)
 	r.HandleFunc("/api/queue-status", handlers.QueueStatusHandler).Methods(http.MethodGet)
 
 	return r

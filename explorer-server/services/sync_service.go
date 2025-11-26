@@ -1052,3 +1052,29 @@ func processAndStoreBlocks(token models.TokenType, blocks []interface{}) error {
 
 	return nil
 }
+
+// ProcessSingleBlock is used by the live /api/block-update path.
+// It stores the block in AllBlocks and then routes it to the right table.
+func ProcessSingleBlock(blockMap map[string]interface{}) {
+	if blockMap == nil {
+		return
+	}
+
+	// Always store in AllBlocks table
+	StoreBlockInAllBlocks(blockMap)
+
+	transType, _ := blockMap["TCTransTypeKey"].(string)
+
+	switch transType {
+	case "02", "2":
+		StoreTransferBlock(blockMap)
+	case "08", "13":
+		StoreBurntBlock(blockMap)
+	case "09", "9":
+		StoreSCDeployBlock(blockMap)
+	case "10":
+		StoreSCExecuteBlock(blockMap)
+	default:
+		log.Printf("⚠️ Unknown block type in live update: %s", transType)
+	}
+}
