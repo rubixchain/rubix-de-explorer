@@ -2,6 +2,7 @@ package services
 
 import (
 	"crypto/tls"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -31,19 +32,20 @@ func GetNodeHTTPClient() *http.Client {
 			TLSClientConfig: &tls.Config{
 				InsecureSkipVerify: true, // fullnode runs with self-signed cert
 			},
-			DisableKeepAlives:   false,
+			DialContext: (&net.Dialer{
+				Timeout:   10 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
 			MaxIdleConns:        500,
 			MaxIdleConnsPerHost: 200,
 			MaxConnsPerHost:     200,
 			IdleConnTimeout:     90 * time.Second,
-			ForceAttemptHTTP2:   false, // avoid implicit TLS revalidation with HTTP/2
 		}
 
 		nodeHTTPClient = &http.Client{
-			Timeout:   30 * time.Second,
 			Transport: tr,
+			Timeout:   120 * time.Second,
 		}
 	})
-
 	return nodeHTTPClient
 }
