@@ -58,7 +58,7 @@ func main() {
 	// Start continuous background sync (Option C)
 	// --------------------------------------------------
 	// This uses the dedicated sync worker pool internally.
-	services.StartContinuousSync(syncCores)
+	// services.StartContinuousSync(syncCores)
 
 	// --------------------------------------------------
 	// HTTP router + CORS
