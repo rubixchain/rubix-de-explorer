@@ -1,0 +1,37 @@
+# Build artifacts
+*.exe
+*.dll
+explorer-server
+explorer.exe
+
+.env
+
+# Database runtime files - DO NOT COMMIT
+database/postgres-bin/*/data/
+database/postgres-bin/windows/data/
+database/postgres-bin/linux/data/
+database/postgres-bin/macos/data/
+
+# Database logs
+database/postgres-bin/*/postgres.log
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*~
+NUL
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Go build cache
+go.sum.backup

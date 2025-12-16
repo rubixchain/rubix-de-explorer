@@ -1,22 +1,43 @@
 package services
 
 import (
-	"explorer-server/client"
-	"explorer-server/model"
+	"explorer-server/database"
+	"explorer-server/database/models"
 )
 
-type FTService struct {
-	client *client.RubixClient
+// GetRBTCount returns the total number of RBTs in the database
+func GetFTCount() (int64, error) {
+	var count int64
+	if err := database.DB.Model(&models.FT{}).Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
-func NewFTService(c *client.RubixClient) *FTService {
-	return &FTService{client: c}
+func GetFTInfoFromFTID(ftID string) (*models.FT, error) {
+	var ftInfo models.FT
+	if err := database.DB.First(&ftInfo, "ft_id = ?", ftID).Error; err != nil {
+		return nil, err
+	}
+	return &ftInfo, nil
 }
+func GetFTListFromDID(did string) ([]models.FT, error) {
+	var ftList []models.FT
 
-func (s *FTService) GetFTTokens() (*model.GetFTResponse, error) {
-	return s.client.GetFTs()
-}
+	// Fetch all FTs where owner_did = given DID
+	if err := database.DB.
+		Where("owner_did = ?", did).
+		Find(&ftList).Error; err != nil {
+		return nil, err
+	}
 
-func (s *FTService) GetFTTokenchain(tokenID string) (map[string]interface{}, error) {
-	return s.client.GetFTTokenchain(tokenID)
+	return ftList, nil
 }
+// // GetRBTInfoFromRBTID fetches a single RBT by its ID
+// func GetRBTInfoFromRBTID(rbtID string) (*models.RBT, error) {
+// 	var rbt models.RBT
+// 	if err := database.DB.First(&rbt, "rbt_id = ?", rbtID).Error; err != nil {
+// 		return nil, err
+// 	}
+// 	return &rbt, nil
+// }
