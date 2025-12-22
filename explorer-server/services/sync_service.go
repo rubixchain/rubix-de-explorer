@@ -8,10 +8,10 @@ import (
 	"explorer-server/database/models"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"math"
 	"net/http"
+	"reflect"
 	"regexp"
 	"strconv"
 	"time"
@@ -115,17 +115,22 @@ func FetchAndStoreAllRBTsFromFullNodeDB() error {
 
 	log.Println("📡 Fetching RBT list from:", apiURL)
 
-	resp, err := http.Get(apiURL)
+	client := GetNodeHTTPClient()
+	release := acquireNodeSlot()
+	defer release()
+
+	resp, err := client.Get(apiURL)
 	if err != nil {
 		return fmt.Errorf("failed to call get-rbt-list API: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		io.Copy(io.Discard, resp.Body)
 		return fmt.Errorf("API returned non-200 status: %d", resp.StatusCode)
 	}
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
@@ -152,17 +157,22 @@ func FetchAndStoreAllFTsFromFullNodeDB() error {
 
 	log.Println("📡 Fetching FT list from:", apiURL)
 
-	resp, err := http.Get(apiURL)
+	client := GetNodeHTTPClient()
+	release := acquireNodeSlot()
+	defer release()
+
+	resp, err := client.Get(apiURL)
 	if err != nil {
 		return fmt.Errorf("failed to call get-ft-list API: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		io.Copy(io.Discard, resp.Body)
 		return fmt.Errorf("API returned non-200 status: %d", resp.StatusCode)
 	}
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
@@ -189,17 +199,22 @@ func FetchAndStoreAllNFTsFromFullNodeDB() error {
 
 	log.Println("📡 Fetching NFT list from:", apiURL)
 
-	resp, err := http.Get(apiURL)
+	client := GetNodeHTTPClient()
+	release := acquireNodeSlot()
+	defer release()
+
+	resp, err := client.Get(apiURL)
 	if err != nil {
 		return fmt.Errorf("failed to call get-nft-list API: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		io.Copy(io.Discard, resp.Body)
 		return fmt.Errorf("API returned non-200 status: %d", resp.StatusCode)
 	}
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
@@ -226,17 +241,22 @@ func FetchAndStoreAllSCsFromFullNodeDB() error {
 
 	log.Println("📡 Fetching SC list from:", apiURL)
 
-	resp, err := http.Get(apiURL)
+	client := GetNodeHTTPClient()
+	release := acquireNodeSlot()
+	defer release()
+
+	resp, err := client.Get(apiURL)
 	if err != nil {
 		return fmt.Errorf("failed to call get-smart-contract-list API: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		io.Copy(io.Discard, resp.Body)
 		return fmt.Errorf("API returned non-200 status: %d", resp.StatusCode)
 	}
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
@@ -530,93 +550,6 @@ func StoreSCInfoInDB(SCs []SC) error {
 	return nil
 }
 
-// // FetchAllTokenChainFromFullNode iterates over all tokens and stores different blocks
-// func FetchAllTokenChainFromFullNode() error {
-// 	var tokens []models.TokenType
-
-// 	// Fetch all tokens from DB
-// 	if err := database.DB.Find(&tokens).Error; err != nil {
-// 		log.Fatalf("❌ Failed to fetch tokens from DB: %v", err)
-// 		return err
-// 	}
-
-// 	for _, token := range tokens {
-// 		apiURL := fmt.Sprintf("%s/api/de-exp/get-token-chain?tokenID=%s&tokenType=%s",
-// 			config.RubixNodeURL, token.TokenID, token.TokenType)
-
-// 		resp, err := http.Get(apiURL)
-// 		if err != nil {
-// 			log.Printf("❌ Error fetching chain for %s: %v", token.TokenID, err)
-// 			continue
-// 		}
-// 		defer resp.Body.Close()
-
-// 		body, err := io.ReadAll(resp.Body)
-// 		if err != nil {
-// 			log.Printf("❌ Error reading response for %s: %v", token.TokenID, err)
-// 			continue
-// 		}
-
-// 		var chainData map[string]interface{}
-// 		if err := json.Unmarshal(body, &chainData); err != nil {
-// 			log.Printf("❌ Error decoding JSON for %s: %v", token.TokenID, err)
-// 			continue
-// 		}
-
-// 		var blocks []interface{}
-// 		if b, ok := chainData["TokenChainData"].([]interface{}); ok {
-// 			blocks = b
-// 		} else if b, ok := chainData["blocks"].([]interface{}); ok {
-// 			blocks = b
-// 		} else {
-// 			log.Printf("⚠️ No blocks found for token %s", token.TokenID)
-// 			continue
-// 		}
-
-// 		for _, blk := range blocks {
-// 			blockMap, ok := blk.(map[string]interface{})
-// 			if !ok {
-// 				continue
-// 			}
-
-// 			// Always store in AllBlocks first
-// 			StoreBlockInAllBlocks(blockMap)
-
-// 			// Extract transaction type
-// 			transType, _ := blockMap["TCTransTypeKey"].(string)
-
-// 			// Smart Contract (Deploy or Execute)
-// 			if token.TokenType == "SC" {
-// 				switch transType {
-// 				case "09", "9":
-// 					StoreSCDeployBlock(blockMap)
-// 				case "10":
-// 					StoreSCExecuteBlock(blockMap)
-// 				default:
-// 					log.Printf("⚠️ Ignoring non-SC block type %s for token %s", transType, token.TokenID)
-// 				}
-// 				continue
-// 			}
-
-// 			// Regular tokens (FT, NFT, RBT)
-// 			switch transType {
-// 			case "02", "2":
-// 				StoreTransferBlock(blockMap)
-// 			case "08", "13":
-// 				StoreBurntBlock(blockMap)
-// 			default:
-// 				log.Printf("⚠️ Unknown block type %s for token %s", transType, token.TokenID)
-// 			}
-// 		}
-
-// 		// Small delay between tokens to avoid overloading node
-// 		time.Sleep(100 * time.Millisecond)
-// 	}
-
-// 	log.Println("✅ Finished fetching all token chains and storing block data")
-// 	return nil
-// }
-
 // StoreTransferBlock handles inserting a single transfer-type block into DB
 func StoreTransferBlock(blockMap map[string]interface{}) {
 	transInfo, _ := blockMap["TCTransInfoKey"].(map[string]interface{})
@@ -629,7 +562,8 @@ func StoreTransferBlock(blockMap map[string]interface{}) {
 	epoch := int64Ptr(blockMap["TCEpoch"])
 
 	tb := models.TransferBlocks{
-		BlockHash:          fmt.Sprintf("%v", blockMap["TCBlockHashKey"]),
+		BlockHash: fmt.Sprintf("%v", blockMap["TCBlockHashKey"]),
+
 		PrevBlockID:        stringPtr(getNested(transInfo, "TTPreviousBlockIDKey")),
 		SenderDID:          stringPtr(getNested(transInfo, "TISenderDIDKey")),
 		ReceiverDID:        stringPtr(getNested(transInfo, "TIReceiverDIDKey")),
@@ -646,7 +580,7 @@ func StoreTransferBlock(blockMap map[string]interface{}) {
 	}).Create(&tb).Error; err != nil && !errors.Is(err, gorm.ErrDuplicatedKey) {
 		log.Printf("❌ Failed to store transfer block %v: %v", tb.BlockHash, err)
 	}
-	// time.Sleep(100 * time.Millisecond) // avoid hammering full node
+
 	log.Println("Transfer block stored")
 }
 
@@ -667,10 +601,9 @@ func StoreBurntBlock(blockMap map[string]interface{}) {
 			ist, err := time.LoadLocation("Asia/Kolkata")
 			if err != nil {
 				log.Printf("⚠️ Failed to load IST timezone: %v", err)
-				ist = time.FixedZone("IST", 5*3600+30*60) // fallback to fixed offset
+				ist = time.FixedZone("IST", 5*3600+30*60)
 			}
 
-			// Parse the time as IST, then convert to Unix epoch (which is always UTC)
 			if t, err := time.ParseInLocation("2006-01-02 15:04:05", match, ist); err == nil {
 				val := t.Unix()
 				epoch = &val
@@ -691,7 +624,8 @@ func StoreBurntBlock(blockMap map[string]interface{}) {
 	}
 
 	bb := models.BurntBlocks{
-		BlockHash:   fmt.Sprintf("%v", blockMap["TCBlockHashKey"]),
+		BlockHash: fmt.Sprintf("%v", blockMap["TCBlockHashKey"]),
+
 		ChildTokens: datatypes.JSON(childTokensJSON),
 		TxnType:     &txnTypeStr,
 		OwnerDID:    fmt.Sprintf("%v", blockMap["TCTokenOwnerKey"]),
@@ -729,13 +663,11 @@ func StoreSCDeployBlock(blockMap map[string]interface{}) {
 		break
 	}
 
-	// Parse epoch
 	var epoch time.Time
 	if e, ok := blockMap["TCEpoch"].(float64); ok {
 		epoch = time.Unix(int64(e), 0)
 	}
 
-	// Owner_DID from TIDeployerDIDKey
 	ownerDID := fmt.Sprintf("%v", getNested(transInfo, "TIDeployerDIDKey"))
 
 	scBlock := models.SC_Block{
@@ -746,7 +678,6 @@ func StoreSCDeployBlock(blockMap map[string]interface{}) {
 		Owner_DID:    ownerDID,
 	}
 
-	// Insert or update (on conflict block_id)
 	if err := database.DB.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "block_id"}},
 		UpdateAll: true,
@@ -779,13 +710,11 @@ func StoreSCExecuteBlock(blockMap map[string]interface{}) {
 		break
 	}
 
-	// Parse epoch (if available)
 	var epoch time.Time
 	if e, ok := blockMap["TCEpoch"].(float64); ok {
 		epoch = time.Unix(int64(e), 0)
 	}
 
-	// Executor_DID from TIExecutorDIDKey
 	execDidStr := getNested(transInfo, "TIExecutorDIDKey")
 	execDidPtr := stringPtr(execDidStr)
 
@@ -797,7 +726,6 @@ func StoreSCExecuteBlock(blockMap map[string]interface{}) {
 		Epoch:        epoch,
 	}
 
-	// Insert or update (on conflict block_id)
 	if err := database.DB.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "block_id"}},
 		UpdateAll: true,
@@ -816,7 +744,6 @@ func StoreBlockInAllBlocks(blockMap map[string]interface{}) {
 	blockHash := fmt.Sprintf("%v", blockMap["TCBlockHashKey"])
 	txnID := fmt.Sprintf("%v", transInfo["TITIDKey"])
 
-	// Determine readable block type
 	var blockType string
 	switch fmt.Sprintf("%v", blockMap["TCTransTypeKey"]) {
 	case "02", "2":
@@ -835,7 +762,6 @@ func StoreBlockInAllBlocks(blockMap map[string]interface{}) {
 		blockType = "unknown"
 	}
 
-	// Parse epoch timestamp
 	var epochTime time.Time
 	switch v := blockMap["TCEpoch"].(type) {
 	case string:
@@ -860,7 +786,6 @@ func StoreBlockInAllBlocks(blockMap map[string]interface{}) {
 		TxnID:     txnID,
 	}
 
-	// Insert — if duplicate, skip (no update needed)
 	if err := database.DB.Clauses(clause.OnConflict{DoNothing: true}).Create(&record).Error; err != nil {
 		log.Printf("❌ Failed to insert block into AllBlocks (%v): %v", blockHash, err)
 		return
@@ -943,13 +868,10 @@ func sliceStringPtr(v interface{}) *[]string {
 	return &strs
 }
 
-/// sequential token chain fetching
-
 // FetchAllTokenChainFromFullNode syncs token chains sequentially
 func FetchAllTokenChainFromFullNode() error {
 	var tokens []models.TokenType
 
-	// Fetch all tokens from DB
 	if err := database.DB.Find(&tokens).Error; err != nil {
 		log.Fatalf("❌ Failed to fetch tokens from DB: %v", err)
 		return err
@@ -967,6 +889,9 @@ func FetchAllTokenChainFromFullNode() error {
 	var errs []error
 
 	for idx, token := range tokens {
+		fmt.Printf("🔄 Syncing token %d/%d: ID=%s, Type=%s\n",
+			idx+1, len(tokens), token.TokenID, token.TokenType)
+
 		if err := fetchAndStoreTokenChain(token); err != nil {
 			errs = append(errs, err)
 			failureCount++
@@ -974,13 +899,11 @@ func FetchAllTokenChainFromFullNode() error {
 			successCount++
 		}
 
-		// Log progress every 1000 tokens
 		if (idx+1)%1000 == 0 {
 			log.Printf("📈 Progress: %d/%d tokens processed (Success: %d, Failures: %d)",
 				idx+1, len(tokens), successCount, failureCount)
 		}
 
-		// Small delay to prevent node hammering
 		time.Sleep(5 * time.Millisecond)
 	}
 
@@ -990,6 +913,7 @@ func FetchAllTokenChainFromFullNode() error {
 
 	log.Printf("✅ Finished fetching all token chains and storing block data (Success: %d, Failures: %d)",
 		successCount, failureCount)
+
 	return nil
 }
 
@@ -998,39 +922,52 @@ func fetchAndStoreTokenChain(token models.TokenType) error {
 	fmt.Println("tokenInfo for getting tokenchain is:", token)
 	apiURL := fmt.Sprintf("%s/api/de-exp/get-token-chain?tokenID=%s&tokenType=%s",
 		config.RubixNodeURL, token.TokenID, token.TokenType)
-	fmt.Println("API is:", apiURL)
 
-	// Retry logic with exponential backoff
 	maxRetries := 3
 	var resp *http.Response
 	var err error
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		resp, err = http.Get(apiURL)
-		if err == nil && resp.StatusCode == http.StatusOK {
+		release := acquireNodeSlot()
+		client := GetNodeHTTPClient()
+
+		resp, err = client.Get(apiURL)
+		release()
+
+		fmt.Print("testing-02:", resp)
+
+		if err == nil && resp != nil && resp.StatusCode == http.StatusOK {
+			fmt.Printf("✅ Successfully fetched chain for %s on attempt %d\n",
+				token.TokenID, attempt+1)
 			break
 		}
 
 		if err != nil {
-			log.Printf("❌ Attempt %d: Error fetching chain for %s: %v", attempt+1, token.TokenID, err)
-		} else if resp.StatusCode != http.StatusOK {
-			log.Printf("❌ Attempt %d: Bad status %d for token %s", attempt+1, resp.StatusCode, token.TokenID)
+			log.Printf("❌ Attempt %d: Error fetching chain for %s: %v",
+				attempt+1, token.TokenID, err)
+		} else if resp != nil {
+			log.Printf("❌ Attempt %d: Bad status %d for token %s",
+				attempt+1, resp.StatusCode, token.TokenID)
+			io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 		}
 
 		if attempt < maxRetries-1 {
-			backoffTime := time.Duration(1<<uint(attempt)) * 500 * time.Millisecond
-			time.Sleep(backoffTime)
+			backoff := time.Duration(1<<uint(attempt)) * 500 * time.Millisecond
+			time.Sleep(backoff)
 		}
 	}
 
 	if err != nil {
 		return err
 	}
-
+	if resp == nil {
+		return fmt.Errorf("nil response received from node for token %s", token.TokenID)
+	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		io.Copy(io.Discard, resp.Body)
 		return fmt.Errorf("bad status code: %d", resp.StatusCode)
 	}
 
@@ -1046,18 +983,30 @@ func fetchAndStoreTokenChain(token models.TokenType) error {
 		return err
 	}
 
-	// Extract blocks
+	if status, ok := chainData["status"].(bool); ok && !status {
+		log.Printf("❌ API returned error for token %s: %v",
+			token.TokenID, chainData["message"])
+		return nil
+	}
+
 	var blocks []interface{}
 	if b, ok := chainData["TokenChainData"].([]interface{}); ok {
 		blocks = b
 	} else if b, ok := chainData["blocks"].([]interface{}); ok {
 		blocks = b
 	} else {
-		log.Printf("⚠️ No blocks found for token %s", token.TokenID)
+		log.Printf("⚠️ No block array found for token %s (keys: %v)",
+			token.TokenID, reflect.ValueOf(chainData).MapKeys())
 		return nil
 	}
 
-	// Process blocks sequentially
+	if blocks == nil || len(blocks) == 0 {
+		log.Printf("⚠️ Empty or nil block list for token %s", token.TokenID)
+		return nil
+	}
+
+	fmt.Printf("tested %d blocks for token %s\n", len(blocks), token.TokenID)
+
 	if err := processAndStoreBlocks(token, blocks); err != nil {
 		return err
 	}
@@ -1073,13 +1022,10 @@ func processAndStoreBlocks(token models.TokenType, blocks []interface{}) error {
 			continue
 		}
 
-		// Always store in AllBlocks first
 		StoreBlockInAllBlocks(blockMap)
 
-		// Extract transaction type
 		transType, _ := blockMap["TCTransTypeKey"].(string)
 
-		// Smart Contract (Deploy or Execute)
 		if token.TokenType == "SC" {
 			switch transType {
 			case "09", "9":
@@ -1092,7 +1038,6 @@ func processAndStoreBlocks(token models.TokenType, blocks []interface{}) error {
 			continue
 		}
 
-		// Regular tokens (FT, NFT, RBT)
 		switch transType {
 		case "02", "2":
 			StoreTransferBlock(blockMap)
@@ -1102,9 +1047,34 @@ func processAndStoreBlocks(token models.TokenType, blocks []interface{}) error {
 			log.Printf("⚠️ Unknown block type %s for token %s", transType, token.TokenID)
 		}
 
-		// Small delay between block writes to reduce DB contention
 		time.Sleep(2 * time.Millisecond)
 	}
 
 	return nil
+}
+
+// ProcessSingleBlock is used by the live /api/block-update path.
+// It stores the block in AllBlocks and then routes it to the right table.
+func ProcessSingleBlock(blockMap map[string]interface{}) {
+	if blockMap == nil {
+		return
+	}
+
+	// Always store in AllBlocks table
+	StoreBlockInAllBlocks(blockMap)
+
+	transType, _ := blockMap["TCTransTypeKey"].(string)
+
+	switch transType {
+	case "02", "2":
+		StoreTransferBlock(blockMap)
+	case "08", "13":
+		StoreBurntBlock(blockMap)
+	case "09", "9":
+		StoreSCDeployBlock(blockMap)
+	case "10":
+		StoreSCExecuteBlock(blockMap)
+	default:
+		log.Printf("⚠️ Unknown block type in live update: %s", transType)
+	}
 }

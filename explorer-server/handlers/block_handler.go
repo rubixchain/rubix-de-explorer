@@ -2,11 +2,16 @@ package handlers
 
 import (
 	"encoding/json"
+	"explorer-server/services"
 	"log"
 	"net/http"
 	"strconv"
-	"explorer-server/services"
+	"time"
 )
+
+// ============================================================================
+//  READ-ONLY PUBLIC API HANDLERS (unchanged)
+// ============================================================================
 
 func GetTxnsCountHandler(w http.ResponseWriter, r *http.Request) {
 	count, err := services.GetTxnsCount()
@@ -14,19 +19,14 @@ func GetTxnsCountHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	response := map[string]int64{"all_block_count": count}
-
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-	}
+	json.NewEncoder(w).Encode(map[string]int64{"all_block_count": count})
 }
 
 func GetTransferBlockListHandler(w http.ResponseWriter, r *http.Request) {
-	// Parse pagination params
 	limitStr := r.URL.Query().Get("limit")
 	pageStr := r.URL.Query().Get("page")
+
 	limit := 10
 	page := 1
 
@@ -37,7 +37,6 @@ func GetTransferBlockListHandler(w http.ResponseWriter, r *http.Request) {
 		page = p
 	}
 
-	// Fetch data
 	response, err := services.GetTransferBlocksList(limit, page)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -45,107 +44,116 @@ func GetTransferBlockListHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-	}
-
+	json.NewEncoder(w).Encode(response)
 }
 
 func GetBlockInfoFromTxnHash(w http.ResponseWriter, r *http.Request) {
-	// Parse pagination params
 	txnHash := r.URL.Query().Get("hash")
 
-	// Fetch data
-	response, err := services.GetTransferBlockInfoFromTxnID(txnHash)
+	data, err := services.GetTransferBlockInfoFromTxnID(txnHash)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-	}
+	json.NewEncoder(w).Encode(data)
 }
 
 func GetBlockInfoFromBlockHash(w http.ResponseWriter, r *http.Request) {
-	// Parse pagination params
 	blockHash := r.URL.Query().Get("hash")
 
-	// Fetch data
-	response, err := services.GetTransferBlockInfoFromBlockHash(blockHash)
+	data, err := services.GetTransferBlockInfoFromBlockHash(blockHash)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-	}
+	json.NewEncoder(w).Encode(data)
 }
 
 func GetBurntTxnInfoFromTxnHash(w http.ResponseWriter, r *http.Request) {
+	txnHash := r.URL.Query().Get("hash")
 
-	txnkHash := r.URL.Query().Get("hash")
-
-	// Fetch data using service
-	data, err := services.GetBurntBlockInfo(txnkHash)
+	data, err := services.GetBurntBlockInfo(txnHash)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Send JSON response
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-	}
+	json.NewEncoder(w).Encode(data)
 }
 
 func GetBurntBlockList(w http.ResponseWriter, r *http.Request) {
 	limitStr := r.URL.Query().Get("limit")
 	pageStr := r.URL.Query().Get("page")
 
-	limit, err := strconv.Atoi(limitStr)
-	if err != nil || limit <= 0 {
-		limit = 10 // default limit
+	limit, _ := strconv.Atoi(limitStr)
+	page, _ := strconv.Atoi(pageStr)
+
+	if limit <= 0 {
+		limit = 10
+	}
+	if page <= 0 {
+		page = 1
 	}
 
-	page, err := strconv.Atoi(pageStr)
-	if err != nil || page <= 0 {
-		page = 1 // default page
-	}
-
-	// Fetch data using service
 	data, err := services.GetBurntBlockList(limit, page)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Send JSON response
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-	}
+	json.NewEncoder(w).Encode(data)
 }
 
-// UpdateBlocksHandler handles block updates pushed from the full node
+// ============================================================================
+//  BLOCK UPDATE (High Priority) → Worker Pool
+// ============================================================================
+
 func UpdateBlocksHandler(w http.ResponseWriter, r *http.Request) {
 	var block map[string]interface{}
-	// Decode incoming JSON body
 	if err := json.NewDecoder(r.Body).Decode(&block); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
 
-	log.Println("✅ Received block from fullnode:", block)
+	log.Println("📥 Received block update — queueing to high-priority worker")
 
-	// Process the incoming block
-	services.UpdateBlocks(block)
+	// Use the ORIGINAL, already-correct update path, just executed in the pool.
+	ok := services.EnqueueBlockUpdateTask(func() {
+		// This function already knows how to:
+		//   - decode the fullnode block map
+		//   - store into AllBlocks with correct hash / type / txn_id
+		//   - fan out into RBT/FT/NFT/SC etc.
+		services.UpdateBlocks(block)
+	})
+
+	if !ok {
+		log.Println("⚠️ Worker queue full — processing block inline (fallback)")
+		services.UpdateBlocks(block)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"message": "Block processed successfully"}`))
+	w.Write([]byte(`{"status":"queued","message":"Block update accepted"}`))
+}
+
+// ============================================================================
+//  Optional Debug Endpoint — Worker Pool Status
+// ============================================================================
+
+func QueueStatusHandler(w http.ResponseWriter, r *http.Request) {
+	status := services.GetWorkerPoolStatus()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"timestamp":    time.Now().Format(time.RFC3339),
+		"workers":      status.Workers,
+		"queue_length": status.QueueLen,
+		"queue_cap":    status.QueueCap,
+		"load_factor":  status.LoadFactor,
+	})
 }

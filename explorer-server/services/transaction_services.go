@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 
+	"explorer-server/config"
 	"explorer-server/database"
 	"explorer-server/database/models"
 )
@@ -14,7 +15,6 @@ import (
 // SyncMissingTxnAmounts checks TransferBlocks for missing amounts,
 // fetches from fullnode API, and updates DB.
 func SyncMissingTxnAmounts() {
-	const apiURL = "http://localhost:20010/api/de-exp/get-txn-amount-by-txnID?txnID=%s"
 
 	var blocks []models.TransferBlocks
 	if err := database.DB.Where("amount IS NULL OR amount = 0").Find(&blocks).Error; err != nil {
@@ -32,7 +32,9 @@ func SyncMissingTxnAmounts() {
 			continue
 		}
 
-		url := fmt.Sprintf(apiURL, *b.TxnID)
+		// url := fmt.Sprintf(apiURL, *b.TxnID)
+	     url := fmt.Sprintf("%s/api/de-exp/get-txn-amount-by-txnID?txnID=%s", config.RubixNodeURL, *b.TxnID)
+
 		resp, err := http.Get(url)
 		if err != nil {
 			log.Printf("⚠️ Failed to fetch txn amount for %s: %v", *b.TxnID, err)

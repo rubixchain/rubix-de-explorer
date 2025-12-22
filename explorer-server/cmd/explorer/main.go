@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
-	"sync"
 	"syscall"
 	"time"
 
@@ -21,23 +20,23 @@ import (
 
 func main() {
 	startTime := time.Now()
-	
-	// Get total CPU cores
+
+	// Detect CPU cores
 	totalCores := runtime.NumCPU()
 	log.Printf("Detected %d CPU cores\n", totalCores)
-	
-	// Reserve 1 core for server, rest for syncing
+
+	// Reserve 1 core for HTTP server, rest can be used for background workers
 	syncCores := totalCores - 1
 	if syncCores < 1 {
-		syncCores = 1 // Minimum 1 core for syncing
+		syncCores = 1
 	}
-	
-	// Set GOMAXPROCS to use all cores
+
+	// Use all cores
 	runtime.GOMAXPROCS(totalCores)
-	log.Printf("Using %d cores total: 1 for server, %d for data syncing\n", totalCores, syncCores)
+	log.Printf("Using %d cores total: 1 for server, %d for background work\n", totalCores, syncCores)
 	log.Printf("Starting Explorer Server at %s\n", startTime.Format(time.RFC1123))
 
-	// Load environment variables
+	// Load .env if present
 	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found, using default values")
 	} else {
@@ -49,23 +48,40 @@ func main() {
 	database.ConnectAndMigrate(false)
 	log.Println("PostgreSQL connected and migrated")
 
-	// Setup router
+	// --------------------------------------------------
+	// Initialize worker pools (block / token / sync)
+	// --------------------------------------------------
+	services.InitWorkerPools(totalCores)
+	log.Println("✅ Worker pools initialized")
+
+	// --------------------------------------------------
+	// Start continuous background sync (Option C)
+	// --------------------------------------------------
+	// This uses the dedicated sync worker pool internally.
+	// services.StartContinuousSync(syncCores)
+
+	// --------------------------------------------------
+	// HTTP router + CORS
+	// --------------------------------------------------
 	r := router.NewRouter()
 	handler := cors.Default().Handler(r)
 
-	// Get port
+	// Port
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080"
+		port = "8082"
 	}
 
-	// Create HTTP server
+	// HTTP server
 	srv := &http.Server{
-		Addr:"0.0.0.0:" + port, 
-		Handler: handler,
+		Addr:           "0.0.0.0:" + port,
+		Handler:        handler,
+		ReadTimeout:    15 * time.Second,
+		WriteTimeout:   15 * time.Second,
+		MaxHeaderBytes: 1 << 20,
 	}
 
-	// Start server IMMEDIATELY in goroutine
+	// Start HTTP server
 	go func() {
 		serverStart := time.Now()
 		log.Printf("Explorer server STARTED on port :%s at %s\n", port, serverStart.Format(time.RFC1123))
@@ -74,16 +90,9 @@ func main() {
 		}
 	}()
 
-	// Start initial sync IN BACKGROUND (non-blocking) with parallel processing
-	go func() {
-		time.Sleep(2 * time.Second) // Let server boot first
-		syncData("Initial Sync (Startup)", syncCores)
-	}()
-
-	// Start periodic sync scheduler
-	go startPeriodicSync(syncCores)
-
-	// Graceful shutdown
+	// --------------------------------------------------
+	// Graceful shutdown (HTTP + DB)
+	// --------------------------------------------------
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigChan
@@ -91,90 +100,20 @@ func main() {
 	shutdownStart := time.Now()
 	log.Printf("Shutdown signal received at %s\n", shutdownStart.Format(time.RFC1123))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
+	// 1) Stop accepting new HTTP requests
+	httpCtx, httpCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer httpCancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
+	if err := srv.Shutdown(httpCtx); err != nil {
 		log.Printf("Server forced to shutdown: %v", err)
 	} else {
-		log.Println("HTTP server stopped gracefully")
+		log.Println("✅ HTTP server stopped gracefully")
 	}
 
+	// 2) Close database connection
 	database.CloseDB()
-	log.Printf("Database connection closed\n")
+	log.Println("✅ Database connection closed")
+
 	log.Printf("Server shutdown complete in %s\n", time.Since(shutdownStart).Round(time.Millisecond))
 	log.Printf("Total uptime: %s\n", time.Since(startTime).Round(time.Second))
-}
-
-// startPeriodicSync runs syncData every 3 hours in background
-func startPeriodicSync(maxWorkers int) {
-	log.Println("Periodic sync scheduler started (every 12 hours)")
-
-	ticker := time.NewTicker(12 * time.Hour)
-	defer ticker.Stop()
-
-	for t := range ticker.C {
-		go func(triggerTime time.Time) {
-			log.Printf("Scheduled sync triggered at %s\n", triggerTime.Format(time.RFC1123))
-			syncData("Scheduled Sync", maxWorkers)
-		}(t)
-	}
-}
-
-// syncData performs all data fetches in parallel using available cores
-func syncData(syncType string, maxWorkers int) {
-	syncStart := time.Now()
-	log.Printf("=== %s STARTED at %s (using %d workers) ===\n", syncType, syncStart.Format(time.RFC1123), maxWorkers)
-
-	var errCount int
-	var mu sync.Mutex // Protect errCount
-	var wg sync.WaitGroup
-
-	// Semaphore to limit concurrent workers
-	semaphore := make(chan struct{}, maxWorkers)
-
-	// Helper to log each fetch with timing (parallel with worker limit)
-	fetchWithLog := func(name string, fn func() error) {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			
-			// Acquire semaphore (blocks if maxWorkers already running)
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }() // Release semaphore
-			
-			start := time.Now()
-			err := fn()
-			duration := time.Since(start)
-
-			mu.Lock()
-			defer mu.Unlock()
-			if err != nil {
-				log.Printf("  [Failed] %s | Duration: %s | Error: %v\n", name, duration.Round(time.Millisecond), err)
-				errCount++
-			} else {
-				log.Printf("  [Success] %s | Duration: %s\n", name, duration.Round(time.Millisecond))
-			}
-		}()
-	}
-
-	// Run all syncs IN PARALLEL (limited by maxWorkers)
-	fetchWithLog("FetchAndStoreAllRBTsFromFullNodeDB", services.FetchAndStoreAllRBTsFromFullNodeDB)
-	fetchWithLog("FetchAndStoreAllFTsFromFullNodeDB", services.FetchAndStoreAllFTsFromFullNodeDB)
-	fetchWithLog("FetchAndStoreAllNFTsFromFullNodeDB", services.FetchAndStoreAllNFTsFromFullNodeDB)
-	fetchWithLog("FetchAndStoreAllSCsFromFullNodeDB", services.FetchAndStoreAllSCsFromFullNodeDB)
-	fetchWithLog("FetchAllTokenChainFromFullNode", services.FetchAllTokenChainFromFullNode)
-
-	// Wait for all fetches to complete
-	wg.Wait()
-
-	totalDuration := time.Since(syncStart)
-	log.Printf("=== %s COMPLETED in %s | Failed: %d ===\n",
-		syncType, totalDuration.Round(time.Millisecond), errCount)
-
-	if errCount == 0 {
-		log.Println("All data synced successfully!")
-	} else {
-		log.Printf("Sync completed with %d error(s). Check logs above.\n", errCount)
-	}
 }

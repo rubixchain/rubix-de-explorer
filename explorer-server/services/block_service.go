@@ -8,12 +8,12 @@ import (
 	"explorer-server/model"
 	"explorer-server/util"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 )
 
-// GetTxnsCount returns total number of RBT records
+// GetTxnsCount returns total number of TransferBlocks records
 func GetTxnsCount() (int64, error) {
 	var count int64
 	if err := database.DB.Model(&models.TransferBlocks{}).Count(&count).Error; err != nil {
@@ -27,6 +27,12 @@ func GetTransferBlocksList(limit, page int) (model.TransactionsResponse, error) 
 	var blocks []models.TransferBlocks
 	var response model.TransactionsResponse
 
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 10
+	}
 	offset := (page - 1) * limit
 
 	// Fetch paginated blocks
@@ -52,7 +58,7 @@ func GetTransferBlocksList(limit, page int) (model.TransactionsResponse, error) 
 		if (b.Amount == nil || *b.Amount == 0) && b.TxnID != nil && *b.TxnID != "" {
 			if newAmt := fetchTxnAmountFromFullNode(*b.TxnID); newAmt != nil {
 				b.Amount = newAmt
-				database.DB.Model(&b).Update("amount", *newAmt)
+				_ = database.DB.Model(&b).Update("amount", *newAmt).Error
 			}
 		}
 
@@ -102,23 +108,45 @@ func GetTransferBlockInfoFromBlockHash(hash string) (models.TransferBlocks, erro
 		return block, err
 	}
 
+	// If amount is missing, fetch it from fullnode
 	if (block.Amount == nil || *block.Amount == 0) && block.TxnID != nil && *block.TxnID != "" {
-		apiURL := fmt.Sprintf("%s/api/de-exp/get-txn-amount-by-txnID?txnID=%s", config.RubixNodeURL, *block.TxnID)
-		resp, err := http.Get(apiURL)
-		if err == nil && resp.StatusCode == http.StatusOK {
+		apiURL := fmt.Sprintf("%s/api/de-exp/get-txn-amount-by-txnID?txnID=%s",
+			config.RubixNodeURL, *block.TxnID,
+		)
+
+		client := GetNodeHTTPClient()
+		release := acquireNodeSlot()
+		defer release()
+
+		resp, err := client.Get(apiURL)
+		if err != nil {
+			log.Printf("⚠️ Failed to call fullnode for txn %s: %v", *block.TxnID, err)
+		} else {
 			defer resp.Body.Close()
-			var result struct {
-				Status  bool   `json:"status"`
-				Message string `json:"message"`
-				Result  struct {
-					TransactionID    string  `json:"TransactionID"`
-					TransactionValue float64 `json:"TransactionValue"`
-					BlockHash        string  `json:"BlockHash"`
-				} `json:"result"`
-			}
-			if err := json.NewDecoder(resp.Body).Decode(&result); err == nil && result.Status && result.Result.TransactionValue != 0 {
-				block.Amount = &result.Result.TransactionValue
-				database.DB.Model(&models.TransferBlocks{}).Where("txn_id = ?", block.TxnID).Update("amount", block.Amount)
+
+			if resp.StatusCode != http.StatusOK {
+				log.Printf("⚠️ Fullnode returned %d for txn %s", resp.StatusCode, *block.TxnID)
+			} else {
+				var result struct {
+					Status  bool   `json:"status"`
+					Message string `json:"message"`
+					Result  struct {
+						TransactionID    string  `json:"TransactionID"`
+						TransactionValue float64 `json:"TransactionValue"`
+						BlockHash        string  `json:"BlockHash"`
+					} `json:"result"`
+				}
+
+				if err := json.NewDecoder(resp.Body).Decode(&result); err == nil && result.Status {
+					if result.Result.TransactionValue != 0 {
+						block.Amount = &result.Result.TransactionValue
+
+						_ = database.DB.
+							Model(&models.TransferBlocks{}).
+							Where("txn_id = ?", block.TxnID).
+							Update("amount", block.Amount).Error
+					}
+				}
 			}
 		}
 	}
@@ -127,8 +155,15 @@ func GetTransferBlockInfoFromBlockHash(hash string) (models.TransferBlocks, erro
 }
 
 func fetchTxnAmountFromFullNode(txnID string) *float64 {
-	url := fmt.Sprintf("%s/api/de-exp/get-txn-amount-by-txnID?txnID=%s", config.RubixNodeURL, txnID)
-	resp, err := http.Get(url)
+	url := fmt.Sprintf("%s/api/de-exp/get-txn-amount-by-txnID?txnID=%s",
+		config.RubixNodeURL, txnID,
+	)
+
+	client := GetNodeHTTPClient()
+	release := acquireNodeSlot()
+	defer release()
+
+	resp, err := client.Get(url)
 	if err != nil {
 		fmt.Printf("❌ Failed to call fullnode for txnID %s: %v\n", txnID, err)
 		return nil
@@ -137,10 +172,11 @@ func fetchTxnAmountFromFullNode(txnID string) *float64 {
 
 	if resp.StatusCode != http.StatusOK {
 		fmt.Printf("⚠️ Fullnode API returned %d for txnID %s\n", resp.StatusCode, txnID)
+		io.Copy(io.Discard, resp.Body)
 		return nil
 	}
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		fmt.Printf("⚠️ Error reading response for txnID %s: %v\n", txnID, err)
 		return nil
@@ -165,26 +201,42 @@ func fetchTxnAmountFromFullNode(txnID string) *float64 {
 }
 
 func GetBlockType(txnId string) (int64, error) {
-	var blockType int64
+	// NOTE: DB column block_type is string (transfer/burnt/etc.).
+	// Keeping signature as int64 to match existing usage.
+	var blockTypeStr string
 
 	err := database.DB.
 		Table("all_blocks").
 		Select("block_type").
 		Where("txn_id = ?", txnId).
-		Scan(&blockType).Error
+		Scan(&blockTypeStr).Error
 
 	if err != nil {
 		return 0, fmt.Errorf("❌ failed to get block_type for txn_id %s: %v", txnId, err)
 	}
 
-	return blockType, nil
+	// Map string types to numeric codes if needed (keeping simple & backward-compatible).
+	switch blockTypeStr {
+	case "transfer":
+		return 1, nil
+	case "burnt":
+		return 2, nil
+	case "burnt_for_ft":
+		return 3, nil
+	case "deploy":
+		return 4, nil
+	case "execute":
+		return 5, nil
+	case "mint":
+		return 6, nil
+	default:
+		return 0, nil
+	}
 }
 
 func GetSCBlockInfoFromTxnId(hash string) (interface{}, error) {
-
 	var block models.SC_Block
 
-	// Fetch block where block_hash matches
 	if err := database.DB.
 		Where("block_id = ?", hash).
 		First(&block).Error; err != nil {
@@ -192,12 +244,11 @@ func GetSCBlockInfoFromTxnId(hash string) (interface{}, error) {
 	}
 
 	return block, nil
-
 }
+
 func GetBurntBlockInfo(hash string) (interface{}, error) {
 	var block models.BurntBlocks
 
-	// Fetch block where block_hash matches
 	if err := database.DB.
 		Where("block_hash = ?", hash).
 		First(&block).Error; err != nil {
@@ -210,13 +261,18 @@ func GetBurntBlockInfo(hash string) (interface{}, error) {
 func GetBurntBlockList(limit, page int) (interface{}, error) {
 	var blocks []models.BurntBlocks
 
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 10
+	}
 	offset := (page - 1) * limit
 
-	// Fetch all blocks with pagination
 	if err := database.DB.
 		Order("epoch DESC").
-		Limit(int(limit)).
-		Offset(int(offset)).
+		Limit(limit).
+		Offset(offset).
 		Find(&blocks).Error; err != nil {
 		return nil, err
 	}
@@ -226,7 +282,6 @@ func GetBurntBlockList(limit, page int) (interface{}, error) {
 		return model.BurntBlocksListResponse{}, err
 	}
 
-	// Wrap in response struct
 	response := model.BurntBlocksListResponse{
 		BurntBlocks: blocks,
 		Count:       count,
@@ -234,45 +289,6 @@ func GetBurntBlockList(limit, page int) (interface{}, error) {
 
 	return response, nil
 }
-
-// Helper functions
-func derefStringPtr(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
-
-func derefFloatPtr(f *float64) float64 {
-	if f == nil {
-		return 0
-	}
-	return *f
-}
-
-func derefInt64Ptr(i *int64) int64 {
-	if i == nil {
-		return 0
-	}
-	return *i
-}
-
-// Helper functions to safely deref pointers
-// func derefString(s *string) *string {
-// 	if s == nil {
-// 		empty := ""
-// 		return &empty
-// 	}
-// 	return s
-// }
-
-// func derefInt64(i *int64) *int64 {
-// 	if i == nil {
-// 		zero := int64(0)
-// 		return &zero
-// 	}
-// 	return i
-// }
 
 // helper functions
 func deref(ptr *string) string {
@@ -291,40 +307,30 @@ func derefFloat(ptr *float64) float64 {
 
 // ProcessIncomingBlock flattens numeric keys and maps them to readable names
 func ProcessIncomingBlock(blockData map[string]interface{}) map[string]interface{} {
-	// Step 1: Flatten nested numeric keys like "4-2-5"
 	flattened := util.FlattenKeys("", blockData).(map[string]interface{})
-
-	// Step 2: Apply mapping (e.g., 1 → TCTokenTypeKey, etc.)
 	mapped := util.ApplyKeyMapping(flattened).(map[string]interface{})
-
 	return mapped
 }
 
 // UpdateBlocks processes an incoming block and routes it to the right storage function
 func UpdateBlocks(blockMap map[string]interface{}) {
-
-	// Convert numeric keys → named keys
 	mappedBlock := ProcessIncomingBlock(blockMap)
 
-	// Store in AllBlocks first (universal record)
+	// Store in AllBlocks first
 	StoreBlockInAllBlocks(mappedBlock)
 
-	// Identify transaction type
 	transType, _ := mappedBlock["TCTransTypeKey"].(string)
 
 	switch transType {
 	case "02", "2":
 		fmt.Println("Storing transfer block")
 		StoreTransferBlock(mappedBlock)
-
 	case "08", "13":
 		fmt.Println("Storing burnt block")
 		StoreBurntBlock(mappedBlock)
-
 	case "09", "9":
 		fmt.Println("Storing smart contract deploy block")
 		StoreSCDeployBlock(mappedBlock)
-
 	case "10":
 		fmt.Println("Storing smart contract execute block")
 		StoreSCExecuteBlock(mappedBlock)
