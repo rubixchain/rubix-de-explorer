@@ -18,28 +18,14 @@ type workerPool struct {
 }
 
 type WorkerPoolStatus struct {
-	Workers      int
-	QueueLen     int
-	QueueCap     int
-	LoadFactor   float64
-	BlockWorkers int
-	TokenWorkers int
-	SyncWorkers  int
-
-	BlockQueueLen int
-	TokenQueueLen int
-	SyncQueueLen  int
-
-	BlockQueueCap int
-	TokenQueueCap int
-	SyncQueueCap  int
+	Workers    int     `json:"workers"`
+	QueueLen   int     `json:"queue_len"`
+	QueueCap   int     `json:"queue_cap"`
+	LoadFactor float64 `json:"load_factor"`
 }
 
 var (
-	blockPool *workerPool
-	tokenPool *workerPool
-	syncPool  *workerPool
-
+	blockPool     *workerPool
 	initPoolsOnce sync.Once
 )
 
@@ -81,6 +67,7 @@ func (p *workerPool) startWorker() {
 
 	go func() {
 		idleTimeout := 30 * time.Second
+
 		for {
 			select {
 			case job, ok := <-p.queue:
@@ -110,7 +97,6 @@ func (p *workerPool) maybeScaleUp() {
 
 	qLen := len(p.queue)
 	if qLen > p.running && p.running < p.maxWorkers {
-		// simple heuristic: if queue longer than workers, spawn one more
 		p.startWorker()
 		log.Printf("📈 %s pool scaled up: %d workers (queue=%d)", p.name, p.running, qLen)
 	}
@@ -127,21 +113,17 @@ func (p *workerPool) enqueue(job func()) bool {
 	}
 }
 
-// InitWorkerPools configures pools based on CPU cores
+// InitWorkerPools configures the single block pool based on CPU cores
 func InitWorkerPools(totalCPU int) {
 	initPoolsOnce.Do(func() {
 		if totalCPU <= 0 {
 			totalCPU = runtime.NumCPU()
 		}
 
-		// Heuristics; you can tweak these
+		// Simple heuristic: half the cores for block workers, min 2
 		maxBlock := max(2, totalCPU/2)
-		maxToken := max(2, totalCPU/3)
-		maxSync := max(2, totalCPU/2)
 
 		blockPool = newWorkerPool("block", 2000, 2, maxBlock)
-		tokenPool = newWorkerPool("token", 2000, 2, maxToken)
-		syncPool = newWorkerPool("sync", 1000, 1, maxSync)
 	})
 }
 
@@ -153,73 +135,28 @@ func EnqueueBlockUpdateTask(job func()) bool {
 	return blockPool.enqueue(job)
 }
 
-// EnqueueTokenUpdateTask schedules a high-priority token job
-func EnqueueTokenUpdateTask(table string, data interface{}, op string) bool {
-	if tokenPool == nil {
-		InitWorkerPools(0)
-	}
-	return tokenPool.enqueue(func() {
-		UpdateTokens(table, data, op)
-	})
-}
-
-// EnqueueBackgroundSyncTask schedules a background sync job
-func EnqueueBackgroundSyncTask(job func()) bool {
-	if syncPool == nil {
-		InitWorkerPools(0)
-	}
-	return syncPool.enqueue(job)
-}
-
 // GetWorkerPoolStatus returns a snapshot for debugging/monitoring
 func GetWorkerPoolStatus() WorkerPoolStatus {
-	if blockPool == nil || tokenPool == nil || syncPool == nil {
+	if blockPool == nil {
 		return WorkerPoolStatus{}
 	}
 
 	bLen := len(blockPool.queue)
-	tLen := len(tokenPool.queue)
-	sLen := len(syncPool.queue)
-
 	bCap := cap(blockPool.queue)
-	tCap := cap(tokenPool.queue)
-	sCap := cap(syncPool.queue)
-
-	totalLen := bLen + tLen + sLen
-	totalCap := bCap + tCap + sCap
 
 	load := 0.0
-	if totalCap > 0 {
-		load = float64(totalLen) / float64(totalCap)
+	if bCap > 0 {
+		load = float64(bLen) / float64(bCap)
 	}
 
 	blockPool.mu.Lock()
 	bw := blockPool.running
 	blockPool.mu.Unlock()
 
-	tokenPool.mu.Lock()
-	tw := tokenPool.running
-	tokenPool.mu.Unlock()
-
-	syncPool.mu.Lock()
-	sw := syncPool.running
-	syncPool.mu.Unlock()
-
 	return WorkerPoolStatus{
-		Workers:      bw + tw + sw,
-		QueueLen:     totalLen,
-		QueueCap:     totalCap,
-		LoadFactor:   load,
-		BlockWorkers: bw,
-		TokenWorkers: tw,
-		SyncWorkers:  sw,
-
-		BlockQueueLen: bLen,
-		TokenQueueLen: tLen,
-		SyncQueueLen:  sLen,
-
-		BlockQueueCap: bCap,
-		TokenQueueCap: tCap,
-		SyncQueueCap:  sCap,
+		Workers:    bw,
+		QueueLen:   bLen,
+		QueueCap:   bCap,
+		LoadFactor: load,
 	}
 }

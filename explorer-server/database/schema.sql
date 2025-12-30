@@ -1,6 +1,3 @@
--- =============================================
--- TABLE: TransferBlocks
--- =============================================
 CREATE TABLE IF NOT EXISTS "TransferBlocks" (
     block_hash TEXT PRIMARY KEY,
     prev_block_id TEXT,
@@ -14,9 +11,6 @@ CREATE TABLE IF NOT EXISTS "TransferBlocks" (
     txn_id TEXT
 );
 
--- =============================================
--- TABLE: RBT
--- =============================================
 CREATE TABLE IF NOT EXISTS "RBT" (
     rbt_id TEXT PRIMARY KEY,
     owner_did TEXT,
@@ -26,9 +20,6 @@ CREATE TABLE IF NOT EXISTS "RBT" (
     token_status INTEGER
 );
 
--- =============================================
--- TABLE: FT
--- =============================================
 CREATE TABLE IF NOT EXISTS "FT" (
     ft_id TEXT PRIMARY KEY,
     token_value DOUBLE PRECISION,
@@ -41,9 +32,6 @@ CREATE TABLE IF NOT EXISTS "FT" (
     token_status INTEGER
 );
 
--- =============================================
--- TABLE: NFT
--- =============================================
 CREATE TABLE IF NOT EXISTS "NFT" (
     nft_id TEXT PRIMARY KEY,
     token_value TEXT,
@@ -54,9 +42,6 @@ CREATE TABLE IF NOT EXISTS "NFT" (
     token_status INTEGER
 );
 
--- =============================================
--- TABLE: SmartContract
--- =============================================
 CREATE TABLE IF NOT EXISTS "SmartContract" (
     contract_id TEXT PRIMARY KEY,
     block_hash TEXT,
@@ -66,9 +51,6 @@ CREATE TABLE IF NOT EXISTS "SmartContract" (
     token_status INTEGER
 );
 
--- =============================================
--- TABLE: DIDs
--- =============================================
 CREATE TABLE IF NOT EXISTS "DIDs" (
     did TEXT PRIMARY KEY,
     created_at TIMESTAMP,
@@ -78,9 +60,6 @@ CREATE TABLE IF NOT EXISTS "DIDs" (
     total_sc BIGINT
 );
 
--- =============================================
--- TABLE: TxnAnalytics
--- =============================================
 CREATE TABLE IF NOT EXISTS "TxnAnalytics" (
     interval_start TIMESTAMP,
     interval_end TIMESTAMP,
@@ -89,18 +68,12 @@ CREATE TABLE IF NOT EXISTS "TxnAnalytics" (
     token_type TEXT
 );
 
--- =============================================
--- TABLE: TokenType
--- =============================================
 CREATE TABLE IF NOT EXISTS "TokenType" (
     token_id VARCHAR(255) PRIMARY KEY,
     token_type VARCHAR(100),
     last_updated TIMESTAMP NOT NULL
 );
 
--- =============================================
--- TABLE: AllBlocks
--- =============================================
 CREATE TABLE IF NOT EXISTS "AllBlocks" (
     block_hash VARCHAR(255) PRIMARY KEY,
     block_type VARCHAR(50),
@@ -108,9 +81,6 @@ CREATE TABLE IF NOT EXISTS "AllBlocks" (
     txn_id VARCHAR(255)
 );
 
--- =============================================
--- TABLE: SC_Blocks
--- =============================================
 CREATE TABLE IF NOT EXISTS "SC_Blocks" (
     block_id VARCHAR(255) PRIMARY KEY,
     contract_id VARCHAR(255),
@@ -120,9 +90,6 @@ CREATE TABLE IF NOT EXISTS "SC_Blocks" (
     owner_did VARCHAR(255)
 );
 
--- =============================================
--- TABLE: BurntBlocks
--- =============================================
 CREATE TABLE IF NOT EXISTS "BurntBlocks" (
     block_hash VARCHAR(255) PRIMARY KEY,
     child_tokens JSONB,
@@ -130,4 +97,16 @@ CREATE TABLE IF NOT EXISTS "BurntBlocks" (
     owner_did VARCHAR(255),
     epoch BIGINT,
     tokens JSONB
+);
+
+CREATE TABLE IF NOT EXISTS "MintBlocks" (
+    block_hash   VARCHAR(255) PRIMARY KEY,
+    token_ids    TEXT[] NOT NULL,
+    token_type   VARCHAR(50) NOT NULL,
+    owner_did    VARCHAR(255) NOT NULL,
+    creator_did  VARCHAR(255),
+    token_value  DOUBLE PRECISION,
+    ft_name      VARCHAR(255),
+    epoch        BIGINT,
+    txn_type     VARCHAR(50)
 );

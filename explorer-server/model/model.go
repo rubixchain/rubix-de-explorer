@@ -99,3 +99,27 @@ type FailedToSyncTokenDetailsInfo struct {
 	Did       string `gorm:"column:did"`
 	AssetType int    `gorm:"column:asset_type"`
 }
+
+// TokenDetails represents the specific token information received from the full node
+type TokenDetails struct {
+	TokenID    string  `json:"token_id"`
+	TokenType  int     `json:"token_type"`
+	TokenValue float64 `json:"token_value"`
+}
+
+// IncomingBlockInfo represents what Explorer receives from fullnode
+type IncomingBlockInfo struct {
+	BlockHash         string                 `json:"block_hash"`
+	TransactionID     string                 `json:"transaction_id"`
+	TxnType           string                 `json:"transaction_type"`
+	AssetType         int                    `json:"asset_type"`
+	FTName            string                 `json:"ft_name"`
+	CreatorDID        string                 `json:"creator_did"`
+	PublisherDID      string                 `json:"publisher_did"`
+	ReceiverDID       string                 `json:"receiver_did"`
+	TxnBlock          map[string]interface{} `json:"block_map"`
+	LatestBlockHeight uint64                 `json:"block_height"`
+	TransactionValue  float64                `json:"transaction_value"`
+	TokenValue        float64                `json:"token_value"`
+	TokenDetails      []TokenDetails         `json:"token_details"`
+}

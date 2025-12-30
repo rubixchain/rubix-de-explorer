@@ -12,17 +12,7 @@ require (
 )
 
 require (
-	github.com/btcsuite/btcd/btcec/v2 v2.1.3 // indirect
-	github.com/btcsuite/btcd/btcutil v1.1.5 // indirect
-	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0 // indirect
-	github.com/btcsuite/btclog v0.0.0-20170628155309-84c8d2346e9f // indirect
-	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.0.1 // indirect
-	golang.org/x/sys v0.28.0 // indirect
-)
-
-require (
 	filippo.io/edwards25519 v1.1.0 // indirect
-	github.com/btcsuite/btcd v0.24.2
 	github.com/go-sql-driver/mysql v1.8.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
@@ -36,4 +26,8 @@ require (
 	golang.org/x/text v0.21.0 // indirect
 	gorm.io/driver/mysql v1.5.6 // indirect
 )
-require github.com/stretchr/testify v1.9.0
+
+require (
+	github.com/lib/pq v1.10.9
+	github.com/stretchr/testify v1.9.0 // indirect
+)

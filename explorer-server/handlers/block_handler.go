@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"encoding/json"
+	"explorer-server/model"
 	"explorer-server/services"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -10,7 +12,7 @@ import (
 )
 
 // ============================================================================
-//  READ-ONLY PUBLIC API HANDLERS (unchanged)
+//  READ-ONLY PUBLIC API HANDLERS
 // ============================================================================
 
 func GetTxnsCountHandler(w http.ResponseWriter, r *http.Request) {
@@ -115,26 +117,30 @@ func GetBurntBlockList(w http.ResponseWriter, r *http.Request) {
 // ============================================================================
 
 func UpdateBlocksHandler(w http.ResponseWriter, r *http.Request) {
-	var block map[string]interface{}
-	if err := json.NewDecoder(r.Body).Decode(&block); err != nil {
+	var info model.IncomingBlockInfo
+
+	if err := json.NewDecoder(r.Body).Decode(&info); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
 
 	log.Println("📥 Received block update — queueing to high-priority worker")
+	fmt.Println("Block is:", info)
 
-	// Use the ORIGINAL, already-correct update path, just executed in the pool.
-	ok := services.EnqueueBlockUpdateTask(func() {
-		// This function already knows how to:
-		//   - decode the fullnode block map
-		//   - store into AllBlocks with correct hash / type / txn_id
-		//   - fan out into RBT/FT/NFT/SC etc.
-		services.UpdateBlocks(block)
+	if info.TxnBlock == nil {
+		log.Println("❌ Incoming block missing block_map")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":"missing block_map"}`))
+		return
+	}
+
+	okTask := services.EnqueueBlockUpdateTask(func() {
+		services.UpdateBlocks(info.TxnBlock, &info)
 	})
 
-	if !ok {
-		log.Println("⚠️ Worker queue full — processing block inline (fallback)")
-		services.UpdateBlocks(block)
+	if !okTask {
+		log.Println("⚠️ Worker queue full — processing inline")
+		services.UpdateBlocks(info.TxnBlock, &info)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -6,7 +6,6 @@ import (
 	"explorer-server/database"
 	"explorer-server/database/models"
 	"explorer-server/model"
-	"explorer-server/util"
 	"fmt"
 	"io"
 	"log"
@@ -303,36 +302,4 @@ func derefFloat(ptr *float64) float64 {
 		return 0
 	}
 	return *ptr
-}
-
-// ProcessIncomingBlock flattens numeric keys and maps them to readable names
-func ProcessIncomingBlock(blockData map[string]interface{}) map[string]interface{} {
-	flattened := util.FlattenKeys("", blockData).(map[string]interface{})
-	mapped := util.ApplyKeyMapping(flattened).(map[string]interface{})
-	return mapped
-}
-
-// UpdateBlocks processes an incoming block and routes it to the right storage function
-func UpdateBlocks(blockMap map[string]interface{}) {
-	mappedBlock := ProcessIncomingBlock(blockMap)
-
-	// Store in AllBlocks first
-	StoreBlockInAllBlocks(mappedBlock)
-
-	transType, _ := mappedBlock["TCTransTypeKey"].(string)
-
-	switch transType {
-	case "02", "2":
-		fmt.Println("Storing transfer block")
-		StoreTransferBlock(mappedBlock)
-	case "08", "13":
-		fmt.Println("Storing burnt block")
-		StoreBurntBlock(mappedBlock)
-	case "09", "9":
-		fmt.Println("Storing smart contract deploy block")
-		StoreSCDeployBlock(mappedBlock)
-	case "10":
-		fmt.Println("Storing smart contract execute block")
-		StoreSCExecuteBlock(mappedBlock)
-	}
 }

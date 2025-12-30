@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-// Map token type codes to readable names
+// Transaction type names for token-chain display
 var transactionTypeNames = map[string]string{
 	"01": "Minted",
 	"02": "Transfer",
@@ -29,174 +29,150 @@ var transactionTypeNames = map[string]string{
 	"13": "BurntForFT",
 }
 
+// -------------------------------------------------------------------
+// GetAssetType (from TokenType table)
+// -------------------------------------------------------------------
 func GetAssetType(id string) (string, error) {
-	var asset models.TokenType
+	var entry models.TokenType
 
-	result := database.DB.Where("token_id = ?", id).First(&asset)
-	if result.Error != nil {
-		return "", fmt.Errorf("failed to fetch asset type: %w", result.Error)
+	if err := database.DB.Where("token_id = ?", id).First(&entry).Error; err != nil {
+		return "", fmt.Errorf("failed to fetch asset type: %w", err)
 	}
-
-	if asset.TokenType == "" {
+	if entry.TokenType == "" {
 		return "", errors.New("asset type not found")
 	}
-
-	return asset.TokenType, nil
+	return entry.TokenType, nil
 }
 
-// GetTokenChainFromTokenID fetches the complete token chain from the full node for a given tokenID
+// -------------------------------------------------------------------
+// Fetch FULL token-chain for UI
+// -------------------------------------------------------------------
 func GetTokenChainFromTokenID(tokenID string) (map[string]interface{}, error) {
-	// Step 1: Get token type from database
+
 	tokenType, err := GetAssetType(tokenID)
 	if err != nil {
-		return nil, fmt.Errorf("❌ failed to get token type from asset table: %v", err)
+		return nil, fmt.Errorf("failed to get token type: %v", err)
 	}
 
-	// Step 2: For RBT, check value and possibly use PART
+	// RBT → PART if fractional
 	if strings.ToUpper(tokenType) == "RBT" {
 		rbt, err := GetRBTInfoFromRBTID(tokenID)
 		if err != nil {
-			return nil, fmt.Errorf("❌ failed to get RBT from RBT table: %v", err)
+			return nil, fmt.Errorf("failed to get RBT: %v", err)
 		}
-
 		if rbt.TokenValue < 1.0 {
-			tokenType = PartType
+			tokenType = "PART"
 		}
 	}
 
-	apiURL := fmt.Sprintf("%s/api/de-exp/get-token-chain?tokenID=%s&tokenType=%s",
+	url := fmt.Sprintf("%s/api/de-exp/get-token-chain?tokenID=%s&tokenType=%s",
 		config.RubixNodeURL, tokenID, tokenType)
 
 	client := GetNodeHTTPClient()
 	release := acquireNodeSlot()
 	defer release()
 
-	resp, err := client.Get(apiURL)
+	resp, err := client.Get(url)
 	if err != nil {
-		return nil, fmt.Errorf("❌ error fetching token chain for %s: %v", tokenID, err)
+		return nil, fmt.Errorf("fullnode error: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		io.Copy(io.Discard, resp.Body)
-		return nil, fmt.Errorf("❌ fullnode returned status %d for token %s", resp.StatusCode, tokenID)
+		return nil, fmt.Errorf("fullnode returned status %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("❌ error reading response for %s: %v", tokenID, err)
-	}
-	fmt.Println("RAW DATA:", string(body))
+	body, _ := io.ReadAll(resp.Body)
 
-	var chainData map[string]interface{}
-	if err := json.Unmarshal(body, &chainData); err != nil {
-		return nil, fmt.Errorf("❌ error decoding JSON for %s: %v", tokenID, err)
+	var out map[string]interface{}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("json decode error: %v", err)
 	}
 
-	return chainData, nil
+	return out, nil
 }
 
-// Fetches all blocks from a given token chain with pagination
-func GetTokenBlocksFromTokenID(tokenID string, page int, limit int) ([]map[string]interface{}, int, error) {
-	// Step 1: Get token type
+// -------------------------------------------------------------------
+// Paginated blocks-from-token-chain
+// -------------------------------------------------------------------
+func GetTokenBlocksFromTokenID(tokenID string, page, limit int) ([]map[string]interface{}, int, error) {
+
 	tokenType, err := GetAssetType(tokenID)
 	if err != nil {
-		return nil, 0, fmt.Errorf("❌ failed to get token type from asset table: %v", err)
+		return nil, 0, err
 	}
 
-	// Step 2: For RBT, check value and possibly use PART
 	if strings.ToUpper(tokenType) == "RBT" {
 		rbt, err := GetRBTInfoFromRBTID(tokenID)
 		if err != nil {
-			return nil, 0, fmt.Errorf("❌ failed to get RBT from RBT table: %v", err)
+			return nil, 0, err
 		}
-
 		if rbt.TokenValue < 1.0 {
-			tokenType = PartType
+			tokenType = "PART"
 		}
 	}
 
-	apiURL := fmt.Sprintf("%s/api/de-exp/get-token-chain?tokenID=%s&tokenType=%s",
+	url := fmt.Sprintf("%s/api/de-exp/get-token-chain?tokenID=%s&tokenType=%s",
 		config.RubixNodeURL, tokenID, tokenType)
 
 	client := GetNodeHTTPClient()
 	release := acquireNodeSlot()
 	defer release()
 
-	resp, err := client.Get(apiURL)
+	resp, err := client.Get(url)
 	if err != nil {
-		return nil, 0, fmt.Errorf("❌ error fetching token chain for %s: %v", tokenID, err)
+		return nil, 0, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		io.Copy(io.Discard, resp.Body)
-		return nil, 0, fmt.Errorf("❌ fullnode returned status %d for token %s", resp.StatusCode, tokenID)
+		return nil, 0, fmt.Errorf("fullnode error %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, 0, fmt.Errorf("❌ error reading response for %s: %v", tokenID, err)
+	body, _ := io.ReadAll(resp.Body)
+	var chain map[string]interface{}
+	if err := json.Unmarshal(body, &chain); err != nil {
+		return nil, 0, err
 	}
 
-	var chainData map[string]interface{}
-	if err := json.Unmarshal(body, &chainData); err != nil {
-		return nil, 0, fmt.Errorf("❌ error decoding JSON for %s: %v", tokenID, err)
+	arr, ok := chain["TokenChainData"].([]interface{})
+	if !ok {
+		return nil, 0, fmt.Errorf("TokenChainData missing")
 	}
 
-	tokenChainData, ok := chainData["TokenChainData"].([]interface{})
-	if !ok || len(tokenChainData) == 0 {
-		return nil, 0, fmt.Errorf("❌ TokenChainData not found or empty for %s", tokenID)
-	}
-
-	var allBlocks []map[string]interface{}
-
-	for i, blk := range tokenChainData {
-		block, ok := blk.(map[string]interface{})
+	var blocks []map[string]interface{}
+	for _, b := range arr {
+		m, ok := b.(map[string]interface{})
 		if !ok {
-			fmt.Printf("⚠️ Skipping invalid block at index %d for %s\n", i, tokenID)
 			continue
 		}
 
-		blockData := make(map[string]interface{})
+		entry := map[string]interface{}{}
 
-		blockHash := getValue(block, "98", "TCBlockHashKey")
-		owner := getValue(block, "3", "TCTokenOwnerKey")
-		epoch := getValue(block, "epoch", "TCEpoch")
-		transType := getValue(block, "2", "TCTransTypeKey")
-		transInfo := getMap(block, "5", "TCTransInfoKey")
+		entry["block_hash"] = getVal(m, "98", "TCBlockHashKey")
+		entry["owner_did"] = getVal(m, "3", "TCTokenOwnerKey")
+		entry["epoch"] = getVal(m, "epoch", "TCEpoch")
 
-		if blockHash != nil {
-			blockData["block_hash"] = blockHash
-		}
-		if owner != nil {
-			blockData["owner_did"] = owner
-		}
-		if epoch != nil {
-			blockData["epoch"] = epoch
-		}
-
-		if transType != nil {
-			if transTypeStr, ok := transType.(string); ok {
-				if name, found := transactionTypeNames[transTypeStr]; found {
-					blockData["transaction_type"] = name
-				}
+		tx := getVal(m, "2", "TCTransTypeKey")
+		if s, ok := tx.(string); ok {
+			if n, ok2 := transactionTypeNames[s]; ok2 {
+				entry["transaction_type"] = n
 			}
 		}
 
-		if len(transInfo) > 0 {
-			tid := getValue(transInfo, "4", "TITIDKey")
-			if tid != nil {
-				blockData["transaction_id"] = tid
-			}
+		ti := getMap(m, "5", "TCTransInfoKey")
+		if len(ti) > 0 {
+			entry["transaction_id"] = getVal(ti, "4", "TITIDKey")
 		}
 
-		allBlocks = append(allBlocks, blockData)
+		blocks = append(blocks, entry)
 	}
 
-	totalBlocks := len(allBlocks)
-	if totalBlocks == 0 {
-		return nil, 0, fmt.Errorf("❌ no valid token chain blocks found for %s", tokenID)
+	total := len(blocks)
+	if total == 0 {
+		return nil, 0, fmt.Errorf("no blocks")
 	}
 
 	if page < 1 {
@@ -207,41 +183,36 @@ func GetTokenBlocksFromTokenID(tokenID string, page int, limit int) ([]map[strin
 	}
 
 	start := (page - 1) * limit
-	if start >= totalBlocks {
-		return []map[string]interface{}{}, totalBlocks, nil
+	if start >= total {
+		return []map[string]interface{}{}, total, nil
 	}
-
 	end := start + limit
-	if end > totalBlocks {
-		end = totalBlocks
+	if end > total {
+		end = total
 	}
 
-	paginated := allBlocks[start:end]
-	return paginated, totalBlocks, nil
+	return blocks[start:end], total, nil
 }
 
-// Helper: safely get value using either numeric or string key
-func getValue(m map[string]interface{}, numKey, strKey string) interface{} {
-	if val, ok := m[numKey]; ok {
-		return val
+// -------------------------------------------------------------------
+// Helpers for chain parsing
+// -------------------------------------------------------------------
+func getVal(m map[string]interface{}, nk, sk string) interface{} {
+	if v, ok := m[nk]; ok {
+		return v
 	}
-	if val, ok := m[strKey]; ok {
-		return val
+	if v, ok := m[sk]; ok {
+		return v
 	}
 	return nil
 }
 
-// Helper: safely get map using either numeric or string key
-func getMap(m map[string]interface{}, numKey, strKey string) map[string]interface{} {
-	if val, ok := m[numKey]; ok {
-		if subMap, ok := val.(map[string]interface{}); ok {
-			return subMap
-		}
+func getMap(m map[string]interface{}, nk, sk string) map[string]interface{} {
+	if v, ok := m[nk].(map[string]interface{}); ok {
+		return v
 	}
-	if val, ok := m[strKey]; ok {
-		if subMap, ok := val.(map[string]interface{}); ok {
-			return subMap
-		}
+	if v, ok := m[sk].(map[string]interface{}); ok {
+		return v
 	}
 	return map[string]interface{}{}
 }

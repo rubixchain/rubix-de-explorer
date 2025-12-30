@@ -2,10 +2,11 @@ package models
 
 import (
 	"time"
+
+	"github.com/lib/pq"
 	"gorm.io/datatypes"
 )
 
-// ========================= TransferBlocks =========================
 type TransferBlocks struct {
 	BlockHash          string         `json:"block_hash" gorm:"primaryKey;column:block_hash"`
 	PrevBlockID        *string        `json:"prev_block_id" gorm:"column:prev_block_id"`
@@ -21,18 +22,16 @@ type TransferBlocks struct {
 
 func (TransferBlocks) TableName() string { return "TransferBlocks" }
 
-// ========================= TokenType =========================
 type TokenType struct {
-	TokenID     string    `json:"token_id" gorm:"column:token_id"`
+	TokenID     string    `json:"token_id" gorm:"primaryKey;column:token_id"`
 	TokenType   string    `json:"token_type" gorm:"column:token_type"`
 	LastUpdated time.Time `json:"last_updated" gorm:"column:last_updated"`
 }
 
 func (TokenType) TableName() string { return "TokenType" }
 
-// ========================= AllBlocks =========================
 type AllBlocks struct {
-	BlockHash string    `json:"block_hash" gorm:"column:block_hash;primaryKey"`
+	BlockHash string    `json:"block_hash" gorm:"primaryKey;column:block_hash"`
 	BlockType string    `json:"block_type" gorm:"column:block_type"`
 	Epoch     time.Time `json:"epoch" gorm:"column:epoch"`
 	TxnID     string    `json:"txn_id" gorm:"column:txn_id"`
@@ -40,9 +39,8 @@ type AllBlocks struct {
 
 func (AllBlocks) TableName() string { return "AllBlocks" }
 
-// ========================= SmartContract =========================
 type SmartContract struct {
-	ContractID  string `json:"contract_id" gorm:"column:contract_id"`
+	ContractID  string `json:"contract_id" gorm:"primaryKey;column:contract_id"`
 	BlockHash   string `json:"block_hash" gorm:"column:block_hash"`
 	DeployerDID string `json:"deployer_did" gorm:"column:deployer_did"`
 	TxnId       string `json:"txn_id" gorm:"column:txn_id"`
@@ -52,9 +50,8 @@ type SmartContract struct {
 
 func (SmartContract) TableName() string { return "SmartContract" }
 
-// ========================= RBT =========================
 type RBT struct {
-	TokenID     string  `json:"rbt_id" gorm:"column:rbt_id"`
+	TokenID     string  `json:"rbt_id" gorm:"primaryKey;column:rbt_id"`
 	OwnerDID    string  `json:"owner_did" gorm:"column:owner_did"`
 	BlockID     string  `json:"block_id" gorm:"column:block_id"`
 	BlockHeight string  `json:"block_height" gorm:"column:block_height"`
@@ -64,9 +61,8 @@ type RBT struct {
 
 func (RBT) TableName() string { return "RBT" }
 
-// ========================= FT =========================
 type FT struct {
-	FtID        string  `json:"ft_id" gorm:"column:ft_id"`
+	FtID        string  `json:"ft_id" gorm:"primaryKey;column:ft_id"`
 	TokenValue  float64 `json:"token_value" gorm:"column:token_value"`
 	FTName      string  `json:"ft_name" gorm:"column:ft_name"`
 	OwnerDID    string  `json:"owner_did" gorm:"column:owner_did"`
@@ -79,9 +75,8 @@ type FT struct {
 
 func (FT) TableName() string { return "FT" }
 
-// ========================= NFT =========================
 type NFT struct {
-	TokenID     string `json:"nft_id" gorm:"column:nft_id"`
+	TokenID     string `json:"nft_id" gorm:"primaryKey;column:nft_id"`
 	TokenValue  string `json:"token_value" gorm:"column:token_value"`
 	OwnerDID    string `json:"owner_did" gorm:"column:owner_did"`
 	BlockHash   string `json:"block_hash" gorm:"column:block_hash"`
@@ -92,7 +87,6 @@ type NFT struct {
 
 func (NFT) TableName() string { return "NFT" }
 
-// ========================= DIDs =========================
 type DIDs struct {
 	DID       string    `json:"did" gorm:"primaryKey;column:did"`
 	CreatedAt time.Time `json:"created_at" gorm:"column:created_at"`
@@ -104,7 +98,6 @@ type DIDs struct {
 
 func (DIDs) TableName() string { return "DIDs" }
 
-// ========================= TxnAnalytics =========================
 type TxnAnalytics struct {
 	IntervalStart time.Time `json:"interval_start" gorm:"column:interval_start"`
 	IntervalEnd   time.Time `json:"interval_end" gorm:"column:interval_end"`
@@ -115,7 +108,6 @@ type TxnAnalytics struct {
 
 func (TxnAnalytics) TableName() string { return "TxnAnalytics" }
 
-// ========================= DatabaseHealth =========================
 type DatabaseHealth struct {
 	IsConnected bool   `json:"is_connected" gorm:"column:is_connected"`
 	Status      string `json:"status" gorm:"column:status"`
@@ -124,7 +116,6 @@ type DatabaseHealth struct {
 
 func (DatabaseHealth) TableName() string { return "DatabaseHealth" }
 
-// ========================= SC_Block =========================
 type SC_Block struct {
 	Block_ID     string    `json:"block_id" gorm:"primaryKey;column:block_id"`
 	Contract_ID  string    `json:"contract_id" gorm:"column:contract_id"`
@@ -136,7 +127,6 @@ type SC_Block struct {
 
 func (SC_Block) TableName() string { return "SC_Blocks" }
 
-// ========================= BurntBlocks =========================
 type BurntBlocks struct {
 	BlockHash   string         `json:"block_hash" gorm:"primaryKey;column:block_hash"`
 	ChildTokens datatypes.JSON `json:"child_tokens" gorm:"column:child_tokens;type:jsonb"`
@@ -147,3 +137,17 @@ type BurntBlocks struct {
 }
 
 func (BurntBlocks) TableName() string { return "BurntBlocks" }
+
+type MintBlocks struct {
+	BlockHash  string         `json:"block_hash" gorm:"primaryKey;column:block_hash"`
+	TokenIDs   pq.StringArray `json:"token_ids" gorm:"type:text[];column:token_ids"`
+	TokenType  string         `json:"token_type" gorm:"column:token_type"`
+	TokenValue *float64       `json:"token_value" gorm:"column:token_value"`
+	OwnerDID   string         `json:"owner_did" gorm:"column:owner_did"`
+	CreatorDID *string        `json:"creator_did" gorm:"column:creator_did"`
+	FTName     *string        `json:"ft_name" gorm:"column:ft_name"`
+	Epoch      *int64         `json:"epoch" gorm:"column:epoch"`
+	TxnType    *string        `json:"txn_type" gorm:"column:txn_type"`
+}
+
+func (MintBlocks) TableName() string { return "MintBlocks" }

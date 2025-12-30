@@ -49,7 +49,6 @@ func NewRouter() *mux.Router {
 
 	// ==== New async notification endpoints ====
 	r.HandleFunc("/api/block-update", handlers.UpdateBlocksHandler).Methods(http.MethodPost)
-	r.HandleFunc("/api/token-update", handlers.UpdateTokensHandler).Methods(http.MethodPost)
 
 	// Worker pool / queue status (for monitoring)
 	r.HandleFunc("/api/queue-status", handlers.QueueStatusHandler).Methods(http.MethodGet)

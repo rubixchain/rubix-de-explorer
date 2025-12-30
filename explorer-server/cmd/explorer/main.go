@@ -25,15 +25,9 @@ func main() {
 	totalCores := runtime.NumCPU()
 	log.Printf("Detected %d CPU cores\n", totalCores)
 
-	// Reserve 1 core for HTTP server, rest can be used for background workers
-	syncCores := totalCores - 1
-	if syncCores < 1 {
-		syncCores = 1
-	}
-
 	// Use all cores
 	runtime.GOMAXPROCS(totalCores)
-	log.Printf("Using %d cores total: 1 for server, %d for background work\n", totalCores, syncCores)
+	log.Printf("Using %d cores for server + workers\n", totalCores)
 	log.Printf("Starting Explorer Server at %s\n", startTime.Format(time.RFC1123))
 
 	// Load .env if present
@@ -49,16 +43,10 @@ func main() {
 	log.Println("PostgreSQL connected and migrated")
 
 	// --------------------------------------------------
-	// Initialize worker pools (block / token / sync)
+	// Initialize worker pool (blocks only)
 	// --------------------------------------------------
 	services.InitWorkerPools(totalCores)
-	log.Println("✅ Worker pools initialized")
-
-	// --------------------------------------------------
-	// Start continuous background sync (Option C)
-	// --------------------------------------------------
-	// This uses the dedicated sync worker pool internally.
-	// services.StartContinuousSync(syncCores)
+	log.Println("✅ Worker pool initialized (block updates)")
 
 	// --------------------------------------------------
 	// HTTP router + CORS
