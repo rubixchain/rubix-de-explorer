@@ -110,9 +110,11 @@ func GetDIDInfoHandler(w http.ResponseWriter, r *http.Request) {
 	// Check if the "did" param is actually a DID (starts with "bafy")
 	// If not, it might be a token_id sent by the UI — reroute accordingly
 	if !strings.HasPrefix(did, "bafy") {
+		log.Printf("🔀 Non-DID value received: %s — checking AllTokens", did)
 		// Try looking up as a token in AllTokens
 		assetType, err := services.GetAssetType(did)
 		if err == nil {
+			log.Printf("✅ Found in AllTokens as %s — routing to %s service", did, assetType)
 			var data interface{}
 			switch assetType {
 			case "RBT":
@@ -125,6 +127,7 @@ func GetDIDInfoHandler(w http.ResponseWriter, r *http.Request) {
 				data, err = services.GetSCInfoFromSCID(did)
 			}
 			if err != nil {
+				log.Printf("❌ Error fetching %s data for %s: %v", assetType, did, err)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -132,6 +135,7 @@ func GetDIDInfoHandler(w http.ResponseWriter, r *http.Request) {
 			json.NewEncoder(w).Encode(response)
 			return
 		}
+		log.Printf("⚠️ %s not in AllTokens — trying TransactionBlocks", did)
 		// Not a token either — try as a transaction hash
 		blockData, err := services.GetTransferBlockInfoFromTxnID(did)
 		if err == nil {
@@ -139,6 +143,7 @@ func GetDIDInfoHandler(w http.ResponseWriter, r *http.Request) {
 			json.NewEncoder(w).Encode(response)
 			return
 		}
+		log.Printf("❌ %s not found anywhere — returning 404", did)
 		http.Error(w, "No record found for: "+did, http.StatusNotFound)
 		return
 	}
