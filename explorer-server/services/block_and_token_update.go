@@ -59,12 +59,13 @@ func UpdateBlocks(info *model.IncomingBlockInfo) {
 	count := atomic.AddInt64(&blocksProcessed, 1)
 	transType := fmt.Sprintf("%v", mappedBlock["TCTransTypeKey"])
 	blockType := constants.TxTypeToString(transType)
+	blockHash := fmt.Sprintf("%v", mappedBlock["TCBlockHashKey"])
 	if count%100 == 0 {
 		status := GetWorkerPoolStatus()
-		log.Printf("📊 Progress: %d blocks processed | Latest: %s | Queue: %d/%d | Workers: %d",
-			count, blockType, status.QueueLen, status.QueueCap, status.Workers)
+		log.Printf("📊 Progress: %d blocks processed | Latest: %s | Hash: %s | Queue: %d/%d | Workers: %d",
+			count, blockType, blockHash, status.QueueLen, status.QueueCap, status.Workers)
 	} else {
-		log.Printf("📦 Block #%d [%s]", count, blockType)
+		log.Printf("📦 Block #%d [%s] %s", count, blockType, blockHash)
 	}
 
 	// 2. Data Backfilling: Ensure info fields are populated for the DB modules
