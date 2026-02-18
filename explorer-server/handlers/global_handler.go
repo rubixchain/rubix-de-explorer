@@ -53,8 +53,27 @@ func GetInfo(w http.ResponseWriter, r *http.Request) {
 		assetType = "DID"
 		data, err = services.GetDIDInfoFromDID(id)
 	} else {
-		assetType = "TransferBlock"
-		data, err = services.GetTransferBlockInfoFromTxnID(id)
+		// Could be a token_id or a txn_id — check AllTokens first
+		assetType, err = services.GetAssetType(id)
+		if err == nil {
+			switch assetType {
+			case "RBT":
+				data, err = services.GetRBTInfoFromRBTID(id)
+			case "FT":
+				data, err = services.GetFTInfoFromFTID(id)
+			case "NFT":
+				data, err = services.GetNFTInfoFromNFTID(id)
+			case "SmartContract":
+				data, err = services.GetSCInfoFromSCID(id)
+			default:
+				data, err = services.GetTransferBlockInfoFromTxnID(id)
+				assetType = "TransferBlock"
+			}
+		} else {
+			// Not a token — try as a transaction hash
+			assetType = "TransferBlock"
+			data, err = services.GetTransferBlockInfoFromTxnID(id)
+		}
 	}
 
 	// Handle any service error
