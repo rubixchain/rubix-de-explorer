@@ -3,8 +3,10 @@ package handlers
 import (
 	"encoding/json"
 	"explorer-server/services"
+	"log"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 func GetDIDCountHandler(w http.ResponseWriter, r *http.Request) {
@@ -80,7 +82,6 @@ func GetDIDHoldersListHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-
 func GetDIDInfoHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -106,7 +107,44 @@ func GetDIDInfoHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	println("DID:", did, "Page:", page, "Limit:", limit)
+	// Check if the "did" param is actually a DID (starts with "bafy")
+	// If not, it might be a token_id sent by the UI — reroute accordingly
+	if !strings.HasPrefix(did, "bafy") {
+		// Try looking up as a token in AllTokens
+		assetType, err := services.GetAssetType(did)
+		if err == nil {
+			var data interface{}
+			switch assetType {
+			case "RBT":
+				data, err = services.GetRBTInfoFromRBTID(did)
+			case "FT":
+				data, err = services.GetFTInfoFromFTID(did)
+			case "NFT":
+				data, err = services.GetNFTInfoFromNFTID(did)
+			case "SmartContract":
+				data, err = services.GetSCInfoFromSCID(did)
+			}
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			response := map[string]interface{}{"type": assetType, "data": data}
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+		// Not a token either — try as a transaction hash
+		blockData, err := services.GetTransferBlockInfoFromTxnID(did)
+		if err == nil {
+			response := map[string]interface{}{"type": "TransferBlock", "data": blockData}
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+		http.Error(w, "No record found for: "+did, http.StatusNotFound)
+		return
+	}
+
+	// Normal DID flow
+	log.Printf("DID: %s Page: %d Limit: %d", did, page, limit)
 
 	// Get DID info
 	didInfo, err := services.GetDIDInfoFromDID(did)
@@ -124,9 +162,9 @@ func GetDIDInfoHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Prepare response
 	response := map[string]interface{}{
-		"did": didInfo, 
-		"rbts": rbts,
-		"count":totalCount,
+		"did":   didInfo,
+		"rbts":  rbts,
+		"count": totalCount,
 	}
 
 	// Encode response
@@ -134,7 +172,6 @@ func GetDIDInfoHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 	}
 }
-
 
 // func GetRBTListHandler(w http.ResponseWriter, r *http.Request) {
 // 	return func(w http.ResponseWriter, r *http.Request) {
