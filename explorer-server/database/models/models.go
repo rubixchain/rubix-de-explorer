@@ -75,6 +75,7 @@ type SC struct {
 	TokenID     string `json:"token_id" gorm:"primaryKey;column:token_id"`
 	BlockHash   string `json:"block_hash" gorm:"column:block_hash"`
 	DeployerDID string `json:"deployer_did" gorm:"column:deployer_did"`
+	ExecutorDID string `json:"executor_did" gorm:"column:executor_did"`
 	BlockHeight uint64 `json:"block_height" gorm:"column:block_height"`
 	TokenStatus int    `json:"token_status" gorm:"column:token_status"`
 }

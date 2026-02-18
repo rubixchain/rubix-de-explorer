@@ -410,11 +410,12 @@ func handleNFTUpdate(tx *gorm.DB, info *model.IncomingBlockInfo, token model.Tok
 func handleSCUpdate(tx *gorm.DB, info *model.IncomingBlockInfo, token model.TokenDetails, status int) error {
 	return tx.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "token_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"block_hash", "txn_id", "block_height", "token_status"}),
+		DoUpdates: clause.AssignmentColumns([]string{"block_hash", "block_height", "token_status", "executor_did"}),
 	}).Create(&models.SC{
 		TokenID:     token.TokenID,
 		BlockHash:   info.BlockHash,
 		DeployerDID: info.CreatorDID,
+		ExecutorDID: info.ReceiverDID,
 		BlockHeight: uint64(info.LatestBlockHeight),
 		TokenStatus: status,
 	}).Error
