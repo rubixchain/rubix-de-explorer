@@ -11,6 +11,7 @@ import (
 	"log"
 	"regexp"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/lib/pq"
@@ -18,6 +19,9 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+// Block processing counter for progress logging
+var blocksProcessed int64
 
 // MapTxnTypeToTokenStatus mirrors the Fullnode logic for token lifecycle
 func MapTxnTypeToTokenStatus(txnType string) int {
@@ -51,6 +55,18 @@ func UpdateBlocks(info *model.IncomingBlockInfo) {
 	// 1. Extract and Process the internal block map
 	mappedBlock := ProcessIncomingBlock(info.BlockMap)
 
+	// Progress logging
+	count := atomic.AddInt64(&blocksProcessed, 1)
+	transType := fmt.Sprintf("%v", mappedBlock["TCTransTypeKey"])
+	blockType := constants.TxTypeToString(transType)
+	if count%100 == 0 {
+		status := GetWorkerPoolStatus()
+		log.Printf("📊 Progress: %d blocks processed | Latest: %s | Queue: %d/%d | Workers: %d",
+			count, blockType, status.QueueLen, status.QueueCap, status.Workers)
+	} else {
+		log.Printf("📦 Block #%d [%s]", count, blockType)
+	}
+
 	// 2. Data Backfilling: Ensure info fields are populated for the DB modules
 	// If Fullnode sends empty strings, we pull from the mappedBlock
 	if info.ReceiverDID == "" {
@@ -78,7 +94,7 @@ func UpdateBlocks(info *model.IncomingBlockInfo) {
 	}
 
 	// Backfill TxnType from block map (critical for DID analytics logic)
-	transType := fmt.Sprintf("%v", mappedBlock["TCTransTypeKey"])
+	// transType already declared above in progress logging
 	if info.TxnType == "" {
 		info.TxnType = transType
 	}
