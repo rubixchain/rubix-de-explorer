@@ -36,7 +36,7 @@ func ConnectAndMigrate(drop bool) {
 	// ── Write Pool (block ingestion) ──
 	var err error
 	WriteDB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Warn),
+		Logger: logger.Default.LogMode(logger.Info),
 	})
 	if err != nil {
 		log.Fatalf("❌ Failed to connect WriteDB: %v", err)
@@ -49,7 +49,7 @@ func ConnectAndMigrate(drop bool) {
 
 	// ── Read Pool (API queries) ──
 	ReadDB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Warn),
+		Logger: logger.Default.LogMode(logger.Info),
 	})
 	if err != nil {
 		log.Fatalf("❌ Failed to connect ReadDB: %v", err)
