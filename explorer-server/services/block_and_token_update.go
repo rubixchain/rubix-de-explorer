@@ -152,6 +152,12 @@ func StoreTransferBlock(blockMap map[string]interface{}, info *model.IncomingBlo
 		}
 	}
 
+	// Token count: number of tokens in this transaction (useful for FT)
+	var tokenCount *int
+	if count := len(tokensKey); count > 0 {
+		tokenCount = &count
+	}
+
 	tb := models.TransactionBlocks{
 		BlockHash:   fmt.Sprintf("%v", blockMap["TCBlockHashKey"]),
 		SenderDID:   stringPtr(getNested(transInfo, "TISenderDIDKey")),
@@ -159,6 +165,7 @@ func StoreTransferBlock(blockMap map[string]interface{}, info *model.IncomingBlo
 		AssetType:   assetTypeStr,
 		TxnID:       stringPtr(getNested(transInfo, "TITIDKey")),
 		Amount:      amount,
+		TokenCount:  tokenCount,
 		Epoch:       int64Ptr(blockMap["TCEpoch"]),
 		Tokens:      datatypes.JSON(tokensJSON),
 		Validators:  validatorsJSON,

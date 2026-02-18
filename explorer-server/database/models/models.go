@@ -24,6 +24,7 @@ type TransactionBlocks struct {
 	ReceiverDID *string        `json:"receiver_did" gorm:"column:receiver_did"`
 	AssetType   string         `json:"asset_type" gorm:"column:asset_type"`
 	Amount      *float64       `json:"amount" gorm:"column:amount"`
+	TokenCount  *int           `json:"token_count" gorm:"column:token_count"`
 	Epoch       *int64         `json:"epoch" gorm:"column:epoch"`
 	Tokens      datatypes.JSON `json:"tokens" gorm:"column:tokens;type:jsonb"`
 	Validators  datatypes.JSON `json:"validators" gorm:"column:validators;type:jsonb"`
