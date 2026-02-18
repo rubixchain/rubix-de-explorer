@@ -23,6 +23,35 @@ var keyMapping = map[string]string{
 	"98":    "TCBlockHashKey",
 	"99":    "TCSignatureKey",
 	"epoch": "TCEpoch",
+
+	// Live block update string keys (from fullnode block_map)
+	"blockHash":          "TCBlockHashKey",
+	"blockType":          "TCTransTypeKey",
+	"tokenOwner":         "TCTokenOwnerKey",
+	"tokenValue":         "TCTokenValueKey",
+	"childTokens":        "TCChildTokensKey",
+	"signature":          "TCSignatureKey",
+	"transInfo":          "TCTransInfoKey",
+	"version":            "TCVersionKey",
+	"quorumSignature":    "TCQuorumSignatureKey",
+	"initiatorSignature": "TCSenderSignatureKey",
+	"pledgeDetails":      "TCPledgeDetailsKey",
+
+	// Sub-keys under transInfo (live path)
+	"senderDID":   "TISenderDIDKey",
+	"receiverDID": "TIReceiverDIDKey",
+	"txnID":       "TITIDKey",
+	"comment":     "TICommentKey",
+	"refID":       "TIRefIDKey",
+	"transTokens": "TITokensKey",
+	"deployerDID": "TIDeployerDIDKey",
+	"executorDID": "TIExecutorDIDKey",
+
+	// Sub-keys under transTokens (live path)
+	"tokenType":       "TTTokenTypeKey",
+	"blockNumber":     "TTBlockNumberKey",
+	"previousBlockID": "TTPreviousBlockIDKey",
+
 	// Keys under "4"
 	"4-1": "GBTypeKey",
 	"4-2": "GBInfoKey",

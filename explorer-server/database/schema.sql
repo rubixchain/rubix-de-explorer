@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS "TransferBlocks" (
+CREATE TABLE IF NOT EXISTS "TransactionBlocks" (
     block_hash TEXT PRIMARY KEY,
     prev_block_id TEXT,
     sender_did TEXT,
@@ -7,12 +7,12 @@ CREATE TABLE IF NOT EXISTS "TransferBlocks" (
     amount DOUBLE PRECISION,
     epoch BIGINT,
     tokens JSONB,
-    validator_pledge_map JSONB,
+    validators JSONB,
     txn_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS "RBT" (
-    rbt_id TEXT PRIMARY KEY,
+    token_id TEXT PRIMARY KEY,
     owner_did TEXT,
     block_id TEXT,
     block_height TEXT,
@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS "RBT" (
 );
 
 CREATE TABLE IF NOT EXISTS "FT" (
-    ft_id TEXT PRIMARY KEY,
+    token_id TEXT PRIMARY KEY,
     token_value DOUBLE PRECISION,
     ft_name TEXT,
     owner_did TEXT,
@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS "FT" (
 );
 
 CREATE TABLE IF NOT EXISTS "NFT" (
-    nft_id TEXT PRIMARY KEY,
+    token_id TEXT PRIMARY KEY,
     token_value TEXT,
     owner_did TEXT,
     block_hash TEXT,
@@ -42,8 +42,8 @@ CREATE TABLE IF NOT EXISTS "NFT" (
     token_status INTEGER
 );
 
-CREATE TABLE IF NOT EXISTS "SmartContract" (
-    contract_id TEXT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS "SC" (
+    token_id TEXT PRIMARY KEY,
     block_hash TEXT,
     deployer_did TEXT,
     txn_id TEXT,
@@ -68,26 +68,25 @@ CREATE TABLE IF NOT EXISTS "TxnAnalytics" (
     token_type TEXT
 );
 
-CREATE TABLE IF NOT EXISTS "TokenType" (
+CREATE TABLE IF NOT EXISTS "AllTokens" (
     token_id VARCHAR(255) PRIMARY KEY,
-    token_type VARCHAR(100),
-    last_updated TIMESTAMP NOT NULL
+    token_type VARCHAR(100)
 );
 
-CREATE TABLE IF NOT EXISTS "AllBlocks" (
+CREATE TABLE IF NOT EXISTS "BlockType" (
     block_hash VARCHAR(255) PRIMARY KEY,
     block_type VARCHAR(50),
     epoch TIMESTAMP,
     txn_id VARCHAR(255)
 );
 
-CREATE TABLE IF NOT EXISTS "SC_Blocks" (
+CREATE TABLE IF NOT EXISTS "SCBlocks" (
     block_id VARCHAR(255) PRIMARY KEY,
-    contract_id VARCHAR(255),
+    token_id VARCHAR(255),
     executor_did VARCHAR(255),
     block_height BIGINT,
     epoch TIMESTAMP,
-    owner_did VARCHAR(255)
+    deployer_did VARCHAR(255)
 );
 
 CREATE TABLE IF NOT EXISTS "BurntBlocks" (
@@ -95,8 +94,7 @@ CREATE TABLE IF NOT EXISTS "BurntBlocks" (
     child_tokens JSONB,
     txn_type VARCHAR(255),
     owner_did VARCHAR(255),
-    epoch BIGINT,
-    tokens JSONB
+    epoch BIGINT
 );
 
 CREATE TABLE IF NOT EXISTS "MintBlocks" (

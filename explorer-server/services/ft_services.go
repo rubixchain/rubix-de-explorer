@@ -16,7 +16,7 @@ func GetFTCount() (int64, error) {
 
 func GetFTInfoFromFTID(ftID string) (*models.FT, error) {
 	var ftInfo models.FT
-	if err := database.DB.First(&ftInfo, "ft_id = ?", ftID).Error; err != nil {
+	if err := database.DB.First(&ftInfo, "token_id = ?", ftID).Error; err != nil {
 		return nil, err
 	}
 	return &ftInfo, nil
@@ -33,6 +33,7 @@ func GetFTListFromDID(did string) ([]models.FT, error) {
 
 	return ftList, nil
 }
+
 // // GetRBTInfoFromRBTID fetches a single RBT by its ID
 // func GetRBTInfoFromRBTID(rbtID string) (*models.RBT, error) {
 // 	var rbt models.RBT

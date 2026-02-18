@@ -60,14 +60,13 @@ func ConnectAndMigrate(drop bool) {
 		&models.RBT{},
 		&models.FT{},
 		&models.NFT{},
-		&models.SmartContract{},
+		&models.SC{},
 		&models.DIDs{},
-		&models.TokenType{},
+		&models.AllTokens{},
 		&models.AllBlocks{},
-		&models.TransferBlocks{},
-		&models.TxnAnalytics{},
+		&models.TransactionBlocks{},
 		&models.BurntBlocks{},
-		&models.SC_Block{},
+		&models.SCBlocks{},
 		&models.MintBlocks{},
 	)
 	if err != nil {
@@ -79,8 +78,8 @@ func ConnectAndMigrate(drop bool) {
 
 // dropTables drops only the TransferBlocks table
 func dropTables() {
-	if DB.Migrator().HasTable(&models.TransferBlocks{}) {
-		if err := DB.Migrator().DropTable(&models.TransferBlocks{}); err != nil {
+	if DB.Migrator().HasTable(&models.TransactionBlocks{}) {
+		if err := DB.Migrator().DropTable(&models.TransactionBlocks{}); err != nil {
 			log.Fatalf("❌ Failed to drop TransferBlocks table: %v", err)
 		}
 	}

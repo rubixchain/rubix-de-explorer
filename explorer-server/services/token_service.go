@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"time"
 
 	"gorm.io/gorm"
 )
@@ -72,7 +71,7 @@ func UpdateRBTToken(tokenData interface{}, operation string) error {
 	}
 
 	var existingRBT models.RBT
-	result := database.DB.Where("rbt_id = ?", rbt.TokenID).First(&existingRBT)
+	result := database.DB.Where("token_id = ?", rbt.TokenID).First(&existingRBT)
 
 	isNewToken := errors.Is(result.Error, gorm.ErrRecordNotFound)
 
@@ -87,7 +86,7 @@ func UpdateRBTToken(tokenData interface{}, operation string) error {
 		log.Printf("❌ Error querying RBT %s: %v", rbt.TokenID, result.Error)
 		return result.Error
 	} else {
-		if err := database.DB.Where("rbt_id = ?", rbt.TokenID).Updates(updateData).Error; err != nil {
+		if err := database.DB.Where("token_id = ?", rbt.TokenID).Updates(updateData).Error; err != nil {
 			log.Printf("❌ Failed to update RBT %s: %v", rbt.TokenID, err)
 			return err
 		}
@@ -95,12 +94,11 @@ func UpdateRBTToken(tokenData interface{}, operation string) error {
 	}
 
 	// Ensure token_type entry exists
-	tokenType := models.TokenType{
-		TokenID:     rbt.TokenID,
-		TokenType:   "RBT",
-		LastUpdated: time.Now(),
+	tokenType := models.AllTokens{
+		TokenID:   rbt.TokenID,
+		TokenType: "RBT",
 	}
-	if err := database.DB.FirstOrCreate(&tokenType, models.TokenType{TokenID: rbt.TokenID}).Error; err != nil {
+	if err := database.DB.FirstOrCreate(&tokenType, models.AllTokens{TokenID: rbt.TokenID}).Error; err != nil {
 		log.Printf("⚠️ Failed to ensure token_type for %s: %v", rbt.TokenID, err)
 	}
 
@@ -120,7 +118,7 @@ func deleteRBTToken(tokenData interface{}) error {
 	tokenID := deletePayload["token_id"].(string)
 
 	var rbt models.RBT
-	result := database.DB.Where("rbt_id = ?", tokenID).First(&rbt)
+	result := database.DB.Where("token_id = ?", tokenID).First(&rbt)
 
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		log.Printf("⚠️ RBT token not found for deletion: %s", tokenID)
@@ -142,7 +140,7 @@ func deleteRBTToken(tokenData interface{}) error {
 	}
 
 	// Delete token_type entry
-	if err := database.DB.Where("token_id = ?", tokenID).Delete(&models.TokenType{}).Error; err != nil {
+	if err := database.DB.Where("token_id = ?", tokenID).Delete(&models.AllTokens{}).Error; err != nil {
 		log.Printf("⚠️ Failed to delete token_type for %s: %v", tokenID, err)
 	}
 
@@ -171,18 +169,16 @@ func UpdateFTToken(tokenData interface{}, operation string) error {
 	}
 
 	updateData := models.FT{
-		FtID:        ft.TokenID,
+		TokenID:     ft.TokenID,
 		TokenValue:  ft.TokenValue,
 		FTName:      ft.FTName,
 		OwnerDID:    ft.OwnerDID,
 		CreatorDID:  ft.CreatorDID,
-		BlockID:     ft.BlockHash,
-		Txn_ID:      ft.TransactionID,
 		TokenStatus: ft.TokenStatus,
 	}
 
 	var existingFT models.FT
-	result := database.DB.Where("ft_id = ?", ft.TokenID).First(&existingFT)
+	result := database.DB.Where("token_id = ?", ft.TokenID).First(&existingFT)
 
 	isNewToken := errors.Is(result.Error, gorm.ErrRecordNotFound)
 
@@ -196,7 +192,7 @@ func UpdateFTToken(tokenData interface{}, operation string) error {
 		log.Printf("❌ Error querying FT %s: %v", ft.TokenID, result.Error)
 		return result.Error
 	} else {
-		if err := database.DB.Where("ft_id = ?", ft.TokenID).Updates(updateData).Error; err != nil {
+		if err := database.DB.Where("token_id = ?", ft.TokenID).Updates(updateData).Error; err != nil {
 			log.Printf("❌ Failed to update FT %s: %v", ft.TokenID, err)
 			return err
 		}
@@ -204,12 +200,11 @@ func UpdateFTToken(tokenData interface{}, operation string) error {
 	}
 
 	// Ensure token_type entry exists
-	tokenType := models.TokenType{
-		TokenID:     ft.TokenID,
-		TokenType:   "FT",
-		LastUpdated: time.Now(),
+	tokenType := models.AllTokens{
+		TokenID:   ft.TokenID,
+		TokenType: "FT",
 	}
-	if err := database.DB.FirstOrCreate(&tokenType, models.TokenType{TokenID: ft.TokenID}).Error; err != nil {
+	if err := database.DB.FirstOrCreate(&tokenType, models.AllTokens{TokenID: ft.TokenID}).Error; err != nil {
 		log.Printf("⚠️ Failed to ensure token_type for %s: %v", ft.TokenID, err)
 	}
 
@@ -229,7 +224,7 @@ func deleteFTToken(tokenData interface{}) error {
 	tokenID := deletePayload["token_id"].(string)
 
 	var ft models.FT
-	result := database.DB.Where("ft_id = ?", tokenID).First(&ft)
+	result := database.DB.Where("token_id = ?", tokenID).First(&ft)
 
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		log.Printf("⚠️ FT token not found for deletion: %s", tokenID)
@@ -251,7 +246,7 @@ func deleteFTToken(tokenData interface{}) error {
 	}
 
 	// Delete token_type entry
-	if err := database.DB.Where("token_id = ?", tokenID).Delete(&models.TokenType{}).Error; err != nil {
+	if err := database.DB.Where("token_id = ?", tokenID).Delete(&models.AllTokens{}).Error; err != nil {
 		log.Printf("⚠️ Failed to delete token_type for %s: %v", tokenID, err)
 	}
 
@@ -283,14 +278,12 @@ func UpdateNFTToken(tokenData interface{}, operation string) error {
 		TokenID:     nft.TokenID,
 		TokenValue:  fmt.Sprintf("%f", nft.TokenValue),
 		OwnerDID:    nft.OwnerDID,
-		BlockHash:   nft.BlockHash,
-		Txn_ID:      nft.TransactionID,
 		BlockHeight: nft.BlockHeight,
 		TokenStatus: nft.TokenStatus,
 	}
 
 	var existingNFT models.NFT
-	result := database.DB.Where("nft_id = ?", nft.TokenID).First(&existingNFT)
+	result := database.DB.Where("token_id = ?", nft.TokenID).First(&existingNFT)
 
 	isNewToken := errors.Is(result.Error, gorm.ErrRecordNotFound)
 
@@ -304,7 +297,7 @@ func UpdateNFTToken(tokenData interface{}, operation string) error {
 		log.Printf("❌ Error querying NFT %s: %v", nft.TokenID, result.Error)
 		return result.Error
 	} else {
-		if err := database.DB.Where("nft_id = ?", nft.TokenID).Updates(updateData).Error; err != nil {
+		if err := database.DB.Where("token_id = ?", nft.TokenID).Updates(updateData).Error; err != nil {
 			log.Printf("❌ Failed to update NFT %s: %v", nft.TokenID, err)
 			return err
 		}
@@ -312,12 +305,11 @@ func UpdateNFTToken(tokenData interface{}, operation string) error {
 	}
 
 	// Ensure token_type entry exists
-	tokenType := models.TokenType{
-		TokenID:     nft.TokenID,
-		TokenType:   "NFT",
-		LastUpdated: time.Now(),
+	tokenType := models.AllTokens{
+		TokenID:   nft.TokenID,
+		TokenType: "NFT",
 	}
-	if err := database.DB.FirstOrCreate(&tokenType, models.TokenType{TokenID: nft.TokenID}).Error; err != nil {
+	if err := database.DB.FirstOrCreate(&tokenType, models.AllTokens{TokenID: nft.TokenID}).Error; err != nil {
 		log.Printf("⚠️ Failed to ensure token_type for %s: %v", nft.TokenID, err)
 	}
 
@@ -335,7 +327,7 @@ func deleteNFTToken(tokenData interface{}) error {
 	tokenID := deletePayload["token_id"].(string)
 
 	var nft models.NFT
-	result := database.DB.Where("nft_id = ?", tokenID).First(&nft)
+	result := database.DB.Where("token_id = ?", tokenID).First(&nft)
 
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		log.Printf("⚠️ NFT token not found for deletion: %s", tokenID)
@@ -357,7 +349,7 @@ func deleteNFTToken(tokenData interface{}) error {
 	}
 
 	// Delete token_type entry
-	if err := database.DB.Where("token_id = ?", tokenID).Delete(&models.TokenType{}).Error; err != nil {
+	if err := database.DB.Where("token_id = ?", tokenID).Delete(&models.AllTokens{}).Error; err != nil {
 		log.Printf("⚠️ Failed to delete token_type for %s: %v", tokenID, err)
 	}
 
@@ -385,17 +377,16 @@ func UpdateSCToken(tokenData interface{}, operation string) error {
 		return err
 	}
 
-	updateData := models.SmartContract{
-		ContractID:  sc.SmartContractHash,
+	updateData := models.SC{
+		TokenID:     sc.SmartContractHash,
 		BlockHash:   sc.BlockHash,
 		DeployerDID: sc.Deployer,
-		TxnId:       sc.TransactionID,
 		BlockHeight: sc.BlockHeight,
 		TokenStatus: sc.TokenStatus,
 	}
 
-	var existingSC models.SmartContract
-	result := database.DB.Where("contract_id = ?", sc.SmartContractHash).First(&existingSC)
+	var existingSC models.SC
+	result := database.DB.Where("token_id = ?", sc.SmartContractHash).First(&existingSC)
 
 	isNewToken := errors.Is(result.Error, gorm.ErrRecordNotFound)
 
@@ -409,7 +400,7 @@ func UpdateSCToken(tokenData interface{}, operation string) error {
 		log.Printf("❌ Error querying SC %s: %v", sc.SmartContractHash, result.Error)
 		return result.Error
 	} else {
-		if err := database.DB.Where("contract_id = ?", sc.SmartContractHash).Updates(updateData).Error; err != nil {
+		if err := database.DB.Where("token_id = ?", sc.SmartContractHash).Updates(updateData).Error; err != nil {
 			log.Printf("❌ Failed to update SC %s: %v", sc.SmartContractHash, err)
 			return err
 		}
@@ -417,12 +408,11 @@ func UpdateSCToken(tokenData interface{}, operation string) error {
 	}
 
 	// Ensure token_type entry exists
-	tokenType := models.TokenType{
-		TokenID:     sc.SmartContractHash,
-		TokenType:   "SC",
-		LastUpdated: time.Now(),
+	tokenType := models.AllTokens{
+		TokenID:   sc.SmartContractHash,
+		TokenType: "SC",
 	}
-	if err := database.DB.FirstOrCreate(&tokenType, models.TokenType{TokenID: sc.SmartContractHash}).Error; err != nil {
+	if err := database.DB.FirstOrCreate(&tokenType, models.AllTokens{TokenID: sc.SmartContractHash}).Error; err != nil {
 		log.Printf("⚠️ Failed to ensure token_type for SC %s: %v", sc.SmartContractHash, err)
 	}
 
@@ -439,8 +429,8 @@ func deleteSCToken(tokenData interface{}) error {
 	deletePayload := tokenData.(map[string]interface{})
 	contractHash := deletePayload["smart_contract_hash"].(string)
 
-	var sc models.SmartContract
-	result := database.DB.Where("contract_id = ?", contractHash).First(&sc)
+	var sc models.SC
+	result := database.DB.Where("token_id = ?", contractHash).First(&sc)
 
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		log.Printf("⚠️ Smart Contract not found for deletion: %s", contractHash)
@@ -462,7 +452,7 @@ func deleteSCToken(tokenData interface{}) error {
 	}
 
 	// Delete token_type entry
-	if err := database.DB.Where("token_id = ?", contractHash).Delete(&models.TokenType{}).Error; err != nil {
+	if err := database.DB.Where("token_id = ?", contractHash).Delete(&models.AllTokens{}).Error; err != nil {
 		log.Printf("⚠️ Failed to delete token_type for SC %s: %v", contractHash, err)
 	}
 
@@ -531,7 +521,6 @@ func updateDIDForRBT(ownerDID string, tokenValue float64, isNewToken bool) error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		newDID := models.DIDs{
 			DID:       ownerDID,
-			CreatedAt: time.Now(),
 			TotalRBTs: tokenValue,
 		}
 		if err := database.DB.Create(&newDID).Error; err != nil {
@@ -560,9 +549,8 @@ func updateDIDForFT(ownerDID string, isNewToken bool) error {
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		newDID := models.DIDs{
-			DID:       ownerDID,
-			CreatedAt: time.Now(),
-			TotalFTs:  1,
+			DID:      ownerDID,
+			TotalFTs: 1,
 		}
 		if err := database.DB.Create(&newDID).Error; err != nil {
 			return err
@@ -577,7 +565,7 @@ func updateDIDForFT(ownerDID string, isNewToken bool) error {
 		if err := database.DB.Save(&existing).Error; err != nil {
 			return err
 		}
-		log.Printf("✅ Updated DID entry for %s, new total FTs: %d", ownerDID, existing.TotalFTs)
+		log.Printf("✅ Updated DID entry for %s, new total FTs: %.0f", ownerDID, existing.TotalFTs)
 	}
 
 	return nil
@@ -590,7 +578,6 @@ func updateDIDForNFT(ownerDID string, isNewToken bool) error {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		newDID := models.DIDs{
 			DID:       ownerDID,
-			CreatedAt: time.Now(),
 			TotalNFTs: 1,
 		}
 		if err := database.DB.Create(&newDID).Error; err != nil {
@@ -618,9 +605,8 @@ func updateDIDForSC(deployerDID string, isNewToken bool) error {
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		newDID := models.DIDs{
-			DID:       deployerDID,
-			CreatedAt: time.Now(),
-			TotalSC:   1,
+			DID:     deployerDID,
+			TotalSC: 1,
 		}
 		if err := database.DB.Create(&newDID).Error; err != nil {
 			return err
@@ -687,7 +673,7 @@ func decrementDIDForFT(ownerDID string) error {
 	if err := database.DB.Save(&existing).Error; err != nil {
 		return err
 	}
-	log.Printf("✅ Decremented DID entry for %s, new total FTs: %d", ownerDID, existing.TotalFTs)
+	log.Printf("✅ Decremented DID entry for %s, new total FTs: %.0f", ownerDID, existing.TotalFTs)
 
 	return nil
 }

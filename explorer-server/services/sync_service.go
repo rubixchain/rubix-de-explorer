@@ -288,7 +288,7 @@ func StoreRBTInfoInDB(RBTs []RBT) error {
 		}
 
 		var existingRBT models.RBT
-		err := database.DB.Where("rbt_id = ?", rbt.TokenID).First(&existingRBT).Error
+		err := database.DB.Where("token_id = ?", rbt.TokenID).First(&existingRBT).Error
 
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			if err := database.DB.Create(&rbtModel).Error; err != nil {
@@ -308,13 +308,12 @@ func StoreRBTInfoInDB(RBTs []RBT) error {
 			log.Printf("ℹ️ RBT already exists, skipping: %s", rbt.TokenID)
 		}
 
-		tokenType := models.TokenType{
-			TokenID:     rbt.TokenID,
-			TokenType:   RBTType,
-			LastUpdated: time.Now(),
+		tokenType := models.AllTokens{
+			TokenID:   rbt.TokenID,
+			TokenType: RBTType,
 		}
 
-		if err := database.DB.FirstOrCreate(&tokenType, models.TokenType{TokenID: rbt.TokenID}).Error; err != nil {
+		if err := database.DB.FirstOrCreate(&tokenType, models.AllTokens{TokenID: rbt.TokenID}).Error; err != nil {
 			log.Printf("⚠️ Failed to insert token_type for %s: %v", rbt.TokenID, err)
 		}
 	}
@@ -327,7 +326,6 @@ func StoreRBTInfoInDB(RBTs []RBT) error {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				newDID := models.DIDs{
 					DID:       did,
-					CreatedAt: time.Now(),
 					TotalRBTs: roundedValue,
 				}
 				if err := database.DB.Create(&newDID).Error; err != nil {
@@ -350,18 +348,16 @@ func StoreFTInfoInDB(FTs []FT) error {
 	didCount := make(map[string]int)
 	for _, ft := range FTs {
 		ftmodel := models.FT{
-			FtID:        ft.TokenID,
+			TokenID:     ft.TokenID,
 			TokenValue:  ft.TokenValue,
 			FTName:      ft.FTName,
 			OwnerDID:    ft.OwnerDID,
 			CreatorDID:  ft.CreatorDID,
-			BlockID:     ft.BlockHash,
-			Txn_ID:      ft.TransactionID,
 			TokenStatus: ft.TokenStatus,
 		}
 
 		var existingFT models.FT
-		err := database.DB.Where("ft_id = ?", ft.TokenID).First(&existingFT).Error
+		err := database.DB.Where("token_id = ?", ft.TokenID).First(&existingFT).Error
 
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			if err := database.DB.Create(&ftmodel).Error; err != nil {
@@ -381,13 +377,12 @@ func StoreFTInfoInDB(FTs []FT) error {
 			log.Printf("ℹ️ FT already exists, skipping: %s", ft.TokenID)
 		}
 
-		tokenType := models.TokenType{
-			TokenID:     ft.TokenID,
-			TokenType:   FTType,
-			LastUpdated: time.Now(),
+		tokenType := models.AllTokens{
+			TokenID:   ft.TokenID,
+			TokenType: FTType,
 		}
 
-		if err := database.DB.FirstOrCreate(&tokenType, models.TokenType{TokenID: ft.TokenID}).Error; err != nil {
+		if err := database.DB.FirstOrCreate(&tokenType, models.AllTokens{TokenID: ft.TokenID}).Error; err != nil {
 			log.Printf("⚠️ Failed to insert token_type for %s: %v", ft.TokenID, err)
 		}
 	}
@@ -397,9 +392,8 @@ func StoreFTInfoInDB(FTs []FT) error {
 		if err := database.DB.First(&existing, "did = ?", did).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				newDID := models.DIDs{
-					DID:       did,
-					CreatedAt: time.Now(),
-					TotalFTs:  float64(count),
+					DID:      did,
+					TotalFTs: float64(count),
 				}
 				if err := database.DB.Create(&newDID).Error; err != nil {
 					log.Printf("⚠️ Failed to create DID %s: %v", did, err)
@@ -423,14 +417,12 @@ func StoreNFTInfoInDB(NFTs []NFT) error {
 			TokenID:     nft.TokenID,
 			TokenValue:  fmt.Sprintf("%f", nft.TokenValue),
 			OwnerDID:    nft.OwnerDID,
-			BlockHash:   nft.BlockHash,
-			Txn_ID:      nft.TransactionID,
 			BlockHeight: nft.BlockHeight,
 			TokenStatus: nft.TokenStatus,
 		}
 
 		var existingNFT models.NFT
-		err := database.DB.Where("nft_id = ?", nft.TokenID).First(&existingNFT).Error
+		err := database.DB.Where("token_id = ?", nft.TokenID).First(&existingNFT).Error
 
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			if err := database.DB.Create(&nftmodel).Error; err != nil {
@@ -447,13 +439,12 @@ func StoreNFTInfoInDB(NFTs []NFT) error {
 			log.Printf("NFT already exists, skipping: %s", nft.TokenID)
 		}
 
-		tokenType := models.TokenType{
-			TokenID:     nft.TokenID,
-			TokenType:   NFTType,
-			LastUpdated: time.Now(),
+		tokenType := models.AllTokens{
+			TokenID:   nft.TokenID,
+			TokenType: NFTType,
 		}
 
-		if err := database.DB.FirstOrCreate(&tokenType, models.TokenType{TokenID: nft.TokenID}).Error; err != nil {
+		if err := database.DB.FirstOrCreate(&tokenType, models.AllTokens{TokenID: nft.TokenID}).Error; err != nil {
 			log.Printf("⚠️ Failed to insert token_type for %s: %v", nft.TokenID, err)
 		}
 	}
@@ -464,7 +455,6 @@ func StoreNFTInfoInDB(NFTs []NFT) error {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				newDID := models.DIDs{
 					DID:       did,
-					CreatedAt: time.Now(),
 					TotalNFTs: int64(count),
 				}
 				if err := database.DB.Create(&newDID).Error; err != nil {
@@ -485,17 +475,16 @@ func StoreNFTInfoInDB(NFTs []NFT) error {
 func StoreSCInfoInDB(SCs []SC) error {
 	didCount := make(map[string]int)
 	for _, sc := range SCs {
-		scmodel := models.SmartContract{
-			ContractID:  sc.SmartContractHash,
+		scmodel := models.SC{
+			TokenID:     sc.SmartContractHash,
 			BlockHash:   sc.BlockHash,
 			DeployerDID: sc.Deployer,
-			TxnId:       sc.TransactionID,
 			BlockHeight: sc.BlockHeight,
 			TokenStatus: sc.TokenStatus,
 		}
 
-		var existingSC models.SmartContract
-		err := database.DB.Where("contract_id = ?", sc.SmartContractHash).First(&existingSC).Error
+		var existingSC models.SC
+		err := database.DB.Where("token_id = ?", sc.SmartContractHash).First(&existingSC).Error
 
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			if err := database.DB.Create(&scmodel).Error; err != nil {
@@ -512,12 +501,11 @@ func StoreSCInfoInDB(SCs []SC) error {
 			log.Printf("ℹ️ SC already exists, skipping: %s", sc.SmartContractHash)
 		}
 
-		tokenType := models.TokenType{
-			TokenID:     sc.SmartContractHash,
-			TokenType:   SCType,
-			LastUpdated: time.Now(),
+		tokenType := models.AllTokens{
+			TokenID:   sc.SmartContractHash,
+			TokenType: SCType,
 		}
-		if err := database.DB.FirstOrCreate(&tokenType, models.TokenType{TokenID: sc.SmartContractHash}).Error; err != nil {
+		if err := database.DB.FirstOrCreate(&tokenType, models.AllTokens{TokenID: sc.SmartContractHash}).Error; err != nil {
 			log.Printf("⚠️ Failed to insert token_type for SC %s: %v", sc.SmartContractHash, err)
 		}
 	}
@@ -527,9 +515,8 @@ func StoreSCInfoInDB(SCs []SC) error {
 		if err := database.DB.First(&existing, "did = ?", did).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				newDID := models.DIDs{
-					DID:       did,
-					CreatedAt: time.Now(),
-					TotalSC:   int64(count),
+					DID:     did,
+					TotalSC: int64(count),
 				}
 				if err := database.DB.Create(&newDID).Error; err != nil {
 					log.Printf("⚠️ Failed to create DID %s: %v", did, err)
@@ -565,7 +552,7 @@ func sliceStringPtr(v interface{}) *[]string {
 
 // FetchAllTokenChainFromFullNode syncs token chains sequentially
 func FetchAllTokenChainFromFullNode() error {
-	var tokens []models.TokenType
+	var tokens []models.AllTokens
 
 	if err := database.DB.Find(&tokens).Error; err != nil {
 		log.Fatalf("❌ Failed to fetch tokens from DB: %v", err)
@@ -613,7 +600,7 @@ func FetchAllTokenChainFromFullNode() error {
 }
 
 // fetchAndStoreTokenChain handles individual token chain syncing with retry logic
-func fetchAndStoreTokenChain(token models.TokenType) error {
+func fetchAndStoreTokenChain(token models.AllTokens) error {
 	fmt.Println("tokenInfo for getting tokenchain is:", token)
 	apiURL := fmt.Sprintf("%s/api/de-exp/get-token-chain?tokenID=%s&tokenType=%s",
 		config.RubixNodeURL, token.TokenID, token.TokenType)
@@ -695,7 +682,7 @@ func fetchAndStoreTokenChain(token models.TokenType) error {
 		return nil
 	}
 
-	if blocks == nil || len(blocks) == 0 {
+	if len(blocks) == 0 {
 		log.Printf("⚠️ Empty or nil block list for token %s", token.TokenID)
 		return nil
 	}
@@ -710,7 +697,7 @@ func fetchAndStoreTokenChain(token models.TokenType) error {
 }
 
 // processAndStoreBlocks handles block classification and storage
-func processAndStoreBlocks(token models.TokenType, blocks []interface{}) error {
+func processAndStoreBlocks(token models.AllTokens, blocks []interface{}) error {
 	for _, blk := range blocks {
 		blockMap, ok := blk.(map[string]interface{})
 		if !ok {
@@ -749,13 +736,13 @@ func processAndStoreBlocks(token models.TokenType, blocks []interface{}) error {
 }
 
 // ProcessSingleBlock is used by the live /api/block-update path.
-// It stores the block in AllBlocks and then routes it to the right table.
+// It stores the block in BlockType and then routes it to the right table.
 func ProcessSingleBlock(blockMap map[string]interface{}) {
 	if blockMap == nil {
 		return
 	}
 
-	// Always store in AllBlocks table
+	// Always store in BlockType table
 	StoreBlockInAllBlocks(blockMap)
 
 	transType, _ := blockMap["TCTransTypeKey"].(string)

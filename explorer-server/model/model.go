@@ -57,7 +57,7 @@ type TransactionsResponse struct {
 }
 
 type SCBlocksListResponse struct {
-	SC_Blocks []models.SC_Block `json:"sc_blocks"`
+	SC_Blocks []models.SCBlocks `json:"sc_blocks"`
 	Count     int64             `json:"count"`
 }
 
@@ -117,9 +117,9 @@ type IncomingBlockInfo struct {
 	CreatorDID        string                 `json:"creator_did"`
 	PublisherDID      string                 `json:"publisher_did"`
 	ReceiverDID       string                 `json:"receiver_did"`
-	TxnBlock          map[string]interface{} `json:"block_map"`
 	LatestBlockHeight uint64                 `json:"block_height"`
 	TransactionValue  float64                `json:"transaction_value"`
 	TokenValue        float64                `json:"token_value"`
+	BlockMap          map[string]interface{} `json:"block_map"`
 	TokenDetails      []TokenDetails         `json:"token_details"`
 }

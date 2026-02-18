@@ -43,15 +43,56 @@ func MapTxnTypeToTokenStatus(txnType string) int {
 }
 
 // UpdateBlocks orchestrates the block storage and delegates token updates
-func UpdateBlocks(blockMap map[string]interface{}, info *model.IncomingBlockInfo) {
-	if blockMap == nil || info == nil {
+func UpdateBlocks(info *model.IncomingBlockInfo) {
+	if info == nil || info.BlockMap == nil {
 		return
 	}
 
-	mappedBlock := ProcessIncomingBlock(blockMap)
-	StoreBlockInAllBlocks(mappedBlock)
+	// 1. Extract and Process the internal block map
+	mappedBlock := ProcessIncomingBlock(info.BlockMap)
+	fmt.Println("Block Map received at Explorer is:", mappedBlock)
 
+	// 2. Data Backfilling: Ensure info fields are populated for the DB modules
+	// If Fullnode sends empty strings, we pull from the mappedBlock
+	if info.ReceiverDID == "" {
+		if owner, ok := mappedBlock["TCTokenOwnerKey"].(string); ok && owner != "" {
+			info.ReceiverDID = owner
+		} else {
+			info.ReceiverDID = info.PublisherDID
+		}
+	}
+
+	// Extract TxnID if missing
+	if info.TransactionID == "" || info.TransactionID == "<nil>" {
+		transInfo, _ := mappedBlock["TCTransInfoKey"].(map[string]interface{})
+		if tid := stringPtr(getNested(transInfo, "TITIDKey")); tid != nil {
+			info.TransactionID = *tid
+		}
+	}
+
+	// Extract CreatorDID if missing (common in FT minting)
+	if info.CreatorDID == "" || info.CreatorDID == "<nil>" {
+		transInfo, _ := mappedBlock["TCTransInfoKey"].(map[string]interface{})
+		if cdid := stringPtr(getNested(transInfo, "TICreatorDIDKey")); cdid != nil {
+			info.CreatorDID = *cdid
+		}
+	}
+
+	// Backfill TxnType from block map (critical for DID analytics logic)
 	transType := fmt.Sprintf("%v", mappedBlock["TCTransTypeKey"])
+	if info.TxnType == "" {
+		info.TxnType = transType
+	}
+
+	// Backfill TransactionValue from block map (needed for RBT balance updates)
+	if info.TransactionValue == 0 {
+		if val, ok := mappedBlock["TCTokenValueKey"].(float64); ok {
+			info.TransactionValue = val
+		}
+	}
+
+	// 3. Store Block Records
+	StoreBlockInAllBlocks(mappedBlock)
 
 	switch transType {
 	case constants.TokenTransferredType:
@@ -63,11 +104,12 @@ func UpdateBlocks(blockMap map[string]interface{}, info *model.IncomingBlockInfo
 	case constants.TokenExecutedType:
 		StoreSCExecuteBlock(mappedBlock)
 	case constants.TokenGeneratedType, constants.TokenMintedType:
-		StoreMintBlock(mappedBlock)
+		StoreMintBlock(mappedBlock, info)
 	default:
 		log.Printf("📥 Block Type: %s (Handled in AllBlocks only)", transType)
 	}
 
+	// 4. Process Live Updates using the enriched info struct
 	if err := ProcessLiveTokenUpdates(info); err != nil {
 		log.Printf("⚠️ Token/DID Update error: %v", err)
 	}
@@ -82,17 +124,30 @@ func StoreTransferBlock(blockMap map[string]interface{}) {
 	tokensKey, _ := transInfo["TITokensKey"].(map[string]interface{})
 	tokensJSON, _ := json.Marshal(tokensKey)
 
-	tb := models.TransferBlocks{
+	// Receiver DID: try transInfo first, fallback to tokenOwner
+	receiverDID := stringPtr(getNested(transInfo, "TIReceiverDIDKey"))
+	if receiverDID == nil {
+		receiverDID = stringPtr(getNested(blockMap, "TCTokenOwnerKey"))
+	}
+
+	// Validators: serialize quorumSignature if present
+	var validatorsJSON datatypes.JSON
+	if qs := blockMap["TCQuorumSignatureKey"]; qs != nil {
+		if data, err := json.Marshal(qs); err == nil {
+			validatorsJSON = datatypes.JSON(data)
+		}
+	}
+
+	tb := models.TransactionBlocks{
 		BlockHash:   fmt.Sprintf("%v", blockMap["TCBlockHashKey"]),
-		PrevBlockID: stringPtr(getNested(transInfo, "TTPreviousBlockIDKey")),
 		SenderDID:   stringPtr(getNested(transInfo, "TISenderDIDKey")),
-		ReceiverDID: stringPtr(getNested(transInfo, "TIReceiverDIDKey")),
+		ReceiverDID: receiverDID,
 		TxnType:     stringPtr(getNested(blockMap, "TCTransTypeKey")),
 		TxnID:       stringPtr(getNested(transInfo, "TITIDKey")),
 		Amount:      float64Ptr(blockMap["TCTokenValueKey"]),
 		Epoch:       int64Ptr(blockMap["TCEpoch"]),
 		Tokens:      datatypes.JSON(tokensJSON),
-		// ValidatorPledgeMap removed as requested
+		Validators:  validatorsJSON,
 	}
 	database.DB.Clauses(clause.OnConflict{UpdateAll: true}).Create(&tb)
 }
@@ -100,7 +155,13 @@ func StoreTransferBlock(blockMap map[string]interface{}) {
 func StoreBurntBlock(blockMap map[string]interface{}) {
 	transInfo, _ := blockMap["TCTransInfoKey"].(map[string]interface{})
 	tokensKey, _ := transInfo["TITokensKey"].(map[string]interface{})
-	tokensJSON, _ := json.Marshal(tokensKey)
+
+	var childTokensJSON datatypes.JSON
+	if tokensKey != nil {
+		if data, err := json.Marshal(tokensKey); err == nil {
+			childTokensJSON = datatypes.JSON(data)
+		}
+	}
 
 	var epoch *int64
 	if comment, ok := transInfo["TICommentKey"].(string); ok {
@@ -120,8 +181,7 @@ func StoreBurntBlock(blockMap map[string]interface{}) {
 		TxnType:   &txnType,
 		OwnerDID:  fmt.Sprintf("%v", blockMap["TCTokenOwnerKey"]),
 		Epoch:     epoch,
-		Tokens:    datatypes.JSON(tokensJSON),
-		// ChildTokens removed as requested
+		Tokens:    childTokensJSON,
 	}
 	database.DB.Clauses(clause.OnConflict{UpdateAll: true}).Create(&bb)
 }
@@ -145,12 +205,12 @@ func StoreSCDeployBlock(blockMap map[string]interface{}) {
 	if e, ok := blockMap["TCEpoch"].(float64); ok {
 		epoch = time.Unix(int64(e), 0)
 	}
-	scBlock := models.SC_Block{
-		Block_ID:     blockID,
-		Contract_ID:  contractID,
-		Block_Height: blockHeight,
-		Epoch:        epoch,
-		Owner_DID:    fmt.Sprintf("%v", getNested(transInfo, "TIDeployerDIDKey")),
+	scBlock := models.SCBlocks{
+		BlockID:     blockID,
+		TokenID:     contractID,
+		BlockHeight: blockHeight,
+		Epoch:       epoch,
+		DeployerDID: fmt.Sprintf("%v", getNested(transInfo, "TIDeployerDIDKey")),
 	}
 	database.DB.Clauses(clause.OnConflict{UpdateAll: true}).Create(&scBlock)
 }
@@ -174,18 +234,18 @@ func StoreSCExecuteBlock(blockMap map[string]interface{}) {
 	if e, ok := blockMap["TCEpoch"].(float64); ok {
 		epoch = time.Unix(int64(e), 0)
 	}
-	scBlock := models.SC_Block{
-		Block_ID:     blockID,
-		Contract_ID:  contractID,
-		Executor_DID: stringPtr(getNested(transInfo, "TIExecutorDIDKey")),
-		Block_Height: blockHeight,
-		Epoch:        epoch,
-		Owner_DID:    fmt.Sprintf("%v", getNested(transInfo, "TIReceiverDIDKey")),
+	scBlock := models.SCBlocks{
+		BlockID:     blockID,
+		TokenID:     contractID,
+		ExecutorDID: stringPtr(getNested(transInfo, "TIExecutorDIDKey")),
+		BlockHeight: blockHeight,
+		Epoch:       epoch,
+		DeployerDID: fmt.Sprintf("%v", getNested(transInfo, "TIDeployerDIDKey")),
 	}
 	database.DB.Clauses(clause.OnConflict{UpdateAll: true}).Create(&scBlock)
 }
 
-func StoreMintBlock(blockMap map[string]interface{}) {
+func StoreMintBlock(blockMap map[string]interface{}, info *model.IncomingBlockInfo) {
 	transInfo, _ := blockMap["TCTransInfoKey"].(map[string]interface{})
 	tokensKey, _ := transInfo["TITokensKey"].(map[string]interface{})
 
@@ -194,20 +254,25 @@ func StoreMintBlock(blockMap map[string]interface{}) {
 		tokenIDs = append(tokenIDs, k)
 	}
 
-	assetTypeInt := 0
-	if val, ok := blockMap["TCAssetTypeKey"].(float64); ok {
-		assetTypeInt = int(val)
+	var creatorDID string
+	if info.CreatorDID != "" {
+		creatorDID = info.CreatorDID
+	} else {
+		creatorDID = info.PublisherDID
+	}
+	var ftName *string
+	if info.FTName != "" {
+		ftName = &info.FTName
 	}
 
 	txnType := fmt.Sprintf("%v", blockMap["TCTransTypeKey"])
 	mb := models.MintBlocks{
 		BlockHash:  fmt.Sprintf("%v", blockMap["TCBlockHashKey"]),
 		TokenIDs:   pq.StringArray(tokenIDs),
-		TokenType:  constants.AssetTypeToString(assetTypeInt),
+		TokenType:  constants.AssetTypeToString(info.AssetType),
 		TokenValue: float64Ptr(blockMap["TCTokenValueKey"]),
-		OwnerDID:   fmt.Sprintf("%v", blockMap["TCTokenOwnerKey"]),
-		CreatorDID: stringPtr(getNested(transInfo, "TICreatorDIDKey")),
-		FTName:     stringPtr(blockMap["TCFTNameKey"]),
+		CreatorDID: creatorDID,
+		FTName:     ftName,
 		Epoch:      int64Ptr(blockMap["TCEpoch"]),
 		TxnType:    &txnType,
 	}
@@ -219,32 +284,18 @@ func StoreBlockInAllBlocks(blockMap map[string]interface{}) {
 	blockHash := fmt.Sprintf("%v", blockMap["TCBlockHashKey"])
 	txnID := fmt.Sprintf("%v", transInfo["TITIDKey"])
 
-	var blockType string
-	switch fmt.Sprintf("%v", blockMap["TCTransTypeKey"]) {
-	case "02":
-		blockType = "transfer"
-	case "08":
-		blockType = "burnt"
-	case "13":
-		blockType = "burnt_for_ft"
-	case "09":
-		blockType = "deploy"
-	case "10":
-		blockType = "execute"
-	case "05":
-		blockType = "mint"
-	default:
-		blockType = "unknown"
+	// Get the raw type string (e.g., "02")
+	rawType := fmt.Sprintf("%v", blockMap["TCTransTypeKey"])
+
+	// INTEGRATION: Call your helper function to get "Transferred", "Minted", etc.
+	blockType := constants.TxTypeToString(rawType)
+
+	record := models.AllBlocks{
+		BlockHash: blockHash,
+		BlockType: blockType,
+		TxnID:     txnID,
 	}
 
-	var epochTime time.Time
-	if v, ok := blockMap["TCEpoch"].(float64); ok {
-		epochTime = time.Unix(int64(v), 0)
-	} else {
-		epochTime = time.Now()
-	}
-
-	record := models.AllBlocks{BlockHash: blockHash, BlockType: blockType, Epoch: epochTime, TxnID: txnID}
 	database.DB.Clauses(clause.OnConflict{DoNothing: true}).Create(&record)
 }
 
@@ -297,17 +348,16 @@ func ProcessLiveTokenUpdates(info *model.IncomingBlockInfo) error {
 func updateTokenRegistry(tx *gorm.DB, tokenID string, assetType int) error {
 	return tx.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "token_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"token_type", "last_updated"}),
-	}).Create(&models.TokenType{
-		TokenID:     tokenID,
-		TokenType:   constants.AssetTypeToString(assetType),
-		LastUpdated: time.Now(),
+		DoUpdates: clause.AssignmentColumns([]string{"token_type"}),
+	}).Create(&models.AllTokens{
+		TokenID:   tokenID,
+		TokenType: constants.AssetTypeToString(assetType),
 	}).Error
 }
 
 func handleRBTUpdate(tx *gorm.DB, info *model.IncomingBlockInfo, token model.TokenDetails, status int) error {
 	return tx.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "rbt_id"}},
+		Columns:   []clause.Column{{Name: "token_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{"owner_did", "block_id", "block_height", "token_status"}),
 	}).Create(&models.RBT{
 		TokenID:     token.TokenID,
@@ -321,31 +371,27 @@ func handleRBTUpdate(tx *gorm.DB, info *model.IncomingBlockInfo, token model.Tok
 
 func handleFTUpdate(tx *gorm.DB, info *model.IncomingBlockInfo, token model.TokenDetails, status int) error {
 	return tx.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "ft_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"owner_did", "block_height", "block_id", "txn_id", "token_status"}),
+		Columns:   []clause.Column{{Name: "token_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"owner_did", "block_height", "token_status"}),
 	}).Create(&models.FT{
-		FtID:        token.TokenID,
+		TokenID:     token.TokenID,
 		TokenValue:  token.TokenValue,
 		FTName:      info.FTName,
 		OwnerDID:    info.ReceiverDID,
 		CreatorDID:  info.CreatorDID,
 		BlockHeight: info.LatestBlockHeight,
-		BlockID:     info.BlockHash,
-		Txn_ID:      info.TransactionID,
 		TokenStatus: status,
 	}).Error
 }
 
 func handleNFTUpdate(tx *gorm.DB, info *model.IncomingBlockInfo, token model.TokenDetails, status int) error {
 	return tx.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "nft_id"}},
+		Columns:   []clause.Column{{Name: "token_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{"owner_did", "block_hash", "txn_id", "block_height", "token_status"}),
 	}).Create(&models.NFT{
 		TokenID:     token.TokenID,
 		TokenValue:  fmt.Sprintf("%f", token.TokenValue),
 		OwnerDID:    info.ReceiverDID,
-		BlockHash:   info.BlockHash,
-		Txn_ID:      info.TransactionID,
 		BlockHeight: info.LatestBlockHeight,
 		TokenStatus: status,
 	}).Error
@@ -353,34 +399,94 @@ func handleNFTUpdate(tx *gorm.DB, info *model.IncomingBlockInfo, token model.Tok
 
 func handleSCUpdate(tx *gorm.DB, info *model.IncomingBlockInfo, token model.TokenDetails, status int) error {
 	return tx.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "contract_id"}},
+		Columns:   []clause.Column{{Name: "token_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{"block_hash", "txn_id", "block_height", "token_status"}),
-	}).Create(&models.SmartContract{
-		ContractID:  token.TokenID,
+	}).Create(&models.SC{
+		TokenID:     token.TokenID,
 		BlockHash:   info.BlockHash,
 		DeployerDID: info.CreatorDID,
-		TxnId:       info.TransactionID,
 		BlockHeight: uint64(info.LatestBlockHeight),
 		TokenStatus: status,
 	}).Error
 }
 
 func updateDIDAnalytics(tx *gorm.DB, info *model.IncomingBlockInfo) error {
-	dids := []string{info.PublisherDID}
-	if info.ReceiverDID != "" {
-		dids = append(dids, info.ReceiverDID)
+	// Collect all unique DIDs involved
+	didSet := make(map[string]bool)
+	if info.PublisherDID != "" {
+		didSet[info.PublisherDID] = true
 	}
-	for _, did := range dids {
-		if did == "" {
-			continue
-		}
-		tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&models.DIDs{DID: did, CreatedAt: time.Now()})
+	if info.ReceiverDID != "" {
+		didSet[info.ReceiverDID] = true
+	}
+	if info.CreatorDID != "" {
+		didSet[info.CreatorDID] = true
 	}
 
-	if info.AssetType == constants.RBTTokenAssetType && info.ReceiverDID != "" {
-		tx.Model(&models.DIDs{}).Where("did = ?", info.PublisherDID).UpdateColumn("total_rbts", gorm.Expr("total_rbts - ?", info.TransactionValue))
-		tx.Model(&models.DIDs{}).Where("did = ?", info.ReceiverDID).UpdateColumn("total_rbts", gorm.Expr("total_rbts + ?", info.TransactionValue))
+	// Ensure all DIDs exist in the table
+	for did := range didSet {
+		tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&models.DIDs{DID: did})
 	}
+
+	isTransfer := info.TxnType == constants.TokenTransferredType
+	isBurn := info.TxnType == constants.TokenBurntType || info.TxnType == constants.TokenIsBurntForFT
+
+	// Logic:
+	// 1. Decrement Sender/Publisher ONLY if it's a collected transfer or burn.
+	//    (If it's a Mint, we do NOT decrement, effectively creating new value).
+	// 2. Increment Receiver ALWAYS (except maybe burns, but usually receiver is nil or burn address there).
+
+	// Update asset-specific counters (use GREATEST to prevent negatives)
+	switch info.AssetType {
+	case constants.RBTTokenAssetType:
+		if info.TransactionValue > 0 {
+			if info.PublisherDID != "" && (isTransfer || isBurn) {
+				tx.Model(&models.DIDs{}).Where("did = ?", info.PublisherDID).
+					UpdateColumn("total_rbts", gorm.Expr("GREATEST(0, total_rbts - ?)", info.TransactionValue))
+			}
+			if info.ReceiverDID != "" && !isBurn {
+				tx.Model(&models.DIDs{}).Where("did = ?", info.ReceiverDID).
+					UpdateColumn("total_rbts", gorm.Expr("total_rbts + ?", info.TransactionValue))
+			}
+		}
+	case constants.FTTokenAssetType:
+		count := len(info.TokenDetails)
+		if count > 0 {
+			if info.PublisherDID != "" && (isTransfer || isBurn) {
+				tx.Model(&models.DIDs{}).Where("did = ?", info.PublisherDID).
+					UpdateColumn("total_fts", gorm.Expr("GREATEST(0, total_fts - ?)", count))
+			}
+			if info.ReceiverDID != "" && !isBurn {
+				tx.Model(&models.DIDs{}).Where("did = ?", info.ReceiverDID).
+					UpdateColumn("total_fts", gorm.Expr("total_fts + ?", count))
+			}
+		}
+	case constants.NFTTokenAssetType:
+		count := len(info.TokenDetails)
+		if count > 0 {
+			if info.PublisherDID != "" && (isTransfer || isBurn) {
+				tx.Model(&models.DIDs{}).Where("did = ?", info.PublisherDID).
+					UpdateColumn("total_nfts", gorm.Expr("GREATEST(0, total_nfts - ?)", count))
+			}
+			if info.ReceiverDID != "" && !isBurn {
+				tx.Model(&models.DIDs{}).Where("did = ?", info.ReceiverDID).
+					UpdateColumn("total_nfts", gorm.Expr("total_nfts + ?", count))
+			}
+		}
+	case constants.SmartContractTokenAssetType:
+		count := len(info.TokenDetails)
+		if count > 0 {
+			if info.PublisherDID != "" && (isTransfer || isBurn) {
+				tx.Model(&models.DIDs{}).Where("did = ?", info.PublisherDID).
+					UpdateColumn("total_sc", gorm.Expr("GREATEST(0, total_sc - ?)", count))
+			}
+			if info.ReceiverDID != "" && !isBurn {
+				tx.Model(&models.DIDs{}).Where("did = ?", info.ReceiverDID).
+					UpdateColumn("total_sc", gorm.Expr("total_sc + ?", count))
+			}
+		}
+	}
+
 	return nil
 }
 

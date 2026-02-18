@@ -125,26 +125,27 @@ func UpdateBlocksHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Println("📥 Received block update — queueing to high-priority worker")
-	fmt.Println("Block is:", info)
+	fmt.Println("Received block update:", info)
 
-	if info.TxnBlock == nil {
+	if info.BlockMap == nil {
 		log.Println("❌ Incoming block missing block_map")
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(`{"error":"missing block_map"}`))
+		json.NewEncoder(w).Encode(map[string]string{"error": "missing block_map"})
 		return
 	}
 
+	// Pass only the info pointer
 	okTask := services.EnqueueBlockUpdateTask(func() {
-		services.UpdateBlocks(info.TxnBlock, &info)
+		services.UpdateBlocks(&info)
 	})
 
 	if !okTask {
 		log.Println("⚠️ Worker queue full — processing inline")
-		services.UpdateBlocks(info.TxnBlock, &info)
+		services.UpdateBlocks(&info)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"status":"queued","message":"Block update accepted"}`))
+	json.NewEncoder(w).Encode(map[string]string{"status": "queued", "message": "Block update accepted"})
 }
 
 // ============================================================================

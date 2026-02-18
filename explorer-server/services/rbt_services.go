@@ -17,7 +17,7 @@ func GetRBTCount() (int64, error) {
 
 func GetRBTInfoFromRBTID(rbtID string) (*models.RBT, error) {
 	var rbt models.RBT
-	if err := database.DB.First(&rbt, "rbt_id = ?", rbtID).Error; err != nil {
+	if err := database.DB.First(&rbt, "token_id = ?", rbtID).Error; err != nil {
 		return nil, err
 	}
 	return &rbt, nil
@@ -60,7 +60,6 @@ func GetRBTList(limit, page int) (interface{}, error) {
 	return response, nil
 }
 
-
 func GetRBTListFromDID(did string, limit, page int) ([]models.RBT, int64, error) {
 	var rbts []models.RBT
 	var totalCount int64
@@ -89,7 +88,7 @@ func GetRBTListFromDID(did string, limit, page int) ([]models.RBT, int64, error)
 // // GetRBTInfoFromRBTID fetches a single RBT by its ID
 // func GetRBTInfoFromRBTID(rbtID string) (*models.RBT, error) {
 // 	var rbt models.RBT
-// 	if err := database.DB.First(&rbt, "rbt_id = ?", rbtID).Error; err != nil {
+// 	if err := database.DB.First(&rbt, "token_id = ?", rbtID).Error; err != nil {
 // 		return nil, err
 // 	}
 // 	return &rbt, nil

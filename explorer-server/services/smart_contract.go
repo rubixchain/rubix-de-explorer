@@ -8,22 +8,22 @@ import (
 
 func GetSCCount() (int64, error) {
 	var count int64
-	if err := database.DB.Model(&models.SmartContract{}).Count(&count).Error; err != nil {
+	if err := database.DB.Model(&models.SC{}).Count(&count).Error; err != nil {
 		return 0, err
 	}
 	return count, nil
 }
 
-func GetSCInfoFromSCID(scID string) (*models.SmartContract, error) {
-	var scInfo models.SmartContract
-	if err := database.DB.First(&scInfo, "contract_id = ?", scID).Error; err != nil {
+func GetSCInfoFromSCID(scID string) (*models.SC, error) {
+	var scInfo models.SC
+	if err := database.DB.First(&scInfo, "token_id = ?", scID).Error; err != nil {
 		return nil, err
 	}
 	return &scInfo, nil
 }
 
 func GetSCBlockList(limit, page int) (interface{}, error) {
-	var blocks []models.SC_Block
+	var blocks []models.SCBlocks
 
 	offset := (page - 1) * limit
 
@@ -36,14 +36,14 @@ func GetSCBlockList(limit, page int) (interface{}, error) {
 	}
 
 	var count int64
-	if err := database.DB.Model(&models.SC_Block{}).Count(&count).Error; err != nil {
+	if err := database.DB.Model(&models.SCBlocks{}).Count(&count).Error; err != nil {
 		return model.SCBlocksListResponse{}, err
 	}
 
 	// Wrap in response struct
 	response := model.SCBlocksListResponse{
 		SC_Blocks: blocks,
-		Count: count,
+		Count:     count,
 	}
 
 	return response, nil

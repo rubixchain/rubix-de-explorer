@@ -15,7 +15,7 @@ import (
 // GetTxnsCount returns total number of TransferBlocks records
 func GetTxnsCount() (int64, error) {
 	var count int64
-	if err := database.DB.Model(&models.TransferBlocks{}).Count(&count).Error; err != nil {
+	if err := database.DB.Model(&models.TransactionBlocks{}).Count(&count).Error; err != nil {
 		return 0, err
 	}
 	fmt.Printf("Total RBT count: %d\n", count)
@@ -23,7 +23,7 @@ func GetTxnsCount() (int64, error) {
 }
 
 func GetTransferBlocksList(limit, page int) (model.TransactionsResponse, error) {
-	var blocks []models.TransferBlocks
+	var blocks []models.TransactionBlocks
 	var response model.TransactionsResponse
 
 	if page < 1 {
@@ -47,7 +47,7 @@ func GetTransferBlocksList(limit, page int) (model.TransactionsResponse, error) 
 	// Count total records
 	var count int64
 	if err := database.DB.
-		Model(&models.TransferBlocks{}).
+		Model(&models.TransactionBlocks{}).
 		Where("epoch IS NOT NULL AND epoch <> 0").
 		Count(&count).Error; err != nil {
 		return response, err
@@ -78,8 +78,8 @@ func GetTransferBlocksList(limit, page int) (model.TransactionsResponse, error) 
 	return response, nil
 }
 
-func GetTransferBlockInfoFromTxnID(hash string) (models.TransferBlocks, error) {
-	var block models.TransferBlocks
+func GetTransferBlockInfoFromTxnID(hash string) (models.TransactionBlocks, error) {
+	var block models.TransactionBlocks
 
 	if err := database.DB.Where("txn_id = ?", hash).First(&block).Error; err != nil {
 		return block, err
@@ -100,8 +100,8 @@ func GetTransferBlockInfoFromTxnID(hash string) (models.TransferBlocks, error) {
 	return block, nil
 }
 
-func GetTransferBlockInfoFromBlockHash(hash string) (models.TransferBlocks, error) {
-	var block models.TransferBlocks
+func GetTransferBlockInfoFromBlockHash(hash string) (models.TransactionBlocks, error) {
+	var block models.TransactionBlocks
 
 	if err := database.DB.Where("block_hash = ?", hash).First(&block).Error; err != nil {
 		return block, err
@@ -141,7 +141,7 @@ func GetTransferBlockInfoFromBlockHash(hash string) (models.TransferBlocks, erro
 						block.Amount = &result.Result.TransactionValue
 
 						_ = database.DB.
-							Model(&models.TransferBlocks{}).
+							Model(&models.TransactionBlocks{}).
 							Where("txn_id = ?", block.TxnID).
 							Update("amount", block.Amount).Error
 					}
@@ -205,7 +205,7 @@ func GetBlockType(txnId string) (int64, error) {
 	var blockTypeStr string
 
 	err := database.DB.
-		Table("all_blocks").
+		Table("AllBlocks").
 		Select("block_type").
 		Where("txn_id = ?", txnId).
 		Scan(&blockTypeStr).Error
@@ -234,12 +234,12 @@ func GetBlockType(txnId string) (int64, error) {
 }
 
 func GetSCBlockInfoFromTxnId(hash string) (interface{}, error) {
-	var block models.SC_Block
+	var block models.SCBlocks
 
 	if err := database.DB.
 		Where("block_id = ?", hash).
 		First(&block).Error; err != nil {
-		return models.SC_Block{}, err
+		return models.SCBlocks{}, err
 	}
 
 	return block, nil
