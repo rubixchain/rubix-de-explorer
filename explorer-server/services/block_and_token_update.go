@@ -96,7 +96,7 @@ func UpdateBlocks(info *model.IncomingBlockInfo) {
 
 	switch transType {
 	case constants.TokenTransferredType:
-		StoreTransferBlock(mappedBlock)
+		StoreTransferBlock(mappedBlock, info)
 	case constants.TokenBurntType, constants.TokenIsBurntForFT:
 		StoreBurntBlock(mappedBlock)
 	case constants.TokenDeployedType:
@@ -119,7 +119,7 @@ func UpdateBlocks(info *model.IncomingBlockInfo) {
 //           Block Storage Functions
 // ==========================================
 
-func StoreTransferBlock(blockMap map[string]interface{}) {
+func StoreTransferBlock(blockMap map[string]interface{}, info *model.IncomingBlockInfo) {
 	transInfo, _ := blockMap["TCTransInfoKey"].(map[string]interface{})
 	tokensKey, _ := transInfo["TITokensKey"].(map[string]interface{})
 	tokensJSON, _ := json.Marshal(tokensKey)
@@ -128,6 +128,20 @@ func StoreTransferBlock(blockMap map[string]interface{}) {
 	receiverDID := stringPtr(getNested(transInfo, "TIReceiverDIDKey"))
 	if receiverDID == nil {
 		receiverDID = stringPtr(getNested(blockMap, "TCTokenOwnerKey"))
+	}
+
+	// Amount: prefer info.TransactionValue, fallback to block map
+	var amount *float64
+	if info != nil && info.TransactionValue > 0 {
+		amount = &info.TransactionValue
+	} else {
+		amount = float64Ptr(blockMap["TCTokenValueKey"])
+	}
+
+	// Asset type from info
+	var assetTypeStr string
+	if info != nil {
+		assetTypeStr = constants.AssetTypeToString(info.AssetType)
 	}
 
 	// Validators: serialize quorumSignature if present
@@ -142,9 +156,9 @@ func StoreTransferBlock(blockMap map[string]interface{}) {
 		BlockHash:   fmt.Sprintf("%v", blockMap["TCBlockHashKey"]),
 		SenderDID:   stringPtr(getNested(transInfo, "TISenderDIDKey")),
 		ReceiverDID: receiverDID,
-		TxnType:     stringPtr(getNested(blockMap, "TCTransTypeKey")),
+		AssetType:   assetTypeStr,
 		TxnID:       stringPtr(getNested(transInfo, "TITIDKey")),
-		Amount:      float64Ptr(blockMap["TCTokenValueKey"]),
+		Amount:      amount,
 		Epoch:       int64Ptr(blockMap["TCEpoch"]),
 		Tokens:      datatypes.JSON(tokensJSON),
 		Validators:  validatorsJSON,
@@ -175,10 +189,8 @@ func StoreBurntBlock(blockMap map[string]interface{}) {
 		}
 	}
 
-	txnType := fmt.Sprintf("%v", blockMap["TCTransTypeKey"])
 	bb := models.BurntBlocks{
 		BlockHash: fmt.Sprintf("%v", blockMap["TCBlockHashKey"]),
-		TxnType:   &txnType,
 		OwnerDID:  fmt.Sprintf("%v", blockMap["TCTokenOwnerKey"]),
 		Epoch:     epoch,
 		Tokens:    childTokensJSON,
@@ -206,7 +218,7 @@ func StoreSCDeployBlock(blockMap map[string]interface{}) {
 		epoch = time.Unix(int64(e), 0)
 	}
 	scBlock := models.SCBlocks{
-		BlockID:     blockID,
+		BlockHash:   blockID,
 		TokenID:     contractID,
 		BlockHeight: blockHeight,
 		Epoch:       epoch,
@@ -235,7 +247,7 @@ func StoreSCExecuteBlock(blockMap map[string]interface{}) {
 		epoch = time.Unix(int64(e), 0)
 	}
 	scBlock := models.SCBlocks{
-		BlockID:     blockID,
+		BlockHash:   blockID,
 		TokenID:     contractID,
 		ExecutorDID: stringPtr(getNested(transInfo, "TIExecutorDIDKey")),
 		BlockHeight: blockHeight,
@@ -265,7 +277,6 @@ func StoreMintBlock(blockMap map[string]interface{}, info *model.IncomingBlockIn
 		ftName = &info.FTName
 	}
 
-	txnType := fmt.Sprintf("%v", blockMap["TCTransTypeKey"])
 	mb := models.MintBlocks{
 		BlockHash:  fmt.Sprintf("%v", blockMap["TCBlockHashKey"]),
 		TokenIDs:   pq.StringArray(tokenIDs),
@@ -274,7 +285,6 @@ func StoreMintBlock(blockMap map[string]interface{}, info *model.IncomingBlockIn
 		CreatorDID: creatorDID,
 		FTName:     ftName,
 		Epoch:      int64Ptr(blockMap["TCEpoch"]),
-		TxnType:    &txnType,
 	}
 	database.DB.Clauses(clause.OnConflict{UpdateAll: true}).Create(&mb)
 }
@@ -362,7 +372,7 @@ func handleRBTUpdate(tx *gorm.DB, info *model.IncomingBlockInfo, token model.Tok
 	}).Create(&models.RBT{
 		TokenID:     token.TokenID,
 		OwnerDID:    info.ReceiverDID,
-		BlockID:     info.BlockHash,
+		BlockHash:   info.BlockHash,
 		BlockHeight: fmt.Sprintf("%d", info.LatestBlockHeight),
 		TokenValue:  token.TokenValue,
 		TokenStatus: status,

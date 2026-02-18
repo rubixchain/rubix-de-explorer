@@ -63,7 +63,7 @@ func GetTransferBlocksList(limit, page int) (model.TransactionsResponse, error) 
 
 		response.TransactionsResponse = append(response.TransactionsResponse, model.TransactionResponse{
 			TxnHash:     deref(b.TxnID),
-			TxnType:     deref(b.TxnType),
+			AssetType:   b.AssetType,
 			Amount:      derefFloat(b.Amount),
 			SenderDID:   deref(b.SenderDID),
 			ReceiverDID: deref(b.ReceiverDID),

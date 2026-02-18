@@ -22,7 +22,7 @@ type TransactionBlocks struct {
 	TxnID       *string        `json:"txn_id" gorm:"column:txn_id"`
 	SenderDID   *string        `json:"sender_did" gorm:"column:sender_did"`
 	ReceiverDID *string        `json:"receiver_did" gorm:"column:receiver_did"`
-	TxnType     *string        `json:"txn_type" gorm:"column:txn_type"`
+	AssetType   string         `json:"asset_type" gorm:"column:asset_type"`
 	Amount      *float64       `json:"amount" gorm:"column:amount"`
 	Epoch       *int64         `json:"epoch" gorm:"column:epoch"`
 	Tokens      datatypes.JSON `json:"tokens" gorm:"column:tokens;type:jsonb"`
@@ -32,7 +32,7 @@ type TransactionBlocks struct {
 func (TransactionBlocks) TableName() string { return "TransactionBlocks" }
 
 type SCBlocks struct {
-	BlockID     string    `json:"block_id" gorm:"primaryKey;column:block_id"`
+	BlockHash   string    `json:"block_hash" gorm:"primaryKey;column:block_hash"`
 	TokenID     string    `json:"token_id" gorm:"column:token_id"`
 	ExecutorDID *string   `json:"executor_did" gorm:"column:executor_did"`
 	DeployerDID string    `json:"deployer_did" gorm:"column:deployer_did"`
@@ -45,7 +45,6 @@ func (SCBlocks) TableName() string { return "SCBlocks" }
 type BurntBlocks struct {
 	BlockHash string         `json:"block_hash" gorm:"primaryKey;column:block_hash"`
 	Tokens    datatypes.JSON `json:"tokens" gorm:"column:tokens;type:jsonb"`
-	TxnType   *string        `json:"txn_type" gorm:"column:txn_type"`
 	OwnerDID  string         `json:"owner_did" gorm:"column:owner_did"`
 	Epoch     *int64         `json:"epoch" gorm:"column:epoch"`
 }
@@ -60,7 +59,6 @@ type MintBlocks struct {
 	CreatorDID string         `json:"creator_did" gorm:"column:creator_did"`
 	FTName     *string        `json:"ft_name" gorm:"column:ft_name"`
 	Epoch      *int64         `json:"epoch" gorm:"column:epoch"`
-	TxnType    *string        `json:"txn_type" gorm:"column:txn_type"`
 }
 
 func (MintBlocks) TableName() string { return "MintBlocks" }
@@ -86,7 +84,7 @@ func (SC) TableName() string { return "SC" }
 type RBT struct {
 	TokenID     string  `json:"token_id" gorm:"primaryKey;column:token_id"`
 	OwnerDID    string  `json:"owner_did" gorm:"column:owner_did"`
-	BlockID     string  `json:"block_id" gorm:"column:block_id"`
+	BlockHash   string  `json:"block_hash" gorm:"column:block_hash"`
 	BlockHeight string  `json:"block_height" gorm:"column:block_height"`
 	TokenValue  float64 `json:"token_value" gorm:"column:token_value"`
 	TokenStatus int     `json:"token_status" gorm:"column:token_status"`

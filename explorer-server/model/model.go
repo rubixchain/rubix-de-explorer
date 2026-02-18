@@ -44,7 +44,7 @@ type HoldersResponse struct {
 
 type TransactionResponse struct {
 	TxnHash     string  `json:"txn_hash"`
-	TxnType     string  `json:"txn_type"`
+	AssetType   string  `json:"asset_type"`
 	Amount      float64 `json:"amount"`
 	Epoch       *int64  `json:"txn_time"`
 	SenderDID   string  `json:"sender_did"`

@@ -282,7 +282,7 @@ func StoreRBTInfoInDB(RBTs []RBT) error {
 			TokenID:     rbt.TokenID,
 			TokenValue:  rbt.TokenValue,
 			OwnerDID:    rbt.OwnerDID,
-			BlockID:     rbt.BlockHash,
+			BlockHash:   rbt.BlockHash,
 			BlockHeight: fmt.Sprintf("%d", rbt.BlockHeight),
 			TokenStatus: rbt.TokenStatus,
 		}
@@ -722,7 +722,7 @@ func processAndStoreBlocks(token models.AllTokens, blocks []interface{}) error {
 
 		switch transType {
 		case "02", "2":
-			StoreTransferBlock(blockMap)
+			StoreTransferBlock(blockMap, nil)
 		case "08", "13":
 			StoreBurntBlock(blockMap)
 		default:
@@ -749,7 +749,7 @@ func ProcessSingleBlock(blockMap map[string]interface{}) {
 
 	switch transType {
 	case "02", "2":
-		StoreTransferBlock(blockMap)
+		StoreTransferBlock(blockMap, nil)
 	case "08", "13":
 		StoreBurntBlock(blockMap)
 	case "09", "9":

@@ -65,7 +65,7 @@ func UpdateRBTToken(tokenData interface{}, operation string) error {
 		TokenID:     rbt.TokenID,
 		TokenValue:  rbt.TokenValue,
 		OwnerDID:    rbt.OwnerDID,
-		BlockID:     rbt.BlockHash,
+		BlockHash:   rbt.BlockHash,
 		BlockHeight: fmt.Sprintf("%d", rbt.BlockHeight),
 		TokenStatus: rbt.TokenStatus,
 	}
