@@ -375,7 +375,7 @@ func updateTokenRegistry(tx *gorm.DB, tokenID string, assetType int) error {
 func handleRBTUpdate(tx *gorm.DB, info *model.IncomingBlockInfo, token model.TokenDetails, status int) error {
 	return tx.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "token_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"owner_did", "block_id", "block_height", "token_status"}),
+		DoUpdates: clause.AssignmentColumns([]string{"owner_did", "block_hash", "block_height", "token_status"}),
 	}).Create(&models.RBT{
 		TokenID:     token.TokenID,
 		OwnerDID:    info.ReceiverDID,
