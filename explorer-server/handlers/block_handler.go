@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"explorer-server/model"
 	"explorer-server/services"
-	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -125,7 +124,6 @@ func UpdateBlocksHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Println("📥 Received block update — queueing to high-priority worker")
-	fmt.Println("Received block update:", info)
 
 	if info.BlockMap == nil {
 		log.Println("❌ Incoming block missing block_map")

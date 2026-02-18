@@ -9,7 +9,7 @@ import (
 // GetRBTCount returns the total number of RBTs in the database
 func GetDIDCount() (int64, error) {
 	var count int64
-	if err := database.DB.Model(&models.DIDs{}).Count(&count).Error; err != nil {
+	if err := database.ReadDB.Model(&models.DIDs{}).Count(&count).Error; err != nil {
 		return 0, err
 	}
 	return count, nil
@@ -17,7 +17,7 @@ func GetDIDCount() (int64, error) {
 
 func GetDIDInfoFromDID(did string) (*models.DIDs, error) {
 	var didInfo models.DIDs
-	if err := database.DB.First(&didInfo, "did = ?", did).Error; err != nil {
+	if err := database.ReadDB.First(&didInfo, "did = ?", did).Error; err != nil {
 		return nil, err
 	}
 	return &didInfo, nil
@@ -28,9 +28,9 @@ func GetDIDHoldersList(limit, page int) (interface{}, error) {
 	offset := (page - 1) * limit
 
 	// Fetch paginated DIDs ordered by TotalRBTs descending
-	if err := database.DB.Where("did IS NOT NULL AND did != '0'").Order("total_rbts desc").Limit(limit).Offset(offset).Find(&dids).Error; err != nil {
-    return nil, err
-}
+	if err := database.ReadDB.Where("did IS NOT NULL AND did != '0'").Order("total_rbts desc").Limit(limit).Offset(offset).Find(&dids).Error; err != nil {
+		return nil, err
+	}
 	// Map to response format
 	holders := make([]model.HolderResponse, len(dids))
 	for i, d := range dids {
@@ -42,7 +42,7 @@ func GetDIDHoldersList(limit, page int) (interface{}, error) {
 
 	// Get total count of DIDs
 	var count int64
-	if err := database.DB.Model(&models.DIDs{}).Count(&count).Error; err != nil {
+	if err := database.ReadDB.Model(&models.DIDs{}).Count(&count).Error; err != nil {
 		return nil, err
 	}
 
@@ -58,7 +58,7 @@ func GetDIDHoldersList(limit, page int) (interface{}, error) {
 // // GetRBTInfoFromRBTID fetches a single RBT by its ID
 // func GetRBTInfoFromRBTID(rbtID string) (*models.RBT, error) {
 // 	var rbt models.RBT
-// 	if err := database.DB.First(&rbt, "rbt_id = ?", rbtID).Error; err != nil {
+// 	if err := database.ReadDB.First(&rbt, "rbt_id = ?", rbtID).Error; err != nil {
 // 		return nil, err
 // 	}
 // 	return &rbt, nil

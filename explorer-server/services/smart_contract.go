@@ -8,7 +8,7 @@ import (
 
 func GetSCCount() (int64, error) {
 	var count int64
-	if err := database.DB.Model(&models.SC{}).Count(&count).Error; err != nil {
+	if err := database.ReadDB.Model(&models.SC{}).Count(&count).Error; err != nil {
 		return 0, err
 	}
 	return count, nil
@@ -16,7 +16,7 @@ func GetSCCount() (int64, error) {
 
 func GetSCInfoFromSCID(scID string) (*models.SC, error) {
 	var scInfo models.SC
-	if err := database.DB.First(&scInfo, "token_id = ?", scID).Error; err != nil {
+	if err := database.ReadDB.First(&scInfo, "token_id = ?", scID).Error; err != nil {
 		return nil, err
 	}
 	return &scInfo, nil
@@ -28,7 +28,7 @@ func GetSCBlockList(limit, page int) (interface{}, error) {
 	offset := (page - 1) * limit
 
 	// Fetch all blocks with pagination
-	if err := database.DB.
+	if err := database.ReadDB.
 		Limit(int(limit)).
 		Offset(int(offset)).
 		Find(&blocks).Error; err != nil {
@@ -36,7 +36,7 @@ func GetSCBlockList(limit, page int) (interface{}, error) {
 	}
 
 	var count int64
-	if err := database.DB.Model(&models.SCBlocks{}).Count(&count).Error; err != nil {
+	if err := database.ReadDB.Model(&models.SCBlocks{}).Count(&count).Error; err != nil {
 		return model.SCBlocksListResponse{}, err
 	}
 

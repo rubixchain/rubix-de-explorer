@@ -13,11 +13,17 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+// WriteDB is the connection pool for block ingestion (writes).
+var WriteDB *gorm.DB
+
+// ReadDB is the connection pool for API queries (reads).
+var ReadDB *gorm.DB
+
+// DB is kept for backward compatibility — points to WriteDB.
 var DB *gorm.DB
 
 // ConnectAndMigrate initializes PostgreSQL with GORM and auto-migrates tables
 func ConnectAndMigrate(drop bool) {
-	// Build DSN
 	dsn := fmt.Sprintf(
 		"host=%s user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=UTC",
 		getEnv("PG_HOST", "localhost"),
@@ -27,36 +33,45 @@ func ConnectAndMigrate(drop bool) {
 		getEnv("PG_PORT", "5432"),
 	)
 
-	// Connect to PostgreSQL
+	// ── Write Pool (block ingestion) ──
 	var err error
-	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+	WriteDB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Warn),
 	})
 	if err != nil {
-		log.Fatalf("❌ Failed to connect to PostgreSQL: %v", err)
+		log.Fatalf("❌ Failed to connect WriteDB: %v", err)
+	}
+	if sqlDB, err := WriteDB.DB(); err == nil {
+		sqlDB.SetMaxOpenConns(20)
+		sqlDB.SetMaxIdleConns(5)
+		sqlDB.SetConnMaxLifetime(5 * time.Minute)
 	}
 
-	sqlDB, err := DB.DB()
+	// ── Read Pool (API queries) ──
+	ReadDB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Warn),
+	})
 	if err != nil {
-		log.Fatalf("❌ Failed to get sql.DB from GORM: %v", err)
+		log.Fatalf("❌ Failed to connect ReadDB: %v", err)
+	}
+	if sqlDB, err := ReadDB.DB(); err == nil {
+		sqlDB.SetMaxOpenConns(30)
+		sqlDB.SetMaxIdleConns(10)
+		sqlDB.SetConnMaxLifetime(5 * time.Minute)
 	}
 
-	// Connection pool
-	sqlDB.SetMaxOpenConns(25)
-	sqlDB.SetMaxIdleConns(5)
-	sqlDB.SetConnMaxLifetime(5 * time.Minute)
+	// Backward compat
+	DB = WriteDB
 
-	log.Println("✅ Connected to PostgreSQL successfully")
+	log.Println("✅ Connected to PostgreSQL (WriteDB=20, ReadDB=30)")
 
-	// Drop tables if requested
 	if drop {
 		log.Println("⚠️ Dropping existing tables...")
 		dropTables()
 		log.Println("✅ Tables dropped successfully")
 	}
 
-	// Auto-migrate tables
-	err = DB.AutoMigrate(
+	err = WriteDB.AutoMigrate(
 		&models.RBT{},
 		&models.FT{},
 		&models.NFT{},
@@ -78,8 +93,8 @@ func ConnectAndMigrate(drop bool) {
 
 // dropTables drops only the TransferBlocks table
 func dropTables() {
-	if DB.Migrator().HasTable(&models.TransactionBlocks{}) {
-		if err := DB.Migrator().DropTable(&models.TransactionBlocks{}); err != nil {
+	if WriteDB.Migrator().HasTable(&models.TransactionBlocks{}) {
+		if err := WriteDB.Migrator().DropTable(&models.TransactionBlocks{}); err != nil {
 			log.Fatalf("❌ Failed to drop TransferBlocks table: %v", err)
 		}
 	}
@@ -93,15 +108,17 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
-// CloseDB closes PostgreSQL connection
+// CloseDB closes both PostgreSQL connections
 func CloseDB() {
-	if DB != nil {
-		sqlDB, err := DB.DB()
-		if err != nil {
-			log.Printf("❌ Failed to get sql.DB for closing: %v", err)
-			return
+	if WriteDB != nil {
+		if sqlDB, err := WriteDB.DB(); err == nil {
+			sqlDB.Close()
 		}
-		sqlDB.Close()
-		log.Println("✅ PostgreSQL connection closed")
 	}
+	if ReadDB != nil {
+		if sqlDB, err := ReadDB.DB(); err == nil {
+			sqlDB.Close()
+		}
+	}
+	log.Println("✅ PostgreSQL connections closed")
 }

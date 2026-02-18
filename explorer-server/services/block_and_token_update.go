@@ -50,7 +50,6 @@ func UpdateBlocks(info *model.IncomingBlockInfo) {
 
 	// 1. Extract and Process the internal block map
 	mappedBlock := ProcessIncomingBlock(info.BlockMap)
-	fmt.Println("Block Map received at Explorer is:", mappedBlock)
 
 	// 2. Data Backfilling: Ensure info fields are populated for the DB modules
 	// If Fullnode sends empty strings, we pull from the mappedBlock
@@ -91,27 +90,30 @@ func UpdateBlocks(info *model.IncomingBlockInfo) {
 		}
 	}
 
-	// 3. Store Block Records
-	StoreBlockInAllBlocks(mappedBlock)
+	// 3. Execute ALL DB operations in a single transaction
+	err := database.WriteDB.Transaction(func(tx *gorm.DB) error {
+		StoreBlockInAllBlocks(tx, mappedBlock)
 
-	switch transType {
-	case constants.TokenTransferredType:
-		StoreTransferBlock(mappedBlock, info)
-	case constants.TokenBurntType, constants.TokenIsBurntForFT:
-		StoreBurntBlock(mappedBlock)
-	case constants.TokenDeployedType:
-		StoreSCDeployBlock(mappedBlock)
-	case constants.TokenExecutedType:
-		StoreSCExecuteBlock(mappedBlock)
-	case constants.TokenGeneratedType, constants.TokenMintedType:
-		StoreMintBlock(mappedBlock, info)
-	default:
-		log.Printf("📥 Block Type: %s (Handled in AllBlocks only)", transType)
-	}
+		switch transType {
+		case constants.TokenTransferredType:
+			StoreTransferBlock(tx, mappedBlock, info)
+		case constants.TokenBurntType, constants.TokenIsBurntForFT:
+			StoreBurntBlock(tx, mappedBlock)
+		case constants.TokenDeployedType:
+			StoreSCDeployBlock(tx, mappedBlock)
+		case constants.TokenExecutedType:
+			StoreSCExecuteBlock(tx, mappedBlock)
+		case constants.TokenGeneratedType, constants.TokenMintedType:
+			StoreMintBlock(tx, mappedBlock, info)
+		default:
+			log.Printf("📥 Block Type: %s (Handled in AllBlocks only)", transType)
+		}
 
-	// 4. Process Live Updates using the enriched info struct
-	if err := ProcessLiveTokenUpdates(info); err != nil {
-		log.Printf("⚠️ Token/DID Update error: %v", err)
+		// Process Live Updates within the same transaction
+		return ProcessLiveTokenUpdates(tx, info)
+	})
+	if err != nil {
+		log.Printf("⚠️ Block processing error: %v", err)
 	}
 }
 
@@ -119,7 +121,7 @@ func UpdateBlocks(info *model.IncomingBlockInfo) {
 //           Block Storage Functions
 // ==========================================
 
-func StoreTransferBlock(blockMap map[string]interface{}, info *model.IncomingBlockInfo) {
+func StoreTransferBlock(tx *gorm.DB, blockMap map[string]interface{}, info *model.IncomingBlockInfo) {
 	transInfo, _ := blockMap["TCTransInfoKey"].(map[string]interface{})
 	tokensKey, _ := transInfo["TITokensKey"].(map[string]interface{})
 	tokensJSON, _ := json.Marshal(tokensKey)
@@ -170,10 +172,10 @@ func StoreTransferBlock(blockMap map[string]interface{}, info *model.IncomingBlo
 		Tokens:      datatypes.JSON(tokensJSON),
 		Validators:  validatorsJSON,
 	}
-	database.DB.Clauses(clause.OnConflict{UpdateAll: true}).Create(&tb)
+	tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&tb)
 }
 
-func StoreBurntBlock(blockMap map[string]interface{}) {
+func StoreBurntBlock(tx *gorm.DB, blockMap map[string]interface{}) {
 	transInfo, _ := blockMap["TCTransInfoKey"].(map[string]interface{})
 	tokensKey, _ := transInfo["TITokensKey"].(map[string]interface{})
 
@@ -202,10 +204,10 @@ func StoreBurntBlock(blockMap map[string]interface{}) {
 		Epoch:     epoch,
 		Tokens:    childTokensJSON,
 	}
-	database.DB.Clauses(clause.OnConflict{UpdateAll: true}).Create(&bb)
+	tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&bb)
 }
 
-func StoreSCDeployBlock(blockMap map[string]interface{}) {
+func StoreSCDeployBlock(tx *gorm.DB, blockMap map[string]interface{}) {
 	transInfo, _ := blockMap["TCTransInfoKey"].(map[string]interface{})
 	tokensKey, _ := transInfo["TITokensKey"].(map[string]interface{})
 	blockID := fmt.Sprintf("%v", blockMap["TCBlockHashKey"])
@@ -231,10 +233,10 @@ func StoreSCDeployBlock(blockMap map[string]interface{}) {
 		Epoch:       epoch,
 		DeployerDID: fmt.Sprintf("%v", getNested(transInfo, "TIDeployerDIDKey")),
 	}
-	database.DB.Clauses(clause.OnConflict{UpdateAll: true}).Create(&scBlock)
+	tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&scBlock)
 }
 
-func StoreSCExecuteBlock(blockMap map[string]interface{}) {
+func StoreSCExecuteBlock(tx *gorm.DB, blockMap map[string]interface{}) {
 	transInfo, _ := blockMap["TCTransInfoKey"].(map[string]interface{})
 	tokensKey, _ := transInfo["TITokensKey"].(map[string]interface{})
 	blockID := fmt.Sprintf("%v", blockMap["TCBlockHashKey"])
@@ -261,10 +263,10 @@ func StoreSCExecuteBlock(blockMap map[string]interface{}) {
 		Epoch:       epoch,
 		DeployerDID: fmt.Sprintf("%v", getNested(transInfo, "TIDeployerDIDKey")),
 	}
-	database.DB.Clauses(clause.OnConflict{UpdateAll: true}).Create(&scBlock)
+	tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&scBlock)
 }
 
-func StoreMintBlock(blockMap map[string]interface{}, info *model.IncomingBlockInfo) {
+func StoreMintBlock(tx *gorm.DB, blockMap map[string]interface{}, info *model.IncomingBlockInfo) {
 	transInfo, _ := blockMap["TCTransInfoKey"].(map[string]interface{})
 	tokensKey, _ := transInfo["TITokensKey"].(map[string]interface{})
 
@@ -293,10 +295,10 @@ func StoreMintBlock(blockMap map[string]interface{}, info *model.IncomingBlockIn
 		FTName:     ftName,
 		Epoch:      int64Ptr(blockMap["TCEpoch"]),
 	}
-	database.DB.Clauses(clause.OnConflict{UpdateAll: true}).Create(&mb)
+	tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&mb)
 }
 
-func StoreBlockInAllBlocks(blockMap map[string]interface{}) {
+func StoreBlockInAllBlocks(tx *gorm.DB, blockMap map[string]interface{}) {
 	transInfo, _ := blockMap["TCTransInfoKey"].(map[string]interface{})
 	blockHash := fmt.Sprintf("%v", blockMap["TCBlockHashKey"])
 	txnID := fmt.Sprintf("%v", transInfo["TITIDKey"])
@@ -313,7 +315,7 @@ func StoreBlockInAllBlocks(blockMap map[string]interface{}) {
 		TxnID:     txnID,
 	}
 
-	database.DB.Clauses(clause.OnConflict{DoNothing: true}).Create(&record)
+	tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&record)
 }
 
 // ==========================================
@@ -321,41 +323,39 @@ func StoreBlockInAllBlocks(blockMap map[string]interface{}) {
 // ==========================================
 
 // ProcessLiveTokenUpdates orchestrates the registry update and delegates to specific asset modules
-func ProcessLiveTokenUpdates(info *model.IncomingBlockInfo) error {
+func ProcessLiveTokenUpdates(tx *gorm.DB, info *model.IncomingBlockInfo) error {
 	if len(info.TokenDetails) == 0 {
 		return nil
 	}
 
 	tokenStatus := MapTxnTypeToTokenStatus(info.TxnType)
 
-	return database.DB.Transaction(func(tx *gorm.DB) error {
-		for _, token := range info.TokenDetails {
-			// 1. Update Global Token Registry
-			if err := updateTokenRegistry(tx, token.TokenID, info.AssetType); err != nil {
-				return err
-			}
-
-			// 2. Delegate to specific token modules
-			var err error
-			switch info.AssetType {
-			case constants.RBTTokenAssetType:
-				err = handleRBTUpdate(tx, info, token, tokenStatus)
-			case constants.FTTokenAssetType:
-				err = handleFTUpdate(tx, info, token, tokenStatus)
-			case constants.NFTTokenAssetType:
-				err = handleNFTUpdate(tx, info, token, tokenStatus)
-			case constants.SmartContractTokenAssetType:
-				err = handleSCUpdate(tx, info, token, tokenStatus)
-			}
-
-			if err != nil {
-				return err
-			}
+	for _, token := range info.TokenDetails {
+		// 1. Update Global Token Registry
+		if err := updateTokenRegistry(tx, token.TokenID, info.AssetType); err != nil {
+			return err
 		}
 
-		// 3. Update DID level analytics
-		return updateDIDAnalytics(tx, info)
-	})
+		// 2. Delegate to specific token modules
+		var err error
+		switch info.AssetType {
+		case constants.RBTTokenAssetType:
+			err = handleRBTUpdate(tx, info, token, tokenStatus)
+		case constants.FTTokenAssetType:
+			err = handleFTUpdate(tx, info, token, tokenStatus)
+		case constants.NFTTokenAssetType:
+			err = handleNFTUpdate(tx, info, token, tokenStatus)
+		case constants.SmartContractTokenAssetType:
+			err = handleSCUpdate(tx, info, token, tokenStatus)
+		}
+
+		if err != nil {
+			return err
+		}
+	}
+
+	// 3. Update DID level analytics
+	return updateDIDAnalytics(tx, info)
 }
 
 // ==========================================

@@ -17,7 +17,7 @@ import (
 func SyncMissingTxnAmounts() {
 
 	var blocks []models.TransactionBlocks
-	if err := database.DB.Where("amount IS NULL OR amount = 0").Find(&blocks).Error; err != nil {
+	if err := database.ReadDB.Where("amount IS NULL OR amount = 0").Find(&blocks).Error; err != nil {
 		log.Printf("❌ Failed to query TransferBlocks: %v", err)
 		return
 	}
@@ -63,7 +63,7 @@ func SyncMissingTxnAmounts() {
 		}
 
 		// Update the amount in DB
-		if err := database.DB.Model(&models.TransactionBlocks{}).
+		if err := database.WriteDB.Model(&models.TransactionBlocks{}).
 			Where("txn_id = ?", *b.TxnID).
 			Update("amount", result.Result.TransactionValue).Error; err != nil {
 			log.Printf("❌ Failed to update amount for txn_id %s: %v", *b.TxnID, err)

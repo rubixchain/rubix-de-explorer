@@ -10,15 +10,19 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"time"
 )
 
-// GetTxnsCount returns total number of TransferBlocks records
+// GetTxnsCount returns total number of TransferBlocks records (cached 5s)
 func GetTxnsCount() (int64, error) {
+	if cached, ok := responseCache.Get("txns_count"); ok {
+		return cached.(int64), nil
+	}
 	var count int64
-	if err := database.DB.Model(&models.TransactionBlocks{}).Count(&count).Error; err != nil {
+	if err := database.ReadDB.Model(&models.TransactionBlocks{}).Count(&count).Error; err != nil {
 		return 0, err
 	}
-	fmt.Printf("Total RBT count: %d\n", count)
+	responseCache.Set("txns_count", count, 5*time.Second)
 	return count, nil
 }
 
@@ -35,7 +39,7 @@ func GetTransferBlocksList(limit, page int) (model.TransactionsResponse, error) 
 	offset := (page - 1) * limit
 
 	// Fetch paginated blocks
-	if err := database.DB.
+	if err := database.ReadDB.
 		Where("epoch IS NOT NULL AND epoch <> 0").
 		Order("epoch DESC").
 		Limit(limit).
@@ -46,7 +50,7 @@ func GetTransferBlocksList(limit, page int) (model.TransactionsResponse, error) 
 
 	// Count total records
 	var count int64
-	if err := database.DB.
+	if err := database.ReadDB.
 		Model(&models.TransactionBlocks{}).
 		Where("epoch IS NOT NULL AND epoch <> 0").
 		Count(&count).Error; err != nil {
@@ -57,7 +61,7 @@ func GetTransferBlocksList(limit, page int) (model.TransactionsResponse, error) 
 		if (b.Amount == nil || *b.Amount == 0) && b.TxnID != nil && *b.TxnID != "" {
 			if newAmt := fetchTxnAmountFromFullNode(*b.TxnID); newAmt != nil {
 				b.Amount = newAmt
-				_ = database.DB.Model(&b).Update("amount", *newAmt).Error
+				_ = database.WriteDB.Model(&b).Update("amount", *newAmt).Error
 			}
 		}
 
@@ -81,7 +85,7 @@ func GetTransferBlocksList(limit, page int) (model.TransactionsResponse, error) 
 func GetTransferBlockInfoFromTxnID(hash string) (models.TransactionBlocks, error) {
 	var block models.TransactionBlocks
 
-	if err := database.DB.Where("txn_id = ?", hash).First(&block).Error; err != nil {
+	if err := database.ReadDB.Where("txn_id = ?", hash).First(&block).Error; err != nil {
 		return block, err
 	}
 
@@ -89,7 +93,7 @@ func GetTransferBlockInfoFromTxnID(hash string) (models.TransactionBlocks, error
 	if (block.Amount == nil || *block.Amount == 0) && block.TxnID != nil && *block.TxnID != "" {
 		if newAmt := fetchTxnAmountFromFullNode(*block.TxnID); newAmt != nil {
 			block.Amount = newAmt
-			if err := database.DB.Model(&block).Update("amount", *newAmt).Error; err != nil {
+			if err := database.WriteDB.Model(&block).Update("amount", *newAmt).Error; err != nil {
 				fmt.Printf("⚠️ Failed to update amount in DB for txnID %s: %v\n", *block.TxnID, err)
 			} else {
 				fmt.Printf("✅ Updated amount %.6f for txnID %s\n", *newAmt, *block.TxnID)
@@ -103,7 +107,7 @@ func GetTransferBlockInfoFromTxnID(hash string) (models.TransactionBlocks, error
 func GetTransferBlockInfoFromBlockHash(hash string) (models.TransactionBlocks, error) {
 	var block models.TransactionBlocks
 
-	if err := database.DB.Where("block_hash = ?", hash).First(&block).Error; err != nil {
+	if err := database.ReadDB.Where("block_hash = ?", hash).First(&block).Error; err != nil {
 		return block, err
 	}
 
@@ -140,7 +144,7 @@ func GetTransferBlockInfoFromBlockHash(hash string) (models.TransactionBlocks, e
 					if result.Result.TransactionValue != 0 {
 						block.Amount = &result.Result.TransactionValue
 
-						_ = database.DB.
+						_ = database.WriteDB.
 							Model(&models.TransactionBlocks{}).
 							Where("txn_id = ?", block.TxnID).
 							Update("amount", block.Amount).Error
@@ -204,7 +208,7 @@ func GetBlockType(txnId string) (int64, error) {
 	// Keeping signature as int64 to match existing usage.
 	var blockTypeStr string
 
-	err := database.DB.
+	err := database.ReadDB.
 		Table("AllBlocks").
 		Select("block_type").
 		Where("txn_id = ?", txnId).
@@ -236,7 +240,7 @@ func GetBlockType(txnId string) (int64, error) {
 func GetSCBlockInfoFromTxnId(hash string) (interface{}, error) {
 	var block models.SCBlocks
 
-	if err := database.DB.
+	if err := database.ReadDB.
 		Where("block_id = ?", hash).
 		First(&block).Error; err != nil {
 		return models.SCBlocks{}, err
@@ -248,7 +252,7 @@ func GetSCBlockInfoFromTxnId(hash string) (interface{}, error) {
 func GetBurntBlockInfo(hash string) (interface{}, error) {
 	var block models.BurntBlocks
 
-	if err := database.DB.
+	if err := database.ReadDB.
 		Where("block_hash = ?", hash).
 		First(&block).Error; err != nil {
 		return models.BurntBlocks{}, err
@@ -268,7 +272,7 @@ func GetBurntBlockList(limit, page int) (interface{}, error) {
 	}
 	offset := (page - 1) * limit
 
-	if err := database.DB.
+	if err := database.ReadDB.
 		Order("epoch DESC").
 		Limit(limit).
 		Offset(offset).
@@ -277,7 +281,7 @@ func GetBurntBlockList(limit, page int) (interface{}, error) {
 	}
 
 	var count int64
-	if err := database.DB.Model(&models.BurntBlocks{}).Count(&count).Error; err != nil {
+	if err := database.ReadDB.Model(&models.BurntBlocks{}).Count(&count).Error; err != nil {
 		return model.BurntBlocksListResponse{}, err
 	}
 

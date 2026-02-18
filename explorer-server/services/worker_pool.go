@@ -120,10 +120,10 @@ func InitWorkerPools(totalCPU int) {
 			totalCPU = runtime.NumCPU()
 		}
 
-		// Simple heuristic: half the cores for block workers, min 2
-		maxBlock := max(2, totalCPU/2)
+		// Heuristic: at least 4 workers, scale with cores
+		maxBlock := max(4, totalCPU)
 
-		blockPool = newWorkerPool("block", 2000, 2, maxBlock)
+		blockPool = newWorkerPool("block", 5000, 4, maxBlock)
 	})
 }
 
