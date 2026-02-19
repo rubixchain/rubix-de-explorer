@@ -22,6 +22,26 @@ func GetSCInfoFromSCID(scID string) (*models.SC, error) {
 	return &scInfo, nil
 }
 
+func GetSCList(limit, page int) (model.SCListResponse, error) {
+	var scs []models.SC
+
+	offset := (page - 1) * limit
+
+	if err := database.ReadDB.
+		Limit(limit).
+		Offset(offset).
+		Find(&scs).Error; err != nil {
+		return model.SCListResponse{}, err
+	}
+
+	var count int64
+	if err := database.ReadDB.Model(&models.SC{}).Count(&count).Error; err != nil {
+		return model.SCListResponse{}, err
+	}
+
+	return model.SCListResponse{SCs: scs, Count: count}, nil
+}
+
 func GetSCBlockList(limit, page int) (interface{}, error) {
 	var blocks []models.SCBlocks
 

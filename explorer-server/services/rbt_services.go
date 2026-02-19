@@ -68,6 +68,7 @@ func GetRBTListFromDID(did string, limit, page int) ([]models.RBT, int64, error)
 	if err := database.ReadDB.Model(&models.RBT{}).
 		Where("owner_did = ? AND token_status = ?", did, 0).
 		Count(&totalCount).Error; err != nil {
+		println("Error counting RBTs for DID", did, "with TokenStatus=0:", err)
 		return nil, 0, err
 	}
 
@@ -81,7 +82,7 @@ func GetRBTListFromDID(did string, limit, page int) ([]models.RBT, int64, error)
 		Find(&rbts).Error; err != nil {
 		return nil, 0, err
 	}
-
+    println("Fetched RBTs for DID:", did, "Page:", page, "Limit:", limit, "Total Count:", totalCount)
 	return rbts, totalCount, nil
 }
 

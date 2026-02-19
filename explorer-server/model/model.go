@@ -71,6 +71,11 @@ type RBTListResponse struct {
 	Count  int64   `json:"count"`
 }
 
+type SCListResponse struct {
+	SCs   []models.SC `json:"scs"`
+	Count int64       `json:"count"`
+}
+
 // -----Token explorer response
 type RbtResponse struct {
 	RBT    models.RBT `json:"rbt"`

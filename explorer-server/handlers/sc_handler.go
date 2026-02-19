@@ -41,6 +41,32 @@ func GetSmartContractInfoFromSCID(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func GetSCListHandler(w http.ResponseWriter, r *http.Request) {
+	limitStr := r.URL.Query().Get("limit")
+	pageStr := r.URL.Query().Get("page")
+
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit <= 0 {
+		limit = 10
+	}
+
+	page, err := strconv.Atoi(pageStr)
+	if err != nil || page <= 0 {
+		page = 1
+	}
+
+	data, err := services.GetSCList(limit, page)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
+}
+
 func GetSCBlockList(w http.ResponseWriter, r *http.Request) {
 // Parse query parameters: ?limit=10&page=2
 	limitStr := r.URL.Query().Get("limit")
