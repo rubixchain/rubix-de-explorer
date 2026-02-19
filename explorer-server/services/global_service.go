@@ -74,20 +74,16 @@ func GetTokenChainFromTokenID(tokenID string) (map[string]interface{}, error) {
 
 	resp, err := client.Get(url)
 	if err != nil {
-		fmt.Println("fullnode error:", err)
 		return nil, fmt.Errorf("fullnode error: %v", err)
 	}
-	fmt.Println("resp.StatusCode:", resp.StatusCode)
-	fmt.Println("resp.Body:", resp.Body)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		io.Copy(io.Discard, resp.Body)
-		return nil, fmt.Errorf("fullnode returned status %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("fullnode returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	body, _ := io.ReadAll(resp.Body)
-	fmt.Println("body:", body)
 
 	var out map[string]interface{}
 	if err := json.Unmarshal(body, &out); err != nil {
