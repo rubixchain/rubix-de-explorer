@@ -74,6 +74,7 @@ func GetTokenChainFromTokenID(tokenID string) (map[string]interface{}, error) {
 
 	resp, err := client.Get(url)
 	if err != nil {
+		fmt.Println("fullnode error:", err)
 		return nil, fmt.Errorf("fullnode error: %v", err)
 	}
 	fmt.Println("resp.StatusCode:", resp.StatusCode)
