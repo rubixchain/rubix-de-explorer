@@ -76,6 +76,8 @@ func GetTokenChainFromTokenID(tokenID string) (map[string]interface{}, error) {
 	if err != nil {
 		return nil, fmt.Errorf("fullnode error: %v", err)
 	}
+	fmt.Println("resp.StatusCode:", resp.StatusCode)
+	fmt.Println("resp.Body:", resp.Body)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -84,6 +86,7 @@ func GetTokenChainFromTokenID(tokenID string) (map[string]interface{}, error) {
 	}
 
 	body, _ := io.ReadAll(resp.Body)
+	fmt.Println("body:", body)
 
 	var out map[string]interface{}
 	if err := json.Unmarshal(body, &out); err != nil {

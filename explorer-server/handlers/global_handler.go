@@ -110,11 +110,16 @@ func GetTokenChainFromTokenID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	fmt.Println("tokenID:", tokenID)
+
 	chainData, err := services.GetTokenChainFromTokenID(tokenID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to fetch token chain: %v", err), http.StatusInternalServerError)
 		return
 	}
+
+	fmt.Println("chainData:", chainData)
+	fmt.Println("err:", err)
 
 	if chainData == nil {
 		http.Error(w, fmt.Sprintf("No chain data found for Token ID: %s", tokenID), http.StatusNotFound)
