@@ -67,7 +67,6 @@ func GetTokenChainFromTokenID(tokenID string) (map[string]interface{}, error) {
 
 	url := fmt.Sprintf("%s/api/de-exp/get-token-chain?tokenID=%s&tokenType=%s",
 		config.RubixNodeURL, tokenID, tokenType)
-	fmt.Println("url:", url)
 	client := GetNodeHTTPClient()
 	release := acquireNodeSlot()
 	defer release()
