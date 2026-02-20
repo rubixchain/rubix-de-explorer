@@ -69,6 +69,7 @@ func GetTransferBlocksList(limit, page int) (model.TransactionsResponse, error) 
 			TxnHash:     deref(b.TxnID),
 			AssetType:   b.AssetType,
 			Amount:      derefFloat(b.Amount),
+			TokenCount:  b.TokenCount,
 			SenderDID:   deref(b.SenderDID),
 			ReceiverDID: deref(b.ReceiverDID),
 			Epoch:       b.Epoch,
