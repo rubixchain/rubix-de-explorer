@@ -65,7 +65,7 @@ func GetTokenChainFromTokenID(tokenID string) (map[string]interface{}, error) {
 		}
 	}
 
-	url := fmt.Sprintf("%s/api/de-exp/get-token-chain?tokenID=%s&tokenType=%s",
+	url := fmt.Sprintf("%s/api/de-exp/get-token-chain-latest?tokenID=%s&tokenType=%s",
 		config.RubixNodeURL, tokenID, tokenType)
 	client := GetNodeHTTPClient()
 	release := acquireNodeSlot()
@@ -112,7 +112,7 @@ func GetTokenBlocksFromTokenID(tokenID string, page, limit int) ([]map[string]in
 		}
 	}
 
-	url := fmt.Sprintf("%s/api/de-exp/get-token-chain?tokenID=%s&tokenType=%s",
+	url := fmt.Sprintf("%s/api/de-exp/get-token-chain-latest?tokenID=%s&tokenType=%s",
 		config.RubixNodeURL, tokenID, tokenType)
 
 	client := GetNodeHTTPClient()
