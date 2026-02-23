@@ -71,7 +71,7 @@ func ConnectAndMigrate(drop bool) {
 		log.Println("✅ Tables dropped successfully")
 	}
 
-	err = WriteDB.AutoMigrate(
+	allModels := []interface{}{
 		&models.RBT{},
 		&models.FT{},
 		&models.NFT{},
@@ -83,12 +83,55 @@ func ConnectAndMigrate(drop bool) {
 		&models.BurntBlocks{},
 		&models.SCBlocks{},
 		&models.MintBlocks{},
-	)
+	}
+
+	err = WriteDB.AutoMigrate(allModels...)
 	if err != nil {
 		log.Fatalf("❌ Failed to migrate tables: %v", err)
 	}
 
 	log.Println("✅ Tables auto-migrated successfully")
+
+	// Ensure unique constraints (manual fix for SQLSTATE 42P10)
+	ensureUniqueConstraints(WriteDB, allModels)
+}
+
+// ensureUniqueConstraints adds primary keys if they are missing, dynamically extracted from models
+func ensureUniqueConstraints(db *gorm.DB, models []interface{}) {
+	for _, model := range models {
+		stmt := &gorm.Statement{DB: db}
+		if err := stmt.Parse(model); err != nil {
+			log.Printf("⚠️ Warning: Could not parse model %T: %v", model, err)
+			continue
+		}
+
+		tableName := stmt.Schema.Table
+		pkFields := stmt.Schema.PrimaryFieldDBNames
+		if len(pkFields) == 0 {
+			log.Printf("ℹ️ Skipping %s: No primary key defined in model", tableName)
+			continue
+		}
+
+		// Currently support single-column PKs for this migration
+		pk := pkFields[0]
+
+		query := fmt.Sprintf(`
+			DO $$ 
+			BEGIN 
+				IF NOT EXISTS (
+					SELECT 1 FROM pg_constraint 
+					WHERE conname = '%[1]s_pkey' 
+				) THEN 
+					ALTER TABLE "%[1]s" ADD PRIMARY KEY (%[2]s); 
+				END IF; 
+			END $$;`, tableName, pk)
+
+		if err := db.Exec(query).Error; err != nil {
+			log.Printf("⚠️ Warning: Could not ensure primary key on %s: %v", tableName, err)
+		} else {
+			log.Printf("✅ Verified primary key for %s (%s)", tableName, pk)
+		}
+	}
 }
 
 // dropTables drops only the TransferBlocks table
