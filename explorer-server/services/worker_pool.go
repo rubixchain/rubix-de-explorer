@@ -54,7 +54,6 @@ func newWorkerPool(name string, queueSize, minWorkers, maxWorkers int) *workerPo
 	for i := 0; i < minWorkers; i++ {
 		p.startWorker()
 	}
-	log.Printf("🔧 %s pool started with %d workers (max %d)", name, minWorkers, maxWorkers)
 
 	return p
 }
@@ -98,7 +97,6 @@ func (p *workerPool) maybeScaleUp() {
 	qLen := len(p.queue)
 	if qLen > p.running && p.running < p.maxWorkers {
 		p.startWorker()
-		log.Printf("📈 %s pool scaled up: %d workers (queue=%d)", p.name, p.running, qLen)
 	}
 }
 

@@ -21,32 +21,19 @@ import (
 func main() {
 	startTime := time.Now()
 
-	// Detect CPU cores
+	// Detect CPU cores and initialize worker pool
 	totalCores := runtime.NumCPU()
-	log.Printf("Detected %d CPU cores\n", totalCores)
-
-	// Use all cores
 	runtime.GOMAXPROCS(totalCores)
-	log.Printf("Using %d cores for server + workers\n", totalCores)
-	log.Printf("Starting Explorer Server at %s\n", startTime.Format(time.RFC1123))
+	services.InitWorkerPools(totalCores)
 
 	// Load .env if present
-	if err := godotenv.Load(); err != nil {
-		log.Println("No .env file found, using default values")
-	} else {
-		log.Println(".env file loaded successfully")
+	if err := godotenv.Load(); err == nil {
+		log.Println("✅ Environment configuration loaded")
 	}
 
 	// Initialize PostgreSQL
-	log.Println("Connecting to PostgreSQL...")
 	database.ConnectAndMigrate(false)
-	log.Println("PostgreSQL connected and migrated")
-
-	// --------------------------------------------------
-	// Initialize worker pool (blocks only)
-	// --------------------------------------------------
-	services.InitWorkerPools(totalCores)
-	log.Println("✅ Worker pool initialized (block updates)")
+	log.Printf("✅ Explorer Server initialized with %d cores\n", totalCores)
 
 	// --------------------------------------------------
 	// HTTP router + CORS
@@ -71,8 +58,7 @@ func main() {
 
 	// Start HTTP server
 	go func() {
-		serverStart := time.Now()
-		log.Printf("Explorer server STARTED on port :%s at %s\n", port, serverStart.Format(time.RFC1123))
+		log.Printf("🚀 Explorer Server listening on port :%s\n", port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Server failed: %v", err)
 		}

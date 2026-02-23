@@ -36,7 +36,7 @@ func ConnectAndMigrate(drop bool) {
 	// ── Write Pool (block ingestion) ──
 	var err error
 	WriteDB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+		Logger: logger.Default.LogMode(logger.Warn),
 	})
 	if err != nil {
 		log.Fatalf("❌ Failed to connect WriteDB: %v", err)
@@ -49,7 +49,7 @@ func ConnectAndMigrate(drop bool) {
 
 	// ── Read Pool (API queries) ──
 	ReadDB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+		Logger: logger.Default.LogMode(logger.Warn),
 	})
 	if err != nil {
 		log.Fatalf("❌ Failed to connect ReadDB: %v", err)
@@ -128,10 +128,9 @@ func ensureUniqueConstraints(db *gorm.DB, models []interface{}) {
 
 		if err := db.Exec(query).Error; err != nil {
 			log.Printf("⚠️ Warning: Could not ensure primary key on %s: %v", tableName, err)
-		} else {
-			log.Printf("✅ Verified primary key for %s (%s)", tableName, pk)
 		}
 	}
+	log.Println("✅ All primary key constraints verified")
 }
 
 // dropTables drops only the TransferBlocks table
