@@ -45,9 +45,9 @@ func GetAssetType(id string) (string, error) {
 }
 
 // -------------------------------------------------------------------
-// Fetch FULL token-chain for UI
+// Fetch LATEST token-chain for UI
 // -------------------------------------------------------------------
-func GetTokenChainFromTokenID(tokenID string) (map[string]interface{}, error) {
+func GetLatestTokenChainFromTokenID(tokenID string) (map[string]interface{}, error) {
 
 	tokenType, err := GetAssetType(tokenID)
 	if err != nil {
@@ -93,9 +93,57 @@ func GetTokenChainFromTokenID(tokenID string) (map[string]interface{}, error) {
 }
 
 // -------------------------------------------------------------------
+// Fetch FULL token-chain
+// -------------------------------------------------------------------
+func GetTokenChainFromTokenID(tokenID string) (map[string]interface{}, error) {
+
+	tokenType, err := GetAssetType(tokenID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get token type: %v", err)
+	}
+
+	// RBT → PART if fractional
+	if strings.ToUpper(tokenType) == "RBT" {
+		rbt, err := GetRBTInfoFromRBTID(tokenID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get RBT: %v", err)
+		}
+		if rbt.TokenValue < 1.0 {
+			tokenType = "PART"
+		}
+	}
+
+	url := fmt.Sprintf("%s/api/de-exp/get-token-chain?tokenID=%s&tokenType=%s",
+		config.RubixNodeURL, tokenID, tokenType)
+	client := GetNodeHTTPClient()
+	release := acquireNodeSlot()
+	defer release()
+
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("fullnode error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("fullnode returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+
+	var out map[string]interface{}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("json decode error: %v", err)
+	}
+
+	return out, nil
+}
+
+// -------------------------------------------------------------------
 // Paginated blocks-from-token-chain
 // -------------------------------------------------------------------
-func GetTokenBlocksFromTokenID(tokenID string, page, limit int) ([]map[string]interface{}, int, error) {
+func GetLatestTokenBlocksFromTokenID(tokenID string, page, limit int) ([]map[string]interface{}, int, error) {
 
 	tokenType, err := GetAssetType(tokenID)
 	if err != nil {

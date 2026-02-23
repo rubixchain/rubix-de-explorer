@@ -101,7 +101,7 @@ func GetInfo(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func GetTokenChainFromTokenID(w http.ResponseWriter, r *http.Request) {
+func GetLatestTokenChainFromTokenID(w http.ResponseWriter, r *http.Request) {
 	var chainData map[string]interface{}
 
 	tokenID := r.URL.Query().Get("token_id")
@@ -110,7 +110,7 @@ func GetTokenChainFromTokenID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	chainData, err := services.GetTokenChainFromTokenID(tokenID)
+	chainData, err := services.GetLatestTokenChainFromTokenID(tokenID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to fetch token chain: %v", err), http.StatusInternalServerError)
 		return
@@ -127,7 +127,7 @@ func GetTokenChainFromTokenID(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func GetTokenBlocksFromTokenID(w http.ResponseWriter, r *http.Request) {
+func GetLatestTokenBlocksFromTokenID(w http.ResponseWriter, r *http.Request) {
 	// Parse query parameters
 	tokenID := r.URL.Query().Get("tokenID")
 	if tokenID == "" {
@@ -149,7 +149,7 @@ func GetTokenBlocksFromTokenID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch token chain data with pagination
-	chainData, totalBlocks, err := services.GetTokenBlocksFromTokenID(tokenID, page, limit)
+	chainData, totalBlocks, err := services.GetLatestTokenBlocksFromTokenID(tokenID, page, limit)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to fetch token chain: %v", err), http.StatusInternalServerError)
 		return
