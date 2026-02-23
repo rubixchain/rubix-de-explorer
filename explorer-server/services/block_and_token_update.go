@@ -60,12 +60,13 @@ func UpdateBlocks(info *model.IncomingBlockInfo) {
 	transType := fmt.Sprintf("%v", mappedBlock["TCTransTypeKey"])
 	blockType := constants.TxTypeToString(transType)
 	blockHash := fmt.Sprintf("%v", mappedBlock["TCBlockHashKey"])
-	if count%100 == 0 {
+
+	log.Printf("📦 Block #%d [%s] %s", count, blockType, blockHash)
+
+	if count%50 == 0 {
 		status := GetWorkerPoolStatus()
-		log.Printf("📊 Progress: %d blocks processed | Latest: %s | Hash: %s | Queue: %d/%d | Workers: %d",
-			count, blockType, blockHash, status.QueueLen, status.QueueCap, status.Workers)
-	} else {
-		log.Printf("📦 Block #%d [%s] %s", count, blockType, blockHash)
+		log.Printf("📊 Progress Summary: %d blocks processed | Queue: %d/%d | Workers: %d",
+			count, status.QueueLen, status.QueueCap, status.Workers)
 	}
 
 	// 2. Data Backfilling: Ensure info fields are populated for the DB modules
@@ -123,7 +124,7 @@ func UpdateBlocks(info *model.IncomingBlockInfo) {
 		case constants.TokenGeneratedType, constants.TokenMintedType:
 			StoreMintBlock(tx, mappedBlock, info)
 		default:
-			log.Printf("📥 Block Type: %s (Handled in AllBlocks only)", transType)
+			// Handled in AllBlocks only
 		}
 
 		// Process Live Updates within the same transaction

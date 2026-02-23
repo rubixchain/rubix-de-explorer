@@ -73,10 +73,7 @@ func GetTransferBlocksList(limit, page int) (model.TransactionsResponse, error) 
 			ReceiverDID: deref(b.ReceiverDID),
 			Epoch:       b.Epoch,
 		})
-
-		log.Printf("epoch: %d\n", b.Epoch)
 	}
-	log.Printf("Total Transfer Blocks fetched: %d\n", len(response.TransactionsResponse))
 
 	response.Count = count
 	return response, nil

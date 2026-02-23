@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"explorer-server/model"
 	"explorer-server/services"
-	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -123,10 +122,7 @@ func UpdateBlocksHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Println("📥 Received block update — queueing to high-priority worker")
-
 	if info.BlockMap == nil {
-		log.Println("❌ Incoming block missing block_map")
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "missing block_map"})
 		return
@@ -138,7 +134,6 @@ func UpdateBlocksHandler(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if !okTask {
-		log.Println("⚠️ Worker queue full — processing inline")
 		services.UpdateBlocks(&info)
 	}
 
