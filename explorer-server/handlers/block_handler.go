@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"encoding/json"
-	"explorer-server/model"
 	"explorer-server/services"
 	"net/http"
 	"strconv"
@@ -113,47 +112,27 @@ func GetBurntBlockList(w http.ResponseWriter, r *http.Request) {
 // ============================================================================
 //  BLOCK UPDATE (High Priority) → Worker Pool
 // ============================================================================
-
-func UpdateBlocksHandler(w http.ResponseWriter, r *http.Request) {
-	var info model.IncomingBlockInfo
-
-	if err := json.NewDecoder(r.Body).Decode(&info); err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
-		return
-	}
-
-	if info.BlockMap == nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "missing block_map"})
-		return
-	}
-
-	// Pass only the info pointer
-	okTask := services.EnqueueBlockUpdateTask(func() {
-		services.UpdateBlocks(&info)
-	})
-
-	if !okTask {
-		services.UpdateBlocks(&info)
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "queued", "message": "Block update accepted"})
-}
-
+//  Legacy UpdateBlocksHandler removed (Publishing is now handled via PubSub)
 // ============================================================================
 //  Optional Debug Endpoint — Worker Pool Status
 // ============================================================================
 
 func QueueStatusHandler(w http.ResponseWriter, r *http.Request) {
-	status := services.GetWorkerPoolStatus()
-
 	w.Header().Set("Content-Type", "application/json")
+
+	if services.GlobalTxnProcessor == nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": "Dynamic processor not initialized",
+		})
+		return
+	}
+
+	stats := services.GlobalTxnProcessor.GetStats()
+
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"timestamp":    time.Now().Format(time.RFC3339),
-		"workers":      status.Workers,
-		"queue_length": status.QueueLen,
-		"queue_cap":    status.QueueCap,
-		"load_factor":  status.LoadFactor,
+		"workers":      stats["workers"],
+		"queue_length": stats["queue_length"],
+		"queue_cap":    stats["queue_cap"],
 	})
 }

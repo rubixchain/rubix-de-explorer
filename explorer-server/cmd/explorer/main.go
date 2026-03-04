@@ -23,21 +23,23 @@ import (
 func main() {
 	// CLI Flags
 	testNet := flag.Bool("testnet", false, "Connect to Rubix TestNet (default: MainNet)")
+	swarmKeyPath := flag.String("swarmkey", "", "Path to a custom swarm.key file (overrides built-in keys)")
 	flag.Parse()
 
 	startTime := time.Now()
 
 	// Log which network we're connecting to
-	if *testNet {
+	if *swarmKeyPath != "" {
+		log.Printf("🌐 Network: Custom (swarm key: %s)", *swarmKeyPath)
+	} else if *testNet {
 		log.Println("🌐 Network: TestNet")
 	} else {
 		log.Println("🌐 Network: MainNet")
 	}
 
-	// Detect CPU cores and initialize worker pool
+	// Detect CPU cores
 	totalCores := runtime.NumCPU()
 	runtime.GOMAXPROCS(totalCores)
-	services.InitWorkerPools(totalCores)
 
 	// Load .env if present
 	if err := godotenv.Load(); err == nil {
@@ -51,9 +53,13 @@ func main() {
 	// --------------------------------------------------
 	// Initialize IPFS PubSub Listener & Daemon
 	// --------------------------------------------------
+
+	// Initialize the Dynamic Transaction Processor for PubSub messages
+	services.InitDynamicTxnProcessor()
+
 	ipfsManager := services.NewIPFSManager()
 
-	if err := ipfsManager.EnsureInitialized(*testNet); err != nil {
+	if err := ipfsManager.EnsureInitialized(*testNet, *swarmKeyPath); err != nil {
 		log.Fatalf("❌ Failed to initialize IPFS node: %v\n", err)
 	}
 
@@ -126,9 +132,12 @@ func main() {
 		log.Println("✅ HTTP server stopped gracefully")
 	}
 
-	// 2) Stop IPFS Daemon
+	// 2) Stop IPFS Daemon & Transaction Processor
+	if services.GlobalTxnProcessor != nil {
+		services.GlobalTxnProcessor.Shutdown()
+	}
 	ipfsManager.Stop()
-	log.Println("✅ IPFS Daemon stopped gracefully")
+	log.Println("✅ IPFS Daemon & TxnProcessor stopped gracefully")
 
 	// 3) Close database connection
 	database.CloseDB()

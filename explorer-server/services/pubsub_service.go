@@ -6,10 +6,10 @@ import (
 	"log"
 )
 
-// TxnCallBack processes incoming transaction/block events from the PubSub topic.
-// This function acts as the bridge between the PubSub network layer and the block updating logic.
+// TxnCallBack processes incoming transaction events from the PubSub topic.
+// Mirrors the Fullnode's TxnCallBack in core/fullnode.go.
 func TxnCallBack(peerID string, topic string, data []byte) {
-	var newEvent model.IncomingBlockInfo
+	var newEvent model.PubSubTxnInfo
 
 	err := json.Unmarshal(data, &newEvent)
 	if err != nil {
@@ -22,21 +22,11 @@ func TxnCallBack(peerID string, topic string, data []byte) {
 		return
 	}
 
-	// Validate whether the Fullnode includes the BlockMap in the pubsub message.
-	// UpdateBlocks heavily relies on the BlockMap.
-	if newEvent.BlockMap == nil {
-		log.Printf("⚠️ Received PubSub message for BlockHash %s but BlockMap is nil. Cannot process.", newEvent.BlockHash)
-		return
+	// Enqueue the transaction into the dynamic worker pool
+	// This prevents the IPFS PubSub network reader from blocking
+	if GlobalTxnProcessor != nil {
+		GlobalTxnProcessor.EnqueueTransaction(&newEvent)
+	} else {
+		log.Printf("⚠️ GlobalTxnProcessor not initialized, dropping transaction %s", newEvent.BlockHash)
 	}
-
-	log.Printf("📥 Received transaction from PubSub [%s]: %v", topic, newEvent)
-
-	// Delegate to the standard Queue / Worker Pool if available
-	// okTask := EnqueueBlockUpdateTask(func() {
-	// 	UpdateBlocks(&newEvent)
-	// })
-
-	// if !okTask {
-	// 	UpdateBlocks(&newEvent)
-	// }
 }

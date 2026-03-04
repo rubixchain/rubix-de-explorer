@@ -64,9 +64,16 @@ func UpdateBlocks(info *model.IncomingBlockInfo) {
 	log.Printf("📦 Block #%d [%s] %s", count, blockType, blockHash)
 
 	if count%50 == 0 {
-		status := GetWorkerPoolStatus()
-		log.Printf("📊 Progress Summary: %d blocks processed | Queue: %d/%d | Workers: %d",
-			count, status.QueueLen, status.QueueCap, status.Workers)
+		if GlobalTxnProcessor != nil {
+			GlobalTxnProcessor.workersMutex.RLock()
+			currentWorkers := GlobalTxnProcessor.currentWorkers
+			GlobalTxnProcessor.workersMutex.RUnlock()
+
+			log.Printf("📊 Progress Summary: %d blocks processed | Queue: %d | Workers: %d",
+				count, len(GlobalTxnProcessor.txnQueue), currentWorkers)
+		} else {
+			log.Printf("📊 Progress Summary: %d blocks processed", count)
+		}
 	}
 
 	// 2. Data Backfilling: Ensure info fields are populated for the DB modules

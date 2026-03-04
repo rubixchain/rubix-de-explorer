@@ -100,7 +100,7 @@ func getIPFSRepoPath() (string, error) {
 }
 
 // EnsureInitialized checks if IPFS is available, initialized, and configured for Rubix network
-func (m *IPFSManager) EnsureInitialized(testNet bool) error {
+func (m *IPFSManager) EnsureInitialized(testNet bool, customSwarmKeyPath string) error {
 	// 0. Force private network mode (same as Rubix node)
 	os.Setenv("LIBP2P_FORCE_PNET", "1")
 	log.Println("🔒 LIBP2P_FORCE_PNET=1 (private network mode enforced)")
@@ -128,17 +128,25 @@ func (m *IPFSManager) EnsureInitialized(testNet bool) error {
 		log.Println("✅ IPFS initialized successfully")
 	}
 
-	// 3. Write the appropriate Rubix swarm key
-	swarmKeyPath := filepath.Join(ipfsRepo, "swarm.key")
+	// 3. Write the appropriate swarm key
+	swarmKeyDest := filepath.Join(ipfsRepo, "swarm.key")
 	var swarmKeyData []byte
-	if testNet {
+
+	if customSwarmKeyPath != "" {
+		// Custom swarm key provided via -swarmkey flag
+		swarmKeyData, err = os.ReadFile(customSwarmKeyPath)
+		if err != nil {
+			return fmt.Errorf("failed to read custom swarm key from %s: %w", customSwarmKeyPath, err)
+		}
+		log.Printf("🔑 Using custom swarm key (%s)", customSwarmKeyPath)
+	} else if testNet {
 		swarmKeyData = config.TestNetSwarmKey
 		log.Println("🔑 Using TestNet swarm key (testswarm.key)")
 	} else {
 		swarmKeyData = config.MainNetSwarmKey
 		log.Println("🔑 Using MainNet swarm key (swarm.key)")
 	}
-	if err := os.WriteFile(swarmKeyPath, swarmKeyData, 0600); err != nil {
+	if err := os.WriteFile(swarmKeyDest, swarmKeyData, 0600); err != nil {
 		return fmt.Errorf("failed to write swarm key: %w", err)
 	}
 

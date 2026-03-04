@@ -5,6 +5,7 @@ explorer-server
 explorer.exe
 
 .env
+config/custom_swarm.key
 
 # Database runtime files - DO NOT COMMIT
 database/postgres-bin/*/data/

@@ -128,3 +128,20 @@ type IncomingBlockInfo struct {
 	BlockMap          map[string]interface{} `json:"block_map"`
 	TokenDetails      []TokenDetails         `json:"token_details"`
 }
+
+// PubSubTxnInfo matches the Fullnode's published struct exactly.
+// No json tags = PascalCase JSON keys (Go default marshaling).
+type PubSubTxnInfo struct {
+	BlockHash         string  `gorm:"column:block_hash;primaryKey"`
+	TransactionID     string  `gorm:"column:transaction_id"`
+	BlockType         string  `gorm:"column:block_type"`
+	AssetType         int     `gorm:"column:asset_type"`
+	FTName            string  `gorm:"column:ft_name"`
+	CreatorDID        string  `gorm:"column:creator_did"`
+	PublisherDID      string  `gorm:"column:publisher_did"`
+	ReceiverDID       string  `gorm:"column:receiver_did"`
+	TxnBlock          []byte  `gorm:"column:block"`
+	LatestBlockHeight uint64  `gorm:"column:block_height"`
+	TransactionValue  float64 `gorm:"column:transaction_value"`
+	TokenValue        float64 `gorm:"column:token_value"`
+}

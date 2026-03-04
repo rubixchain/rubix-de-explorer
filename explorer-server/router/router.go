@@ -65,7 +65,7 @@ func NewRouter() *mux.Router {
 	r.HandleFunc("/api/ftholdings", handlers.GetFtHoldingList).Methods(http.MethodGet)
 
 	// ==== New async notification endpoints ====
-	r.HandleFunc("/api/block-update", handlers.UpdateBlocksHandler).Methods(http.MethodPost)
+	// Legacy /api/block-update endpoint removed (now handles via PubSub)
 
 	// Worker pool / queue status (for monitoring)
 	r.HandleFunc("/api/queue-status", handlers.QueueStatusHandler).Methods(http.MethodGet)
