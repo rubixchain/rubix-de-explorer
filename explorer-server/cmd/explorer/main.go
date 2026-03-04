@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log"
 	"net/http"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"explorer-server/database"
+	"explorer-server/pubsub"
 	"explorer-server/router"
 	"explorer-server/services"
 
@@ -19,7 +21,18 @@ import (
 )
 
 func main() {
+	// CLI Flags
+	testNet := flag.Bool("testnet", false, "Connect to Rubix TestNet (default: MainNet)")
+	flag.Parse()
+
 	startTime := time.Now()
+
+	// Log which network we're connecting to
+	if *testNet {
+		log.Println("🌐 Network: TestNet")
+	} else {
+		log.Println("🌐 Network: MainNet")
+	}
 
 	// Detect CPU cores and initialize worker pool
 	totalCores := runtime.NumCPU()
@@ -34,6 +47,35 @@ func main() {
 	// Initialize PostgreSQL
 	database.ConnectAndMigrate(false)
 	log.Printf("✅ Explorer Server initialized with %d cores\n", totalCores)
+
+	// --------------------------------------------------
+	// Initialize IPFS PubSub Listener & Daemon
+	// --------------------------------------------------
+	ipfsManager := services.NewIPFSManager()
+
+	if err := ipfsManager.EnsureInitialized(*testNet); err != nil {
+		log.Fatalf("❌ Failed to initialize IPFS node: %v\n", err)
+	}
+
+	if err := ipfsManager.StartDaemon(); err != nil {
+		log.Fatalf("❌ Failed to start IPFS daemon: %v\n", err)
+	}
+
+	ipfsHost := os.Getenv("IPFS_HOST")
+	if ipfsHost == "" {
+		ipfsHost = "localhost:5001"
+	}
+
+	psClient, err := pubsub.NewPubSub(ipfsHost)
+	if err != nil {
+		log.Printf("⚠️ Failed to initialize PubSub client: %v\n", err)
+	} else {
+		topic := "rubix_txns" // Same topic as regular nodes publish to
+		err = psClient.SubscribeTopic(topic, services.TxnCallBack)
+		if err != nil {
+			log.Printf("⚠️ Failed to subscribe to PubSub topic %s: %v\n", topic, err)
+		}
+	}
 
 	// --------------------------------------------------
 	// HTTP router + CORS
@@ -84,7 +126,11 @@ func main() {
 		log.Println("✅ HTTP server stopped gracefully")
 	}
 
-	// 2) Close database connection
+	// 2) Stop IPFS Daemon
+	ipfsManager.Stop()
+	log.Println("✅ IPFS Daemon stopped gracefully")
+
+	// 3) Close database connection
 	database.CloseDB()
 	log.Println("✅ Database connection closed")
 
