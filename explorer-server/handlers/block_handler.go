@@ -5,7 +5,6 @@ import (
 	"explorer-server/services"
 	"net/http"
 	"strconv"
-	"time"
 )
 
 // ============================================================================
@@ -107,32 +106,4 @@ func GetBurntBlockList(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)
-}
-
-// ============================================================================
-//  BLOCK UPDATE (High Priority) → Worker Pool
-// ============================================================================
-//  Legacy UpdateBlocksHandler removed (Publishing is now handled via PubSub)
-// ============================================================================
-//  Optional Debug Endpoint — Worker Pool Status
-// ============================================================================
-
-func QueueStatusHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	if services.GlobalTxnProcessor == nil {
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status": "Dynamic processor not initialized",
-		})
-		return
-	}
-
-	stats := services.GlobalTxnProcessor.GetStats()
-
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"timestamp":    time.Now().Format(time.RFC3339),
-		"workers":      stats["workers"],
-		"queue_length": stats["queue_length"],
-		"queue_cap":    stats["queue_cap"],
-	})
 }

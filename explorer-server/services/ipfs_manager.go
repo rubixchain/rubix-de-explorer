@@ -195,6 +195,15 @@ func (m *IPFSManager) EnsureInitialized(testNet bool, customSwarmKeyPath string)
 		log.Println("✅ Routing.Type set to dht")
 	}
 
+	// 9. Disable mDNS discovery to prevent "Failed to set multicast interface" log spam on Windows
+	// private networks rely on the explicit bootstrap nodes anyway.
+	mdnsCmd := exec.Command(m.ipfsPath, "config", "--json", "Discovery.MDNS.Enabled", "false")
+	if output, err := mdnsCmd.CombinedOutput(); err != nil {
+		log.Printf("⚠️ Failed to disable mDNS: %v\n%s", err, string(output))
+	} else {
+		log.Println("✅ mDNS Discovery disabled (reduces log spam)")
+	}
+
 	return nil
 }
 

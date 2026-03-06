@@ -327,10 +327,6 @@ func ProcessSingleTransaction(newEvent *model.PubSubTxnInfo, workerID int) {
 	log.Printf("   ReceiverDID:  %s", newEvent.ReceiverDID)
 	log.Printf("   TxnValue:     %f", newEvent.TransactionValue)
 	log.Printf("   TokenValue:   %f", newEvent.TokenValue)
-
-	// In the future:
-	// 1. Map newEvent fields to model.IncomingBlockInfo (if needed by existing code)
-	// 2. Insert into the database using block_and_token_update logic
 }
 
 // mathMin helper
