@@ -1,4 +1,4 @@
-package services
+package ipfs
 
 import (
 	"bufio"
@@ -46,45 +46,45 @@ func NewIPFSManager() *IPFSManager {
 	}
 }
 
-// findIPFSExecutable looks for ipfs executable in this order:
-// 1. Same directory as the running explorer binary (like Rubix does)
-// 2. System PATH
+// findIPFSExecutable looks for the bundled ipfs executable in the ipfs_bin/ directory:
 func findIPFSExecutable() (string, error) {
-	// Determine the correct binary name for the OS
-	ipfsBinary := "ipfs"
+	// Determine the correct bundled binary name for the OS
+	ipfsBinary := "ipfs-linux"
 	if runtime.GOOS == "windows" {
-		ipfsBinary = "ipfs.exe"
+		ipfsBinary = "ipfs-windows.exe"
+	} else if runtime.GOOS == "darwin" {
+		ipfsBinary = "ipfs-mac"
 	}
 
-	// 1. Check same directory as the running binary
+	// 1. Check same directory as the running binary (Production/Compiled)
 	exePath, err := os.Executable()
 	if err == nil {
 		exeDir := filepath.Dir(exePath)
-		localIPFS := filepath.Join(exeDir, ipfsBinary)
+		localIPFS := filepath.Join(exeDir, "ipfs", "ipfs_bin", ipfsBinary)
 		if _, err := os.Stat(localIPFS); err == nil {
-			log.Printf("✅ Found local IPFS binary: %s", localIPFS)
+			log.Printf("✅ Found bundled IPFS binary: %s", localIPFS)
 			return localIPFS, nil
 		}
 	}
 
-	// 2. Also check current working directory (useful during development with `go run`)
+	// 2. Check current working directory (useful during development with `go run`)
 	cwd, err := os.Getwd()
 	if err == nil {
-		cwdIPFS := filepath.Join(cwd, ipfsBinary)
+		cwdIPFS := filepath.Join(cwd, "ipfs", "ipfs_bin", ipfsBinary)
 		if _, err := os.Stat(cwdIPFS); err == nil {
-			log.Printf("✅ Found IPFS binary in working directory: %s", cwdIPFS)
+			log.Printf("✅ Found bundled IPFS binary in dev directory: %s", cwdIPFS)
 			return cwdIPFS, nil
 		}
 	}
 
-	// 3. Fallback to system PATH
+	// 3. Fallback to system PATH (if they installed it globally themselves)
 	pathIPFS, err := exec.LookPath("ipfs")
 	if err == nil {
-		log.Printf("✅ Found IPFS binary in PATH: %s", pathIPFS)
+		log.Printf("⚠️ Bundled IPFS not found. Falling back to system IPFS binary: %s", pathIPFS)
 		return pathIPFS, nil
 	}
 
-	return "", fmt.Errorf("ipfs executable not found. Place ipfs.exe in the same folder as explorer.exe, or install IPFS (Kubo) and add it to PATH")
+	return "", fmt.Errorf("ipfs executable not found. Place %s in the ipfs/ipfs_bin/ folder, or install IPFS (Kubo) and add it to PATH", ipfsBinary)
 }
 
 // getIPFSRepoPath returns the path to the IPFS repository

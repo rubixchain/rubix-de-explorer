@@ -1,4 +1,4 @@
-package services
+package api
 
 import (
 	"encoding/json"
@@ -64,16 +64,18 @@ func UpdateBlocks(info *model.IncomingBlockInfo) {
 	log.Printf("📦 Block #%d [%s] %s", count, blockType, blockHash)
 
 	if count%50 == 0 {
-		if GlobalTxnProcessor != nil {
-			GlobalTxnProcessor.workersMutex.RLock()
-			currentWorkers := GlobalTxnProcessor.currentWorkers
-			GlobalTxnProcessor.workersMutex.RUnlock()
+		/*
+			if processor.GlobalTxnProcessor != nil {
+				processor.GlobalTxnProcessor.workersMutex.RLock()
+				currentWorkers := processor.GlobalTxnProcessor.currentWorkers
+				processor.GlobalTxnProcessor.workersMutex.RUnlock()
 
-			log.Printf("📊 Progress Summary: %d blocks processed | Queue: %d | Workers: %d",
-				count, len(GlobalTxnProcessor.txnQueue), currentWorkers)
-		} else {
-			log.Printf("📊 Progress Summary: %d blocks processed", count)
-		}
+				log.Printf("📊 Progress Summary: %d blocks processed | Queue: %d | Workers: %d",
+					count, len(processor.GlobalTxnProcessor.txnQueue), currentWorkers)
+			} else {
+				log.Printf("📊 Progress Summary: %d blocks processed", count)
+			}
+		*/
 	}
 
 	// 2. Data Backfilling: Ensure info fields are populated for the DB modules

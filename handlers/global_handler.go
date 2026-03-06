@@ -2,7 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
-	"explorer-server/services"
+	"explorer-server/api"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -25,7 +25,7 @@ func GetInfo(w http.ResponseWriter, r *http.Request) {
 	// Determine logic based on ID prefix
 	if strings.HasPrefix(id, "Qm") {
 		// Fetch asset type from DB
-		assetType, err = services.GetAssetType(id)
+		assetType, err = api.GetAssetType(id)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Failed to fetch asset type: %v", err), http.StatusInternalServerError)
 			return
@@ -33,17 +33,17 @@ func GetInfo(w http.ResponseWriter, r *http.Request) {
 
 		switch assetType {
 		case "NFT":
-			data, err = services.GetNFTInfoFromNFTID(id)
+			data, err = api.GetNFTInfoFromNFTID(id)
 		case "RBT":
-			data, err = services.GetRBTInfoFromRBTID(id)
+			data, err = api.GetRBTInfoFromRBTID(id)
 		case "FT":
-			data, err = services.GetFTInfoFromFTID(id)
+			data, err = api.GetFTInfoFromFTID(id)
 		case "SmartContract":
-			data, err = services.GetSCInfoFromSCID(id)
+			data, err = api.GetSCInfoFromSCID(id)
 		case "DID":
-			data, err = services.GetDIDInfoFromDID(id)
+			data, err = api.GetDIDInfoFromDID(id)
 		case "TransferBlock":
-			data, err = services.GetTransferBlockInfoFromTxnID(id)
+			data, err = api.GetTransferBlockInfoFromTxnID(id)
 		default:
 			http.Error(w, fmt.Sprintf("Unknown asset type for ID: %s", id), http.StatusBadRequest)
 			return
@@ -51,28 +51,28 @@ func GetInfo(w http.ResponseWriter, r *http.Request) {
 
 	} else if strings.HasPrefix(id, "bafy") {
 		assetType = "DID"
-		data, err = services.GetDIDInfoFromDID(id)
+		data, err = api.GetDIDInfoFromDID(id)
 	} else {
 		// Could be a token_id or a txn_id — check AllTokens first
-		assetType, err = services.GetAssetType(id)
+		assetType, err = api.GetAssetType(id)
 		if err == nil {
 			switch assetType {
 			case "RBT":
-				data, err = services.GetRBTInfoFromRBTID(id)
+				data, err = api.GetRBTInfoFromRBTID(id)
 			case "FT":
-				data, err = services.GetFTInfoFromFTID(id)
+				data, err = api.GetFTInfoFromFTID(id)
 			case "NFT":
-				data, err = services.GetNFTInfoFromNFTID(id)
+				data, err = api.GetNFTInfoFromNFTID(id)
 			case "SmartContract":
-				data, err = services.GetSCInfoFromSCID(id)
+				data, err = api.GetSCInfoFromSCID(id)
 			default:
-				data, err = services.GetTransferBlockInfoFromTxnID(id)
+				data, err = api.GetTransferBlockInfoFromTxnID(id)
 				assetType = "TransferBlock"
 			}
 		} else {
 			// Not a token — try as a transaction hash
 			assetType = "TransferBlock"
-			data, err = services.GetTransferBlockInfoFromTxnID(id)
+			data, err = api.GetTransferBlockInfoFromTxnID(id)
 		}
 	}
 
@@ -110,7 +110,7 @@ func GetLatestTokenChainFromTokenID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	chainData, err := services.GetLatestTokenChainFromTokenID(tokenID)
+	chainData, err := api.GetLatestTokenChainFromTokenID(tokenID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to fetch token chain: %v", err), http.StatusInternalServerError)
 		return
@@ -149,7 +149,7 @@ func GetLatestTokenBlocksFromTokenID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch token chain data with pagination
-	chainData, totalBlocks, err := services.GetLatestTokenBlocksFromTokenID(tokenID, page, limit)
+	chainData, totalBlocks, err := api.GetLatestTokenBlocksFromTokenID(tokenID, page, limit)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to fetch token chain: %v", err), http.StatusInternalServerError)
 		return
@@ -193,7 +193,7 @@ func GetSCBlockInfoFromTxnHash(w http.ResponseWriter, r *http.Request) {
 
 	var response interface{}
 
-	scBlockInfo, err := services.GetSCBlockInfoFromTxnId(hash)
+	scBlockInfo, err := api.GetSCBlockInfoFromTxnId(hash)
 	if err != nil {
 		http.Error(w, "Failed to fetch SC block info", http.StatusInternalServerError)
 		return

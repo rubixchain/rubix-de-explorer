@@ -2,7 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
-	"explorer-server/services"
+	"explorer-server/api"
 	"net/http"
 	"strconv"
 )
@@ -12,7 +12,7 @@ import (
 // ============================================================================
 
 func GetTxnsCountHandler(w http.ResponseWriter, r *http.Request) {
-	count, err := services.GetTxnsCount()
+	count, err := api.GetTxnsCount()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -35,7 +35,7 @@ func GetTransferBlockListHandler(w http.ResponseWriter, r *http.Request) {
 		page = p
 	}
 
-	response, err := services.GetTransferBlocksList(limit, page)
+	response, err := api.GetTransferBlocksList(limit, page)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -48,7 +48,7 @@ func GetTransferBlockListHandler(w http.ResponseWriter, r *http.Request) {
 func GetBlockInfoFromTxnHash(w http.ResponseWriter, r *http.Request) {
 	txnHash := r.URL.Query().Get("hash")
 
-	data, err := services.GetTransferBlockInfoFromTxnID(txnHash)
+	data, err := api.GetTransferBlockInfoFromTxnID(txnHash)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -61,7 +61,7 @@ func GetBlockInfoFromTxnHash(w http.ResponseWriter, r *http.Request) {
 func GetBlockInfoFromBlockHash(w http.ResponseWriter, r *http.Request) {
 	blockHash := r.URL.Query().Get("hash")
 
-	data, err := services.GetTransferBlockInfoFromBlockHash(blockHash)
+	data, err := api.GetTransferBlockInfoFromBlockHash(blockHash)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -74,7 +74,7 @@ func GetBlockInfoFromBlockHash(w http.ResponseWriter, r *http.Request) {
 func GetBurntTxnInfoFromTxnHash(w http.ResponseWriter, r *http.Request) {
 	txnHash := r.URL.Query().Get("hash")
 
-	data, err := services.GetBurntBlockInfo(txnHash)
+	data, err := api.GetBurntBlockInfo(txnHash)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -98,7 +98,7 @@ func GetBurntBlockList(w http.ResponseWriter, r *http.Request) {
 		page = 1
 	}
 
-	data, err := services.GetBurntBlockList(limit, page)
+	data, err := api.GetBurntBlockList(limit, page)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

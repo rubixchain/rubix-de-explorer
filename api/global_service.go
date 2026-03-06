@@ -1,8 +1,9 @@
-package services
+package api
 
 import (
 	"encoding/json"
 	"errors"
+
 	"explorer-server/config"
 	"explorer-server/database"
 	"explorer-server/database/models"

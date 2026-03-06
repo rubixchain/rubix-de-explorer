@@ -2,12 +2,12 @@ package handlers
 
 import (
 	"encoding/json"
-	"explorer-server/services"
+	"explorer-server/api"
 	"net/http"
 )
 
 func GetFTCountHandler(w http.ResponseWriter, r *http.Request) {
-	count, err := services.GetFTCount()
+	count, err := api.GetFTCount()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -24,7 +24,7 @@ func GetFTCountHandler(w http.ResponseWriter, r *http.Request) {
 func GetFTInfoFromFTID(w http.ResponseWriter, r *http.Request) {
 	ftId := r.URL.Query().Get("ftid")
 	println("FT ID:", ftId)
-	ftInfo, err := services.GetFTInfoFromFTID(ftId)
+	ftInfo, err := api.GetFTInfoFromFTID(ftId)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -42,7 +42,7 @@ func GetFTInfoFromFTID(w http.ResponseWriter, r *http.Request) {
 func GetFtHoldingList(w http.ResponseWriter, r *http.Request) {
    did := r.URL.Query().Get("did")
 
-   ftInfo, err := services.GetFTListFromDID(did)
+   ftInfo, err := api.GetFTListFromDID(did)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

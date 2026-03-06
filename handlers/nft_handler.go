@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"explorer-server/services"
+	"explorer-server/api"
 )
 
 func GetNFTsCountHandler(w http.ResponseWriter, r *http.Request) {
-	count, err := services.GetNFTCount()
+	count, err := api.GetNFTCount()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -26,7 +26,7 @@ func GetNFTsCountHandler(w http.ResponseWriter, r *http.Request) {
 func GetNFTInfoFromNFTID(w http.ResponseWriter, r *http.Request) {
 	nftId := r.URL.Query().Get("nftid")
 	println("NFT ID:", nftId)
-	nftInfo, err := services.GetNFTInfoFromNFTID(nftId)
+	nftInfo, err := api.GetNFTInfoFromNFTID(nftId)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -43,7 +43,7 @@ func GetNFTInfoFromNFTID(w http.ResponseWriter, r *http.Request) {
 // func GetRBTInfoFromRBTIDHandler(w http.ResponseWriter, r *http.Request)  {
 // 	rbtId:= r.URL.Query().Get("rbtId")
 // 	println("RBT ID:", rbtId)
-// 	count, err := services.GetRBTInfoFromRBTID()
+// 	count, err := api.GetRBTInfoFromRBTID()
 // 	if err != nil {
 // 		http.Error(w, err.Error(), http.StatusInternalServerError)
 // 		return

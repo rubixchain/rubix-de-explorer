@@ -2,13 +2,13 @@ package handlers
 
 import (
 	"encoding/json"
-	"explorer-server/services"
+	"explorer-server/api"
 	"net/http"
 	"strconv"
 )
 
 func GetDIDCountHandler(w http.ResponseWriter, r *http.Request) {
-	count, err := services.GetRBTCount()
+	count, err := api.GetRBTCount()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -26,12 +26,12 @@ func GetDIDCountHandler(w http.ResponseWriter, r *http.Request) {
 
 // 	did := r.URL.Query().Get("did", )
 // 	println("DID:", did)
-// 	didInfo, err := services.GetDIDInfoFromDID(did)
+// 	didInfo, err := api.GetDIDInfoFromDID(did)
 // 	if err != nil {
 // 		http.Error(w, err.Error(), http.StatusInternalServerError)
 // 		return
 // 	}
-// 	getAllRBTs, err := services.GetRBTListFromDID(did, limit , page )
+// 	getAllRBTs, err := api.GetRBTListFromDID(did, limit , page )
 // 	if err != nil {
 // 		http.Error(w, err.Error(), http.StatusInternalServerError)
 // 		return
@@ -64,7 +64,7 @@ func GetDIDHoldersListHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	holders, err := services.GetDIDHoldersList(limit, page)
+	holders, err := api.GetDIDHoldersList(limit, page)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -108,14 +108,14 @@ func GetDIDInfoHandler(w http.ResponseWriter, r *http.Request) {
 	println("DID:", did, "Page:", page, "Limit:", limit)
 
 	// Get DID info
-	didInfo, err := services.GetDIDInfoFromDID(did)
+	didInfo, err := api.GetDIDInfoFromDID(did)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	// Get paginated RBT list
-	rbts, totalCount, err := services.GetRBTListFromDID(did, limit, page)
+	rbts, totalCount, err := api.GetRBTListFromDID(did, limit, page)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

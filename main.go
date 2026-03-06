@@ -12,9 +12,10 @@ import (
 	"time"
 
 	"explorer-server/database"
+	"explorer-server/ipfs"
+	"explorer-server/processor"
 	"explorer-server/pubsub"
 	"explorer-server/router"
-	"explorer-server/services"
 
 	"github.com/joho/godotenv"
 	"github.com/rs/cors"
@@ -55,9 +56,9 @@ func main() {
 	// --------------------------------------------------
 
 	// Initialize the Dynamic Transaction Processor for PubSub messages
-	services.InitDynamicTxnProcessor()
+	processor.InitDynamicTxnProcessor()
 
-	ipfsManager := services.NewIPFSManager()
+	ipfsManager := ipfs.NewIPFSManager()
 
 	if err := ipfsManager.EnsureInitialized(*testNet, *swarmKeyPath); err != nil {
 		log.Fatalf("❌ Failed to initialize IPFS node: %v\n", err)
@@ -77,7 +78,7 @@ func main() {
 		log.Printf("⚠️ Failed to initialize PubSub client: %v\n", err)
 	} else {
 		topic := "rubix_txns" // Same topic as regular nodes publish to
-		err = psClient.SubscribeTopic(topic, services.TxnCallBack)
+		err = psClient.SubscribeTopic(topic, processor.TxnCallBack)
 		if err != nil {
 			log.Printf("⚠️ Failed to subscribe to PubSub topic %s: %v\n", topic, err)
 		}
@@ -133,8 +134,8 @@ func main() {
 	}
 
 	// 2) Stop IPFS Daemon & Transaction Processor
-	if services.GlobalTxnProcessor != nil {
-		services.GlobalTxnProcessor.Shutdown()
+	if processor.GlobalTxnProcessor != nil {
+		processor.GlobalTxnProcessor.Shutdown()
 	}
 	ipfsManager.Stop()
 	log.Println("✅ IPFS Daemon & TxnProcessor stopped gracefully")

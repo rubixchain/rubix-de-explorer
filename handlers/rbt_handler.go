@@ -2,13 +2,13 @@ package handlers
 
 import (
 	"encoding/json"
-	"explorer-server/services"
+	"explorer-server/api"
 	"net/http"
 	"strconv"
 )
 
 func GetRBTCountHandler(w http.ResponseWriter, r *http.Request) {
-	count, err := services.GetRBTCount()
+	count, err := api.GetRBTCount()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -25,7 +25,7 @@ func GetRBTCountHandler(w http.ResponseWriter, r *http.Request) {
 func GetRBTInfoFromRBTID(w http.ResponseWriter, r *http.Request) {
 	rbtId := r.URL.Query().Get("rbtid")
 	println("RBT ID:", rbtId)
-	rbtInfo, err := services.GetRBTInfoFromRBTID(rbtId)
+	rbtInfo, err := api.GetRBTInfoFromRBTID(rbtId)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -55,7 +55,7 @@ func GetRBTListHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch data using service
-	data, err := services.GetRBTList(limit, page)
+	data, err := api.GetRBTList(limit, page)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -71,7 +71,7 @@ func GetRBTListHandler(w http.ResponseWriter, r *http.Request) {
 // func GetRBTInfoFromRBTIDHandler(w http.ResponseWriter, r *http.Request)  {
 // 	rbtId:= r.URL.Query().Get("rbtId")
 // 	println("RBT ID:", rbtId)
-// 	count, err := services.GetRBTInfoFromRBTID()
+// 	count, err := api.GetRBTInfoFromRBTID()
 // 	if err != nil {
 // 		http.Error(w, err.Error(), http.StatusInternalServerError)
 // 		return

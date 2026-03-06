@@ -4,13 +4,13 @@ import (
 	"encoding/json"
 	"net/http"
     "strconv"
-	"explorer-server/services"
+	"explorer-server/api"
 	
 )
 
 
 func GetSCsCountHandler(w http.ResponseWriter, r *http.Request) {
-	count, err := services.GetSCCount()
+	count, err := api.GetSCCount()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -27,7 +27,7 @@ func GetSCsCountHandler(w http.ResponseWriter, r *http.Request) {
 func GetSmartContractInfoFromSCID(w http.ResponseWriter, r *http.Request) {
 	scid := r.URL.Query().Get("scid")
 	println("SCID:", scid)
-	scInfo, err := services.GetSCInfoFromSCID(scid)
+	scInfo, err := api.GetSCInfoFromSCID(scid)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -55,7 +55,7 @@ func GetSCListHandler(w http.ResponseWriter, r *http.Request) {
 		page = 1
 	}
 
-	data, err := services.GetSCList(limit, page)
+	data, err := api.GetSCList(limit, page)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -83,7 +83,7 @@ func GetSCBlockList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch data using service
-	data, err := services.GetSCBlockList(limit, page)
+	data, err := api.GetSCBlockList(limit, page)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
