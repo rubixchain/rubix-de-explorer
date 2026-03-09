@@ -62,7 +62,7 @@ func findIPFSExecutable() (string, error) {
 		exeDir := filepath.Dir(exePath)
 		localIPFS := filepath.Join(exeDir, "ipfs", "ipfs_bin", ipfsBinary)
 		if _, err := os.Stat(localIPFS); err == nil {
-			log.Printf("✅ Found bundled IPFS binary: %s", localIPFS)
+			log.Printf("Found bundled IPFS binary: %s", localIPFS)
 			return localIPFS, nil
 		}
 	}
@@ -72,7 +72,7 @@ func findIPFSExecutable() (string, error) {
 	if err == nil {
 		cwdIPFS := filepath.Join(cwd, "ipfs", "ipfs_bin", ipfsBinary)
 		if _, err := os.Stat(cwdIPFS); err == nil {
-			log.Printf("✅ Found bundled IPFS binary in dev directory: %s", cwdIPFS)
+			log.Printf("Found bundled IPFS binary in dev directory: %s", cwdIPFS)
 			return cwdIPFS, nil
 		}
 	}
@@ -80,7 +80,7 @@ func findIPFSExecutable() (string, error) {
 	// 3. Fallback to system PATH (if they installed it globally themselves)
 	pathIPFS, err := exec.LookPath("ipfs")
 	if err == nil {
-		log.Printf("⚠️ Bundled IPFS not found. Falling back to system IPFS binary: %s", pathIPFS)
+		log.Printf("Warning: Bundled IPFS not found. Falling back to system IPFS binary: %s", pathIPFS)
 		return pathIPFS, nil
 	}
 
@@ -103,7 +103,7 @@ func getIPFSRepoPath() (string, error) {
 func (m *IPFSManager) EnsureInitialized(testNet bool, customSwarmKeyPath string) error {
 	// 0. Force private network mode (same as Rubix node)
 	os.Setenv("LIBP2P_FORCE_PNET", "1")
-	log.Println("🔒 LIBP2P_FORCE_PNET=1 (private network mode enforced)")
+	log.Println("LIBP2P_FORCE_PNET=1 (private network mode enforced)")
 
 	// 1. Find ipfs executable
 	ipfsPath, err := findIPFSExecutable()
@@ -119,13 +119,13 @@ func (m *IPFSManager) EnsureInitialized(testNet bool, customSwarmKeyPath string)
 	}
 
 	if _, err := os.Stat(ipfsRepo); os.IsNotExist(err) {
-		log.Println("⚙️ IPFS repository not found. Initializing...")
+		log.Println("IPFS repository not found. Initializing...")
 		cmd := exec.Command(m.ipfsPath, "init")
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("failed to initialize IPFS: %w\nOutput: %s", err, string(output))
 		}
-		log.Println("✅ IPFS initialized successfully")
+		log.Println("IPFS initialized successfully")
 	}
 
 	// 3. Write the appropriate swarm key
@@ -138,20 +138,20 @@ func (m *IPFSManager) EnsureInitialized(testNet bool, customSwarmKeyPath string)
 		if err != nil {
 			return fmt.Errorf("failed to read custom swarm key from %s: %w", customSwarmKeyPath, err)
 		}
-		log.Printf("🔑 Using custom swarm key (%s)", customSwarmKeyPath)
+		log.Printf("Using custom swarm key (%s)", customSwarmKeyPath)
 	} else if testNet {
 		swarmKeyData = config.TestNetSwarmKey
-		log.Println("🔑 Using TestNet swarm key (testswarm.key)")
+		log.Println("Using TestNet swarm key (testswarm.key)")
 	} else {
 		swarmKeyData = config.MainNetSwarmKey
-		log.Println("🔑 Using MainNet swarm key (swarm.key)")
+		log.Println("Using MainNet swarm key (swarm.key)")
 	}
 	if err := os.WriteFile(swarmKeyDest, swarmKeyData, 0600); err != nil {
 		return fmt.Errorf("failed to write swarm key: %w", err)
 	}
 
 	// 4. Remove all default public bootstrap nodes
-	log.Println("🧹 Removing default IPFS bootstrap nodes...")
+	log.Println("Removing default IPFS bootstrap nodes...")
 	exec.Command(m.ipfsPath, "bootstrap", "rm", "--all").Run()
 
 	// 5. Add the Rubix bootstrap nodes (Skip if using a custom completely private network)
@@ -171,35 +171,35 @@ func (m *IPFSManager) EnsureInitialized(testNet bool, customSwarmKeyPath string)
 	}
 
 	if len(bootstrapNodes) > 0 {
-		log.Printf("📡 Configuring %s bootstrap nodes...", networkName)
+		log.Printf("Configuring %s bootstrap nodes...", networkName)
 	} else {
-		log.Printf("📡 Custom Network detected: Skipping default bootstrap nodes")
+		log.Printf("Custom Network detected: Skipping default bootstrap nodes")
 	}
 
 	for _, node := range bootstrapNodes {
 		cmd := exec.Command(m.ipfsPath, "bootstrap", "add", node)
 		if output, err := cmd.CombinedOutput(); err != nil {
-			log.Printf("⚠️ Failed to add bootstrap node %s: %v\n%s", node, err, string(output))
+			log.Printf("Warning: Failed to add bootstrap node %s: %v\n%s", node, err, string(output))
 		}
 	}
 	if len(bootstrapNodes) > 0 {
-		log.Printf("✅ Added %d %s bootstrap nodes", len(bootstrapNodes), networkName)
+		log.Printf("Added %d %s bootstrap nodes", len(bootstrapNodes), networkName)
 	}
 
 	// 6. Enable Experimental.Libp2pStreamMounting (required by Rubix)
 	cfgCmd := exec.Command(m.ipfsPath, "config", "--json", "Experimental.Libp2pStreamMounting", "true")
 	if output, err := cfgCmd.CombinedOutput(); err != nil {
-		log.Printf("⚠️ Failed to enable Libp2pStreamMounting: %v\n%s", err, string(output))
+		log.Printf("Warning: Failed to enable Libp2pStreamMounting: %v\n%s", err, string(output))
 	} else {
-		log.Println("✅ Experimental.Libp2pStreamMounting enabled")
+		log.Println("Experimental.Libp2pStreamMounting enabled")
 	}
 
 	// 7. Set IPFS API address to port 5001 (consistent with our PubSub client)
 	apiCmd := exec.Command(m.ipfsPath, "config", "Addresses.API", "/ip4/127.0.0.1/tcp/5001")
 	if output, err := apiCmd.CombinedOutput(); err != nil {
-		log.Printf("⚠️ Failed to set API address: %v\n%s", err, string(output))
+		log.Printf("Warning: Failed to set API address: %v\n%s", err, string(output))
 	} else {
-		log.Println("✅ IPFS API address set to /ip4/127.0.0.1/tcp/5001")
+		log.Println("IPFS API address set to /ip4/127.0.0.1/tcp/5001")
 	}
 
 	// 9. Allow API access from the local client module
@@ -222,7 +222,7 @@ func (m *IPFSManager) StartDaemon() error {
 		return err
 	}
 
-	log.Println("🚀 Starting local IPFS daemon with PubSub enabled...")
+	log.Println("Starting local IPFS daemon with PubSub enabled...")
 
 	if err := m.cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start ipfs daemon: %w", err)
@@ -246,15 +246,19 @@ func (m *IPFSManager) StartDaemon() error {
 	go func() {
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
-			log.Printf("[IPFS ERROR] %s", scanner.Text())
+			errText := scanner.Text()
+			if strings.Contains(errText, "Private networking (swarm.key / LIBP2P_FORCE_PNET) does not work with public HTTP IPNIs") {
+				continue
+			}
+			log.Printf("[IPFS ERROR] %s", errText)
 		}
 	}()
 
 	select {
 	case <-daemonReady:
-		log.Println("✅ IPFS daemon is ready")
+		log.Println("IPFS daemon is ready")
 	case <-time.After(30 * time.Second):
-		log.Println("⚠️ Timed out waiting for IPFS daemon ready signal, proceeding anyway...")
+		log.Println("Warning: Timed out waiting for IPFS daemon ready signal, proceeding anyway...")
 	}
 
 	return nil
@@ -263,7 +267,7 @@ func (m *IPFSManager) StartDaemon() error {
 // Stop sends the kill signal to the child process
 func (m *IPFSManager) Stop() {
 	if m.cancel != nil {
-		log.Println("🛑 Stopping local IPFS daemon...")
+		log.Println("Stopping local IPFS daemon...")
 		m.cancel()
 	}
 	if m.cmd != nil && m.cmd.Process != nil {
@@ -274,10 +278,10 @@ func (m *IPFSManager) Stop() {
 
 		select {
 		case <-time.After(5 * time.Second):
-			log.Println("⚠️ IPFS daemon did not stop gracefully, forcing kill...")
+			log.Println("Warning: IPFS daemon did not stop gracefully, forcing kill...")
 			m.cmd.Process.Kill()
 		case <-done:
-			log.Println("✅ IPFS daemon stopped")
+			log.Println("IPFS daemon stopped")
 		}
 	}
 }

@@ -19,7 +19,7 @@ func loggingMiddleware(next http.Handler) http.Handler {
 		}
 		start := time.Now()
 		next.ServeHTTP(w, r)
-		log.Printf("🌐 %s %s | %s", r.Method, r.URL.Path, time.Since(start).Round(time.Millisecond))
+		log.Printf("%s %s | %s", r.Method, r.URL.Path, time.Since(start).Round(time.Millisecond))
 	})
 }
 

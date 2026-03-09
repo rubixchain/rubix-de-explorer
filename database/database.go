@@ -39,7 +39,7 @@ func ConnectAndMigrate(drop bool) {
 		Logger: logger.Default.LogMode(logger.Warn),
 	})
 	if err != nil {
-		log.Fatalf("❌ Failed to connect WriteDB: %v", err)
+		log.Fatalf("Failed to connect WriteDB: %v", err)
 	}
 	if sqlDB, err := WriteDB.DB(); err == nil {
 		sqlDB.SetMaxOpenConns(20)
@@ -52,7 +52,7 @@ func ConnectAndMigrate(drop bool) {
 		Logger: logger.Default.LogMode(logger.Warn),
 	})
 	if err != nil {
-		log.Fatalf("❌ Failed to connect ReadDB: %v", err)
+		log.Fatalf("Failed to connect ReadDB: %v", err)
 	}
 	if sqlDB, err := ReadDB.DB(); err == nil {
 		sqlDB.SetMaxOpenConns(30)
@@ -63,12 +63,12 @@ func ConnectAndMigrate(drop bool) {
 	// Backward compat
 	DB = WriteDB
 
-	log.Println("✅ Connected to PostgreSQL (WriteDB=20, ReadDB=30)")
+	log.Println("Connected to PostgreSQL (WriteDB=20, ReadDB=30)")
 
 	if drop {
-		log.Println("⚠️ Dropping existing tables...")
+		log.Println("Warning: Dropping existing tables...")
 		dropTables()
-		log.Println("✅ Tables dropped successfully")
+		log.Println("Tables dropped successfully")
 	}
 
 	allModels := []interface{}{
@@ -87,10 +87,10 @@ func ConnectAndMigrate(drop bool) {
 
 	err = WriteDB.AutoMigrate(allModels...)
 	if err != nil {
-		log.Fatalf("❌ Failed to migrate tables: %v", err)
+		log.Fatalf("Failed to migrate tables: %v", err)
 	}
 
-	log.Println("✅ Tables auto-migrated successfully")
+	log.Println("Tables auto-migrated successfully")
 
 	// Ensure unique constraints (manual fix for SQLSTATE 42P10)
 	ensureUniqueConstraints(WriteDB, allModels)
@@ -101,14 +101,14 @@ func ensureUniqueConstraints(db *gorm.DB, models []interface{}) {
 	for _, model := range models {
 		stmt := &gorm.Statement{DB: db}
 		if err := stmt.Parse(model); err != nil {
-			log.Printf("⚠️ Warning: Could not parse model %T: %v", model, err)
+			log.Printf("Warning: Could not parse model %T: %v", model, err)
 			continue
 		}
 
 		tableName := stmt.Schema.Table
 		pkFields := stmt.Schema.PrimaryFieldDBNames
 		if len(pkFields) == 0 {
-			log.Printf("ℹ️ Skipping %s: No primary key defined in model", tableName)
+			log.Printf("Skipping %s: No primary key defined in model", tableName)
 			continue
 		}
 
@@ -127,17 +127,17 @@ func ensureUniqueConstraints(db *gorm.DB, models []interface{}) {
 			END $$;`, tableName, pk)
 
 		if err := db.Exec(query).Error; err != nil {
-			log.Printf("⚠️ Warning: Could not ensure primary key on %s: %v", tableName, err)
+			log.Printf("Warning: Could not ensure primary key on %s: %v", tableName, err)
 		}
 	}
-	log.Println("✅ All primary key constraints verified")
+	log.Println("All primary key constraints verified")
 }
 
 // dropTables drops only the TransferBlocks table
 func dropTables() {
 	if WriteDB.Migrator().HasTable(&models.TransactionBlocks{}) {
 		if err := WriteDB.Migrator().DropTable(&models.TransactionBlocks{}); err != nil {
-			log.Fatalf("❌ Failed to drop TransferBlocks table: %v", err)
+			log.Fatalf("Failed to drop TransferBlocks table: %v", err)
 		}
 	}
 }
@@ -162,5 +162,5 @@ func CloseDB() {
 			sqlDB.Close()
 		}
 	}
-	log.Println("✅ PostgreSQL connections closed")
+	log.Println("PostgreSQL connections closed")
 }

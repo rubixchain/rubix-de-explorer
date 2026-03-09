@@ -21,12 +21,12 @@ func TxnCallBack(peerID string, topic string, data []byte) {
 
 	err := json.Unmarshal(decodedData, &newEvent)
 	if err != nil {
-		log.Printf("⚠️ Failed to parse published event from PubSub: %v (raw data: %s)", err, string(decodedData))
+		log.Printf("Warning: Failed to parse published event from PubSub: %v (raw data: %s)", err, string(decodedData))
 		return
 	}
 
 	if newEvent.BlockHash == "" {
-		log.Printf("⚠️ Received PubSub message with empty BlockHash, skipping")
+		log.Printf("Warning: Received PubSub message with empty BlockHash, skipping")
 		return
 	}
 
@@ -35,6 +35,6 @@ func TxnCallBack(peerID string, topic string, data []byte) {
 	if GlobalTxnProcessor != nil {
 		GlobalTxnProcessor.EnqueueTransaction(&newEvent)
 	} else {
-		log.Printf("⚠️ GlobalTxnProcessor not initialized, dropping transaction %s", newEvent.BlockHash)
+		log.Printf("Warning: GlobalTxnProcessor not initialized, dropping transaction %s", newEvent.BlockHash)
 	}
 }

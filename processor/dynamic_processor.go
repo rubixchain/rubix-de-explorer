@@ -79,7 +79,7 @@ func InitDynamicTxnProcessor() {
 		resourceMonitor: &ResourceMonitor{},
 	}
 
-	log.Printf("⚙️ Initializing Dynamic Transaction Processor: Min=%d, Max=%d, Current=%d workers\n",
+	log.Printf("Initializing Dynamic Transaction Processor: Min=%d, Max=%d, Current=%d workers\n",
 		GlobalTxnProcessor.minWorkers, GlobalTxnProcessor.maxWorkers, GlobalTxnProcessor.currentWorkers)
 
 	// Start initial workers
@@ -101,17 +101,17 @@ func (p *DynamicTxnProcessor) EnqueueTransaction(txnEvent *model.PubSubTxnInfo) 
 		// Successfully queued
 
 	case <-time.After(5 * time.Second):
-		log.Printf("⚠️ Failed to queue transaction %s - queue full (length=%d)\n",
+		log.Printf("Warning: Failed to queue transaction %s - queue full (length=%d)\n",
 			txnEvent.BlockHash, len(p.txnQueue))
 
 		if currentQueueLen > int64(p.queueThreshold) {
-			log.Printf("⚠️ Queue threshold exceeded - dynamic scaling active (current=%d, threshold=%d)\n",
+			log.Printf("Warning: Queue threshold exceeded - dynamic scaling active (current=%d, threshold=%d)\n",
 				currentQueueLen, p.queueThreshold)
 		}
 		return
 
 	case <-p.ctx.Done():
-		log.Println("ℹ️ Transaction processor is shutting down, dropping transaction")
+		log.Println("Transaction processor is shutting down, dropping transaction")
 		return
 	}
 }
@@ -210,7 +210,6 @@ func (p *DynamicTxnProcessor) scaleUp() {
 
 	p.currentWorkers += newWorkers
 	p.lastScaleAction = time.Now()
-	log.Printf("📈 Scaled UP transaction workers to %d\n", p.currentWorkers)
 }
 
 // Scale down worker count
@@ -239,10 +238,6 @@ func (p *DynamicTxnProcessor) scaleDown() {
 
 	p.currentWorkers -= len(workersToStop)
 	p.lastScaleAction = time.Now()
-
-	if len(workersToStop) > 0 {
-		log.Printf("📉 Scaled DOWN transaction workers to %d\n", p.currentWorkers)
-	}
 }
 
 // Start a new worker
@@ -298,7 +293,7 @@ func (p *DynamicTxnProcessor) updateProcessingMetrics(processingTime time.Durati
 
 // Shutdown gracefully stops all workers
 func (p *DynamicTxnProcessor) Shutdown() {
-	log.Println("🛑 Shutting down dynamic transaction processor...")
+	log.Println("Shutting down dynamic transaction processor...")
 	p.cancel()
 	close(p.txnQueue)
 
@@ -310,16 +305,16 @@ func (p *DynamicTxnProcessor) Shutdown() {
 
 	select {
 	case <-done:
-		log.Println("✅ All transaction workers shut down gracefully")
+		log.Println("All transaction workers shut down gracefully")
 	case <-time.After(30 * time.Second):
-		log.Println("⚠️ Transaction workers shutdown timeout - forcing termination")
+		log.Println("Warning: Transaction workers shutdown timeout - forcing termination")
 	}
 }
 
 // ProcessSingleTransaction handles the actual logic of logging/inserting to DB
 func ProcessSingleTransaction(newEvent *model.PubSubTxnInfo, workerID int) {
 	// For now, mimic the existing TxnCallBack logging
-	log.Printf("[Worker %d] 📥 Processed transaction from PubSub:", workerID)
+	log.Printf("[Worker %d] Processed transaction from PubSub:", workerID)
 	log.Printf("   BlockHash:    %s", newEvent.BlockHash)
 	log.Printf("   BlockType:    %s", newEvent.BlockType)
 	log.Printf("   AssetType:    %d", newEvent.AssetType)

@@ -31,11 +31,11 @@ func main() {
 
 	// Log which network we're connecting to
 	if *swarmKeyPath != "" {
-		log.Printf("🌐 Network: Custom (swarm key: %s)", *swarmKeyPath)
+		log.Printf("Network: Custom (swarm key: %s)", *swarmKeyPath)
 	} else if *testNet {
-		log.Println("🌐 Network: TestNet")
+		log.Println("Network: TestNet")
 	} else {
-		log.Println("🌐 Network: MainNet")
+		log.Println("Network: MainNet")
 	}
 
 	// Detect CPU cores
@@ -44,12 +44,12 @@ func main() {
 
 	// Load .env if present
 	if err := godotenv.Load(); err == nil {
-		log.Println("✅ Environment configuration loaded")
+		log.Println("Environment configuration loaded")
 	}
 
 	// Initialize PostgreSQL
 	database.ConnectAndMigrate(false)
-	log.Printf("✅ Explorer Server initialized with %d cores\n", totalCores)
+	log.Printf("Explorer Server initialized with %d cores\n", totalCores)
 
 	// --------------------------------------------------
 	// Initialize IPFS PubSub Listener & Daemon
@@ -61,11 +61,11 @@ func main() {
 	ipfsManager := ipfs.NewIPFSManager()
 
 	if err := ipfsManager.EnsureInitialized(*testNet, *swarmKeyPath); err != nil {
-		log.Fatalf("❌ Failed to initialize IPFS node: %v\n", err)
+		log.Fatalf("Failed to initialize IPFS node: %v\n", err)
 	}
 
 	if err := ipfsManager.StartDaemon(); err != nil {
-		log.Fatalf("❌ Failed to start IPFS daemon: %v\n", err)
+		log.Fatalf("Failed to start IPFS daemon: %v\n", err)
 	}
 
 	ipfsHost := os.Getenv("IPFS_HOST")
@@ -75,12 +75,12 @@ func main() {
 
 	psClient, err := pubsub.NewPubSub(ipfsHost)
 	if err != nil {
-		log.Printf("⚠️ Failed to initialize PubSub client: %v\n", err)
+		log.Printf("Warning: Failed to initialize PubSub client: %v\n", err)
 	} else {
 		topic := "rubix_txns" // Same topic as regular nodes publish to
 		err = psClient.SubscribeTopic(topic, processor.TxnCallBack)
 		if err != nil {
-			log.Printf("⚠️ Failed to subscribe to PubSub topic %s: %v\n", topic, err)
+			log.Printf("Warning: Failed to subscribe to PubSub topic %s: %v\n", topic, err)
 		}
 	}
 
@@ -107,7 +107,7 @@ func main() {
 
 	// Start HTTP server
 	go func() {
-		log.Printf("🚀 Explorer Server listening on port :%s\n", port)
+		log.Printf("Explorer Server listening on port :%s\n", port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Server failed: %v", err)
 		}
@@ -130,7 +130,7 @@ func main() {
 	if err := srv.Shutdown(httpCtx); err != nil {
 		log.Printf("Server forced to shutdown: %v", err)
 	} else {
-		log.Println("✅ HTTP server stopped gracefully")
+		log.Println("HTTP server stopped gracefully")
 	}
 
 	// 2) Stop IPFS Daemon & Transaction Processor
@@ -138,11 +138,11 @@ func main() {
 		processor.GlobalTxnProcessor.Shutdown()
 	}
 	ipfsManager.Stop()
-	log.Println("✅ IPFS Daemon & TxnProcessor stopped gracefully")
+	log.Println("IPFS Daemon & TxnProcessor stopped gracefully")
 
 	// 3) Close database connection
 	database.CloseDB()
-	log.Println("✅ Database connection closed")
+	log.Println("Database connection closed")
 
 	log.Printf("Server shutdown complete in %s\n", time.Since(shutdownStart).Round(time.Millisecond))
 	log.Printf("Total uptime: %s\n", time.Since(startTime).Round(time.Second))
