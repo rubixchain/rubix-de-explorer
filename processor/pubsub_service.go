@@ -1,6 +1,7 @@
 package processor
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"explorer-server/model"
 	"log"
@@ -11,9 +12,16 @@ import (
 func TxnCallBack(peerID string, topic string, data []byte) {
 	var newEvent model.PubSubTxnInfo
 
-	err := json.Unmarshal(data, &newEvent)
+	// The IPFS pubsub HTTP API streams m.Data as Base64 encoded payload
+	decodedData, b64Err := base64.StdEncoding.DecodeString(string(data))
+	if b64Err != nil {
+		// If it's not base64, assume it's raw JSON and try it anyway
+		decodedData = data
+	}
+
+	err := json.Unmarshal(decodedData, &newEvent)
 	if err != nil {
-		log.Printf("⚠️ Failed to parse published event from PubSub: %v", err)
+		log.Printf("⚠️ Failed to parse published event from PubSub: %v (raw data: %s)", err, string(decodedData))
 		return
 	}
 

@@ -3,6 +3,7 @@ package pubsub
 import (
 	"fmt"
 	"log"
+	"time"
 
 	ipfsnode "github.com/ipfs/go-ipfs-api"
 )
@@ -40,13 +41,15 @@ func (ps *PubSub) SubscribeTopic(topic string, cb PubSubCallback) error {
 }
 
 func (ps *PubSub) receivePub(topic string, p *ipfsnode.PubSubSubscription) {
+	log.Printf("🎧 PubSub listener loop active for topic %s...", topic)
 	for {
 		m, err := p.Next()
 		if err != nil {
-			// Similar to fullnode, we can ignore or break on specific errors, but for now log and continue
-			// log.Printf("failed to read message: %v", err)
+			log.Printf("⚠️ failed to read message: %v", err)
+			time.Sleep(1 * time.Second) // Prevent tight loop crash
 			continue
 		}
+		log.Printf("📬 Received PubSub message from peer: %s", m.From.String())
 		if cb, exists := ps.sub[topic]; exists {
 			go cb(m.From.String(), topic, m.Data)
 		}

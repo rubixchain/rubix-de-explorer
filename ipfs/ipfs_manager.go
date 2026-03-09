@@ -154,14 +154,27 @@ func (m *IPFSManager) EnsureInitialized(testNet bool, customSwarmKeyPath string)
 	log.Println("🧹 Removing default IPFS bootstrap nodes...")
 	exec.Command(m.ipfsPath, "bootstrap", "rm", "--all").Run()
 
-	// 5. Add the Rubix bootstrap nodes
-	bootstrapNodes := MainNetBootstrap
-	networkName := "MainNet"
-	if testNet {
+	// 5. Add the Rubix bootstrap nodes (Skip if using a custom completely private network)
+	var bootstrapNodes []string
+	var networkName string
+
+	if customSwarmKeyPath != "" {
+		networkName = "Custom"
+		// In a custom network, users must add their own bootstrap nodes manually or via config
+		// We leave the bootstrap list completely empty so the daemon starts up cleanly.
+	} else if testNet {
 		bootstrapNodes = TestNetBootstrap
 		networkName = "TestNet"
+	} else {
+		bootstrapNodes = MainNetBootstrap
+		networkName = "MainNet"
 	}
-	log.Printf("📡 Configuring %s bootstrap nodes...", networkName)
+
+	if len(bootstrapNodes) > 0 {
+		log.Printf("📡 Configuring %s bootstrap nodes...", networkName)
+	} else {
+		log.Printf("📡 Custom Network detected: Skipping default bootstrap nodes")
+	}
 
 	for _, node := range bootstrapNodes {
 		cmd := exec.Command(m.ipfsPath, "bootstrap", "add", node)
@@ -169,7 +182,9 @@ func (m *IPFSManager) EnsureInitialized(testNet bool, customSwarmKeyPath string)
 			log.Printf("⚠️ Failed to add bootstrap node %s: %v\n%s", node, err, string(output))
 		}
 	}
-	log.Printf("✅ Added %d %s bootstrap nodes", len(bootstrapNodes), networkName)
+	if len(bootstrapNodes) > 0 {
+		log.Printf("✅ Added %d %s bootstrap nodes", len(bootstrapNodes), networkName)
+	}
 
 	// 6. Enable Experimental.Libp2pStreamMounting (required by Rubix)
 	cfgCmd := exec.Command(m.ipfsPath, "config", "--json", "Experimental.Libp2pStreamMounting", "true")
@@ -187,22 +202,9 @@ func (m *IPFSManager) EnsureInitialized(testNet bool, customSwarmKeyPath string)
 		log.Println("✅ IPFS API address set to /ip4/127.0.0.1/tcp/5001")
 	}
 
-	// 8. Set Routing.Type to dht (required for private networks, 'auto' causes errors)
-	routeCmd := exec.Command(m.ipfsPath, "config", "Routing.Type", "dht")
-	if output, err := routeCmd.CombinedOutput(); err != nil {
-		log.Printf("⚠️ Failed to set Routing.Type: %v\n%s", err, string(output))
-	} else {
-		log.Println("✅ Routing.Type set to dht")
-	}
-
-	// 9. Disable mDNS discovery to prevent "Failed to set multicast interface" log spam on Windows
-	// private networks rely on the explicit bootstrap nodes anyway.
-	mdnsCmd := exec.Command(m.ipfsPath, "config", "--json", "Discovery.MDNS.Enabled", "false")
-	if output, err := mdnsCmd.CombinedOutput(); err != nil {
-		log.Printf("⚠️ Failed to disable mDNS: %v\n%s", err, string(output))
-	} else {
-		log.Println("✅ mDNS Discovery disabled (reduces log spam)")
-	}
+	// 9. Allow API access from the local client module
+	exec.Command(m.ipfsPath, "config", "--json", "API.HTTPHeaders.Access-Control-Allow-Origin", `["*"]`).Run()
+	exec.Command(m.ipfsPath, "config", "--json", "API.HTTPHeaders.Access-Control-Allow-Methods", `["PUT", "POST", "GET"]`).Run()
 
 	return nil
 }
