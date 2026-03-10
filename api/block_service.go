@@ -8,7 +8,6 @@ import (
 	"explorer-server/model"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"time"
 )
@@ -19,7 +18,7 @@ func GetTxnsCount() (int64, error) {
 		return cached.(int64), nil
 	}
 	var count int64
-	if err := database.ReadDB.Model(&models.TransactionBlocks{}).Count(&count).Error; err != nil {
+	if err := database.ReadDB.Model(&models.TransactionInfo{}).Count(&count).Error; err != nil {
 		return 0, err
 	}
 	responseCache.Set("txns_count", count, 5*time.Second)
@@ -27,7 +26,7 @@ func GetTxnsCount() (int64, error) {
 }
 
 func GetTransferBlocksList(limit, page int) (model.TransactionsResponse, error) {
-	var blocks []models.TransactionBlocks
+	var blocks []models.TransactionInfo
 	var response model.TransactionsResponse
 
 	if page < 1 {
@@ -51,105 +50,105 @@ func GetTransferBlocksList(limit, page int) (model.TransactionsResponse, error) 
 	// Count total records
 	var count int64
 	if err := database.ReadDB.
-		Model(&models.TransactionBlocks{}).
+		Model(&models.TransactionInfo{}).
 		Where("epoch IS NOT NULL AND epoch <> 0").
 		Count(&count).Error; err != nil {
 		return response, err
 	}
 
-	for _, b := range blocks {
-		if (b.Amount == nil || *b.Amount == 0) && b.TxnID != nil && *b.TxnID != "" {
-			if newAmt := fetchTxnAmountFromFullNode(*b.TxnID); newAmt != nil {
-				b.Amount = newAmt
-				_ = database.WriteDB.Model(&b).Update("amount", *newAmt).Error
-			}
-		}
+	// for _, b := range blocks {
+	// 	if (b.Amount == nil || *b.Amount == 0) && b.TxnID != nil && *b.TxnID != "" {
+	// 		if newAmt := fetchTxnAmountFromFullNode(*b.TxnID); newAmt != nil {
+	// 			b.Amount = newAmt
+	// 			_ = database.WriteDB.Model(&b).Update("amount", *newAmt).Error
+	// 		}
+	// 	}
 
-		response.TransactionsResponse = append(response.TransactionsResponse, model.TransactionResponse{
-			TxnHash:     deref(b.TxnID),
-			AssetType:   b.AssetType,
-			Amount:      derefFloat(b.Amount),
-			SenderDID:   deref(b.SenderDID),
-			ReceiverDID: deref(b.ReceiverDID),
-			Epoch:       b.Epoch,
-		})
-	}
+	// 	response.TransactionsResponse = append(response.TransactionsResponse, model.TransactionResponse{
+	// 		TxnHash:     deref(b.TxnID),
+	// 		AssetType:   b.AssetType,
+	// 		Amount:      derefFloat(b.Amount),
+	// 		SenderDID:   deref(b.SenderDID),
+	// 		ReceiverDID: deref(b.ReceiverDID),
+	// 		Epoch:       b.Epoch,
+	// 	})
+	// }
 
 	response.Count = count
 	return response, nil
 }
 
-func GetTransferBlockInfoFromTxnID(hash string) (models.TransactionBlocks, error) {
-	var block models.TransactionBlocks
+func GetTransferBlockInfoFromTxnID(hash string) (models.TransactionInfo, error) {
+	var block models.TransactionInfo
 
 	if err := database.ReadDB.Where("txn_id = ?", hash).First(&block).Error; err != nil {
 		return block, err
 	}
 
 	// Fetch missing amount if needed
-	if (block.Amount == nil || *block.Amount == 0) && block.TxnID != nil && *block.TxnID != "" {
-		if newAmt := fetchTxnAmountFromFullNode(*block.TxnID); newAmt != nil {
-			block.Amount = newAmt
-			if err := database.WriteDB.Model(&block).Update("amount", *newAmt).Error; err != nil {
-				fmt.Printf("⚠️ Failed to update amount in DB for txnID %s: %v\n", *block.TxnID, err)
-			} else {
-				fmt.Printf("✅ Updated amount %.6f for txnID %s\n", *newAmt, *block.TxnID)
-			}
-		}
-	}
+	// if (block.Amount == nil || *block.Amount == 0) && block.TxnID != nil && *block.TxnID != "" {
+	// 	if newAmt := fetchTxnAmountFromFullNode(*block.TxnID); newAmt != nil {
+	// 		block.Amount = newAmt
+	// 		if err := database.WriteDB.Model(&block).Update("amount", *newAmt).Error; err != nil {
+	// 			fmt.Printf("⚠️ Failed to update amount in DB for txnID %s: %v\n", *block.TxnID, err)
+	// 		} else {
+	// 			fmt.Printf("✅ Updated amount %.6f for txnID %s\n", *newAmt, *block.TxnID)
+	// 		}
+	// 	}
+	// }
 
 	return block, nil
 }
 
-func GetTransferBlockInfoFromBlockHash(hash string) (models.TransactionBlocks, error) {
-	var block models.TransactionBlocks
+func GetTransferBlockInfoFromBlockHash(hash string) (models.TransactionInfo, error) {
+	var block models.TransactionInfo
 
 	if err := database.ReadDB.Where("block_hash = ?", hash).First(&block).Error; err != nil {
 		return block, err
 	}
 
 	// If amount is missing, fetch it from fullnode
-	if (block.Amount == nil || *block.Amount == 0) && block.TxnID != nil && *block.TxnID != "" {
-		apiURL := fmt.Sprintf("%s/api/de-exp/get-txn-amount-by-txnID?txnID=%s",
-			config.RubixNodeURL, *block.TxnID,
-		)
+	// if (block.Amount == nil || *block.Amount == 0) && block.TxnID != nil && *block.TxnID != "" {
+	// 	apiURL := fmt.Sprintf("%s/api/de-exp/get-txn-amount-by-txnID?txnID=%s",
+	// 		config.RubixNodeURL, *block.TxnID,
+	// 	)
 
-		client := GetNodeHTTPClient()
-		release := acquireNodeSlot()
-		defer release()
+	// 	client := GetNodeHTTPClient()
+	// 	release := acquireNodeSlot()
+	// 	defer release()
 
-		resp, err := client.Get(apiURL)
-		if err != nil {
-			log.Printf("⚠️ Failed to call fullnode for txn %s: %v", *block.TxnID, err)
-		} else {
-			defer resp.Body.Close()
+	// 	resp, err := client.Get(apiURL)
+	// 	if err != nil {
+	// 		log.Printf("⚠️ Failed to call fullnode for txn %s: %v", *block.TxnID, err)
+	// 	} else {
+	// 		defer resp.Body.Close()
 
-			if resp.StatusCode != http.StatusOK {
-				log.Printf("⚠️ Fullnode returned %d for txn %s", resp.StatusCode, *block.TxnID)
-			} else {
-				var result struct {
-					Status  bool   `json:"status"`
-					Message string `json:"message"`
-					Result  struct {
-						TransactionID    string  `json:"TransactionID"`
-						TransactionValue float64 `json:"TransactionValue"`
-						BlockHash        string  `json:"BlockHash"`
-					} `json:"result"`
-				}
+	// 		if resp.StatusCode != http.StatusOK {
+	// 			log.Printf("⚠️ Fullnode returned %d for txn %s", resp.StatusCode, *block.TxnID)
+	// 		} else {
+	// 			var result struct {
+	// 				Status  bool   `json:"status"`
+	// 				Message string `json:"message"`
+	// 				Result  struct {
+	// 					TransactionID    string  `json:"TransactionID"`
+	// 					TransactionValue float64 `json:"TransactionValue"`
+	// 					BlockHash        string  `json:"BlockHash"`
+	// 				} `json:"result"`
+	// 			}
 
-				if err := json.NewDecoder(resp.Body).Decode(&result); err == nil && result.Status {
-					if result.Result.TransactionValue != 0 {
-						block.Amount = &result.Result.TransactionValue
+	// 			if err := json.NewDecoder(resp.Body).Decode(&result); err == nil && result.Status {
+	// 				if result.Result.TransactionValue != 0 {
+	// 					block.Amount = &result.Result.TransactionValue
 
-						_ = database.WriteDB.
-							Model(&models.TransactionBlocks{}).
-							Where("txn_id = ?", block.TxnID).
-							Update("amount", block.Amount).Error
-					}
-				}
-			}
-		}
-	}
+	// 					_ = database.WriteDB.
+	// 						Model(&models.TransactionBlocks{}).
+	// 						Where("txn_id = ?", block.TxnID).
+	// 						Update("amount", block.Amount).Error
+	// 				}
+	// 			}
+	// 		}
+	// 	}
+	// }
 
 	return block, nil
 }
@@ -235,31 +234,31 @@ func GetBlockType(txnId string) (int64, error) {
 }
 
 func GetSCBlockInfoFromTxnId(hash string) (interface{}, error) {
-	var block models.SCBlocks
+	// var block models.SCBlocks
 
-	if err := database.ReadDB.
-		Where("block_id = ?", hash).
-		First(&block).Error; err != nil {
-		return models.SCBlocks{}, err
-	}
+	// if err := database.ReadDB.
+	// 	Where("block_id = ?", hash).
+	// 	First(&block).Error; err != nil {
+	// 	return models.SCBlocks{}, err
+	// }
 
-	return block, nil
+	return nil, nil
 }
 
 func GetBurntBlockInfo(hash string) (interface{}, error) {
-	var block models.BurntBlocks
+	// var block models.BurntBlocks
 
-	if err := database.ReadDB.
-		Where("block_hash = ?", hash).
-		First(&block).Error; err != nil {
-		return models.BurntBlocks{}, err
-	}
+	// if err := database.ReadDB.
+	// 	Where("block_hash = ?", hash).
+	// 	First(&block).Error; err != nil {
+	// 	return models.BurntBlocks{}, err
+	// }
 
-	return block, nil
+	return nil, nil
 }
 
 func GetBurntBlockList(limit, page int) (interface{}, error) {
-	var blocks []models.BurntBlocks
+	// var blocks []models.BurntBlocks
 
 	if page < 1 {
 		page = 1
@@ -267,27 +266,26 @@ func GetBurntBlockList(limit, page int) (interface{}, error) {
 	if limit < 1 {
 		limit = 10
 	}
-	offset := (page - 1) * limit
+	// offset := (page - 1) * limit
 
-	if err := database.ReadDB.
-		Order("epoch DESC").
-		Limit(limit).
-		Offset(offset).
-		Find(&blocks).Error; err != nil {
-		return nil, err
-	}
+	// if err := database.ReadDB.
+	// 	Order("epoch DESC").
+	// 	Limit(limit).
+	// 	Offset(offset).
+	// 	Find(&blocks).Error; err != nil {
+	// 	return nil, err
 
-	var count int64
-	if err := database.ReadDB.Model(&models.BurntBlocks{}).Count(&count).Error; err != nil {
-		return model.BurntBlocksListResponse{}, err
-	}
+	// var count int64
+	// if err := database.ReadDB.Model(&models.BurntBlocks{}).Count(&count).Error; err != nil {
+	// 	return model.BurntBlocksListResponse{}, err
+	// }
 
-	response := model.BurntBlocksListResponse{
-		BurntBlocks: blocks,
-		Count:       count,
-	}
+	// response := model.BurntBlocksListResponse{
+	// 	BurntBlocks: blocks,
+	// 	Count:       count,
+	// }
 
-	return response, nil
+	return nil, nil
 }
 
 // helper functions

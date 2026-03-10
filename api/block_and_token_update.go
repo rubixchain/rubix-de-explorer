@@ -14,7 +14,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/lib/pq"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -186,20 +185,21 @@ func StoreTransferBlock(tx *gorm.DB, blockMap map[string]interface{}, info *mode
 	if count := len(tokensKey); count > 0 {
 		tokenCount = &count
 	}
+	fmt.Println(tokenCount, validatorsJSON, assetTypeStr, amount, tokensJSON)
 
-	tb := models.TransactionBlocks{
-		BlockHash:   fmt.Sprintf("%v", blockMap["TCBlockHashKey"]),
-		SenderDID:   stringPtr(getNested(transInfo, "TISenderDIDKey")),
-		ReceiverDID: receiverDID,
-		AssetType:   assetTypeStr,
-		TxnID:       stringPtr(getNested(transInfo, "TITIDKey")),
-		Amount:      amount,
-		TokenCount:  tokenCount,
-		Epoch:       int64Ptr(blockMap["TCEpoch"]),
-		Tokens:      datatypes.JSON(tokensJSON),
-		Validators:  validatorsJSON,
-	}
-	tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&tb)
+	// tb := models.TransactionBlocks{
+	// 	BlockHash:   fmt.Sprintf("%v", blockMap["TCBlockHashKey"]),
+	// 	SenderDID:   stringPtr(getNested(transInfo, "TISenderDIDKey")),
+	// 	ReceiverDID: receiverDID,
+	// 	AssetType:   assetTypeStr,
+	// 	TxnID:       stringPtr(getNested(transInfo, "TITIDKey")),
+	// 	Amount:      amount,
+	// 	TokenCount:  tokenCount,
+	// 	Epoch:       int64Ptr(blockMap["TCEpoch"]),
+	// 	Tokens:      datatypes.JSON(tokensJSON),
+	// 	Validators:  validatorsJSON,
+	// }
+	// tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&tb)
 }
 
 func StoreBurntBlock(tx *gorm.DB, blockMap map[string]interface{}) {
@@ -224,14 +224,14 @@ func StoreBurntBlock(tx *gorm.DB, blockMap map[string]interface{}) {
 			}
 		}
 	}
-
-	bb := models.BurntBlocks{
-		BlockHash: fmt.Sprintf("%v", blockMap["TCBlockHashKey"]),
-		OwnerDID:  fmt.Sprintf("%v", blockMap["TCTokenOwnerKey"]),
-		Epoch:     epoch,
-		Tokens:    childTokensJSON,
-	}
-	tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&bb)
+	fmt.Println(epoch, childTokensJSON)
+	// bb := models.BurntBlocks{
+	// 	BlockHash: fmt.Sprintf("%v", blockMap["TCBlockHashKey"]),
+	// 	OwnerDID:  fmt.Sprintf("%v", blockMap["TCTokenOwnerKey"]),
+	// 	Epoch:     epoch,
+	// 	Tokens:    childTokensJSON,
+	// }
+	// tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&bb)
 }
 
 func StoreSCDeployBlock(tx *gorm.DB, blockMap map[string]interface{}) {
@@ -253,14 +253,15 @@ func StoreSCDeployBlock(tx *gorm.DB, blockMap map[string]interface{}) {
 	if e, ok := blockMap["TCEpoch"].(float64); ok {
 		epoch = time.Unix(int64(e), 0)
 	}
-	scBlock := models.SCBlocks{
-		BlockHash:   blockID,
-		TokenID:     contractID,
-		BlockHeight: blockHeight,
-		Epoch:       epoch,
-		DeployerDID: fmt.Sprintf("%v", getNested(transInfo, "TIDeployerDIDKey")),
-	}
-	tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&scBlock)
+	fmt.Println(blockID, contractID, blockHeight, epoch, getNested(transInfo, "TIDeployerDIDKey"))
+	// scBlock := models.SCBlocks{
+	// 	BlockHash:   blockID,
+	// 	TokenID:     contractID,
+	// 	BlockHeight: blockHeight,
+	// 	Epoch:       epoch,
+	// 	DeployerDID: fmt.Sprintf("%v", getNested(transInfo, "TIDeployerDIDKey")),
+	// }
+	// tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&scBlock)
 }
 
 func StoreSCExecuteBlock(tx *gorm.DB, blockMap map[string]interface{}) {
@@ -282,15 +283,16 @@ func StoreSCExecuteBlock(tx *gorm.DB, blockMap map[string]interface{}) {
 	if e, ok := blockMap["TCEpoch"].(float64); ok {
 		epoch = time.Unix(int64(e), 0)
 	}
-	scBlock := models.SCBlocks{
-		BlockHash:   blockID,
-		TokenID:     contractID,
-		ExecutorDID: stringPtr(getNested(transInfo, "TIExecutorDIDKey")),
-		BlockHeight: blockHeight,
-		Epoch:       epoch,
-		DeployerDID: fmt.Sprintf("%v", getNested(transInfo, "TIDeployerDIDKey")),
-	}
-	tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&scBlock)
+	fmt.Println(blockID, contractID, blockHeight, epoch, getNested(transInfo, "TIExecutorDIDKey"))
+	// scBlock := models.SCBlocks{
+	// 	BlockHash:   blockID,
+	// 	TokenID:     contractID,
+	// 	ExecutorDID: stringPtr(getNested(transInfo, "TIExecutorDIDKey")),
+	// 	BlockHeight: blockHeight,
+	// 	Epoch:       epoch,
+	// 	DeployerDID: fmt.Sprintf("%v", getNested(transInfo, "TIDeployerDIDKey")),
+	// }
+	// tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&scBlock)
 }
 
 func StoreMintBlock(tx *gorm.DB, blockMap map[string]interface{}, info *model.IncomingBlockInfo) {
@@ -313,16 +315,18 @@ func StoreMintBlock(tx *gorm.DB, blockMap map[string]interface{}, info *model.In
 		ftName = &info.FTName
 	}
 
-	mb := models.MintBlocks{
-		BlockHash:  fmt.Sprintf("%v", blockMap["TCBlockHashKey"]),
-		TokenIDs:   pq.StringArray(tokenIDs),
-		TokenType:  constants.AssetTypeToString(info.AssetType),
-		TokenValue: float64Ptr(blockMap["TCTokenValueKey"]),
-		CreatorDID: creatorDID,
-		FTName:     ftName,
-		Epoch:      int64Ptr(blockMap["TCEpoch"]),
-	}
-	tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&mb)
+	fmt.Println(blockMap["TCBlockHashKey"], tokenIDs, constants.AssetTypeToString(info.AssetType), blockMap["TCTokenValueKey"], creatorDID, ftName, blockMap["TCEpoch"])
+
+	// mb := models.MintBlocks{
+	// 	BlockHash:  fmt.Sprintf("%v", blockMap["TCBlockHashKey"]),
+	// 	TokenIDs:   pq.StringArray(tokenIDs),
+	// 	TokenType:  constants.AssetTypeToString(info.AssetType),
+	// 	TokenValue: float64Ptr(blockMap["TCTokenValueKey"]),
+	// 	CreatorDID: creatorDID,
+	// 	FTName:     ftName,
+	// 	Epoch:      int64Ptr(blockMap["TCEpoch"]),
+	// }
+	// tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&mb)
 }
 
 func StoreBlockInAllBlocks(tx *gorm.DB, blockMap map[string]interface{}) {
@@ -336,13 +340,14 @@ func StoreBlockInAllBlocks(tx *gorm.DB, blockMap map[string]interface{}) {
 	// INTEGRATION: Call your helper function to get "Transferred", "Minted", etc.
 	blockType := constants.TxTypeToString(rawType)
 
-	record := models.AllBlocks{
-		BlockHash: blockHash,
-		BlockType: blockType,
-		TxnID:     txnID,
-	}
+	fmt.Println(blockHash, blockType, txnID)
+	// record := models.AllBlocks{
+	// 	BlockHash: blockHash,
+	// 	BlockType: blockType,
+	// 	TxnID:     txnID,
+	// }
 
-	tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&record)
+	// tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&record)
 }
 
 // ==========================================
@@ -390,13 +395,14 @@ func ProcessLiveTokenUpdates(tx *gorm.DB, info *model.IncomingBlockInfo) error {
 // ==========================================
 
 func updateTokenRegistry(tx *gorm.DB, tokenID string, assetType int) error {
-	return tx.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "token_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"token_type"}),
-	}).Create(&models.AllTokens{
-		TokenID:   tokenID,
-		TokenType: constants.AssetTypeToString(assetType),
-	}).Error
+	// return tx.Clauses(clause.OnConflict{
+	// 	Columns:   []clause.Column{{Name: "token_id"}},
+	// 	DoUpdates: clause.AssignmentColumns([]string{"token_type"}),
+	// }).Create(&models.AllTokens{
+	// 	TokenID:   tokenID,
+	// 	TokenType: constants.AssetTypeToString(assetType),
+	// }).Error
+	return nil
 }
 
 func handleRBTUpdate(tx *gorm.DB, info *model.IncomingBlockInfo, token model.TokenDetails, status int) error {

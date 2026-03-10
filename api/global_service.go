@@ -2,11 +2,8 @@ package api
 
 import (
 	"encoding/json"
-	"errors"
 
 	"explorer-server/config"
-	"explorer-server/database"
-	"explorer-server/database/models"
 	"fmt"
 	"io"
 	"net/http"
@@ -34,15 +31,15 @@ var transactionTypeNames = map[string]string{
 // GetAssetType (from TokenType table)
 // -------------------------------------------------------------------
 func GetAssetType(id string) (string, error) {
-	var entry models.AllTokens
+	// var entry models.AllTokens
 
-	if err := database.ReadDB.Where("token_id = ?", id).First(&entry).Error; err != nil {
-		return "", fmt.Errorf("failed to fetch asset type: %w", err)
-	}
-	if entry.TokenType == "" {
-		return "", errors.New("asset type not found")
-	}
-	return entry.TokenType, nil
+	// if err := database.ReadDB.Where("token_id = ?", id).First(&entry).Error; err != nil {
+	// 	return "", fmt.Errorf("failed to fetch asset type: %w", err)
+	// }
+	// if entry.TokenType == "" {
+	// 	return "", errors.New("asset type not found")
+	// }
+	return "", nil
 }
 
 // -------------------------------------------------------------------

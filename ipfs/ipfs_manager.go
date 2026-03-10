@@ -128,7 +128,19 @@ func (m *IPFSManager) EnsureInitialized(testNet bool, customSwarmKeyPath string)
 		log.Println("IPFS initialized successfully")
 	}
 
-	// 3. Write the appropriate swarm key
+	// 3. Disable mDNS discovery immediately (restores fix while keeping local conn possible)
+	// This ensures mDNS is off for both new and existing repositories
+	mdnsCmd := exec.Command(m.ipfsPath, "config", "--json", "Discovery.MDNS.Enabled", "false")
+	if output, err := mdnsCmd.CombinedOutput(); err != nil {
+		log.Printf("Warning: Failed to disable mDNS: %v\n%s", err, string(output))
+	} else {
+		log.Println("IPFS mDNS discovery disabled (prevents multicast errors on Windows)")
+	}
+
+	// 4. Clear Swarm.AddrFilters to allow local peering (undoing server profile impact)
+	exec.Command(m.ipfsPath, "config", "Swarm.AddrFilters", "null").Run()
+
+	// 5. Write the appropriate swarm key
 	swarmKeyDest := filepath.Join(ipfsRepo, "swarm.key")
 	var swarmKeyData []byte
 
@@ -247,7 +259,11 @@ func (m *IPFSManager) StartDaemon() error {
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
 			errText := scanner.Text()
+			// Filter out noisy warnings that don't impact functionality in private networking / Windows
 			if strings.Contains(errText, "Private networking (swarm.key / LIBP2P_FORCE_PNET) does not work with public HTTP IPNIs") {
+				continue
+			}
+			if strings.Contains(errText, "mdns: Failed to set multicast interface") || strings.Contains(errText, "mdns: Failed to set multicast interface: no such interface") {
 				continue
 			}
 			log.Printf("[IPFS ERROR] %s", errText)
