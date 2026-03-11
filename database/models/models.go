@@ -2,20 +2,18 @@ package models
 
 // Transaction
 
-type TransactionInfo struct {
-	Initiator       *string                 `json:"initiator" gorm:"column:initiator;index"`
-	Owner           *string                 `json:"owner" gorm:"column:owner;index"`
-	Epoch           *int64                  `json:"epoch" gorm:"column:epoch;index"`
-	Network         string                  `json:"network" gorm:"column:network"`
-	Tokens          *TransactionTokens      `json:"tokens" gorm:"column:tokens;type:jsonb"`
-	CommittedTokens []*TokenInfo            `json:"committed_tokens" gorm:"column:committed_tokens;type:jsonb"`
-	Quorums         map[string][]*TokenInfo `json:"quorums" gorm:"column:quorums;type:jsonb"`
-	Memo            string                  `json:"memo" gorm:"column:memo"`
-	Data            string                  `json:"data" gorm:"column:data"`
-	ErrorString     string                  `json:"error_string" gorm:"column:error_string"`
+type TransInfo struct {
+	Initiator       *string            `json:"initiator" gorm:"column:initiator;index"`
+	Owner           *string            `json:"owner" gorm:"column:owner;index"`
+	Epoch           *int64             `json:"epoch" gorm:"column:epoch;index"`
+	Network         string             `json:"network" gorm:"column:network"`
+	Tokens          *TransactionTokens `json:"tokens" gorm:"column:tokens;type:jsonb"`
+	CommittedTokens []*TokenInfo       `json:"committed_tokens" gorm:"column:committed_tokens;type:jsonb"`
+	Quorums         []*QuorumInfo      `json:"quorums" gorm:"column:quorums;type:jsonb"`
+	Memo            string             `json:"memo" gorm:"column:memo"`
 }
 
-func (TransactionInfo) TableName() string { return "TransactionInfo" }
+func (TransInfo) TableName() string { return "TransInfo" }
 
 type TransactionTokens struct {
 	RBT           []*TokenInfo `json:"rbt"`
@@ -27,6 +25,34 @@ type TransactionTokens struct {
 type TokenInfo struct {
 	TokenID               string `json:"token_id"`
 	PreviousTransactionID string `json:"previous_transaction_id"`
+	Data                  string `json:"data"`
+}
+
+type QuorumInfo struct {
+	DID       string       `json:"did"`
+	TokenInfo []*TokenInfo `json:"token_info"`
+}
+
+type QuorumSignatures struct {
+	DID       string `json:"did"`
+	Signature string `json:"signature"`
+}
+
+type Signatures struct {
+	InitiatorSignature string              `json:"initiator_signature"`
+	QuorumSignatures   []*QuorumSignatures `json:"quorum_signatures"`
+}
+
+type Transactions struct {
+	TransactionID   string      `json:"transaction_id"`
+	TransactionInfo *TransInfo  `json:"transaction_info"`
+	Signatures      *Signatures `json:"signatures"`
+}
+
+type EventTransaction struct {
+	Transaction *Transactions `json:"transaction"`
+	Status      int           `json:"status"`
+	Message     string        `json:"message"`
 }
 
 // Token
@@ -86,12 +112,12 @@ type TokenChain struct {
 
 func (TokenChain) TableName() string { return "TokenChain" }
 
-type TokenChainArray struct {
-	TokenID         string   `json:"token_id" gorm:"primaryKey;column:token_id"`
-	TokenChainArray []string `json:"token_chain_array" gorm:"column:token_chain_array;type:jsonb"`
+type TokenChainIndex struct {
+	TokenID string   `json:"token_id" gorm:"primaryKey;column:token_id"`
+	Index   []string `json:"index" gorm:"column:index;type:jsonb"`
 }
 
-func (TokenChainArray) TableName() string { return "TokenChainArray" }
+func (TokenChainIndex) TableName() string { return "TokenChainIndex" }
 
 // DID
 

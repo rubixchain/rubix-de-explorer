@@ -18,7 +18,7 @@ func GetTxnsCount() (int64, error) {
 		return cached.(int64), nil
 	}
 	var count int64
-	if err := database.ReadDB.Model(&models.TransactionInfo{}).Count(&count).Error; err != nil {
+	if err := database.ReadDB.Model(&models.TransInfo{}).Count(&count).Error; err != nil {
 		return 0, err
 	}
 	responseCache.Set("txns_count", count, 5*time.Second)
@@ -26,7 +26,7 @@ func GetTxnsCount() (int64, error) {
 }
 
 func GetTransferBlocksList(limit, page int) (model.TransactionsResponse, error) {
-	var blocks []models.TransactionInfo
+	var blocks []models.TransInfo
 	var response model.TransactionsResponse
 
 	if page < 1 {
@@ -50,7 +50,7 @@ func GetTransferBlocksList(limit, page int) (model.TransactionsResponse, error) 
 	// Count total records
 	var count int64
 	if err := database.ReadDB.
-		Model(&models.TransactionInfo{}).
+		Model(&models.TransInfo{}).
 		Where("epoch IS NOT NULL AND epoch <> 0").
 		Count(&count).Error; err != nil {
 		return response, err
@@ -78,8 +78,8 @@ func GetTransferBlocksList(limit, page int) (model.TransactionsResponse, error) 
 	return response, nil
 }
 
-func GetTransferBlockInfoFromTxnID(hash string) (models.TransactionInfo, error) {
-	var block models.TransactionInfo
+func GetTransferBlockInfoFromTxnID(hash string) (models.TransInfo, error) {
+	var block models.TransInfo
 
 	if err := database.ReadDB.Where("txn_id = ?", hash).First(&block).Error; err != nil {
 		return block, err
@@ -100,8 +100,8 @@ func GetTransferBlockInfoFromTxnID(hash string) (models.TransactionInfo, error) 
 	return block, nil
 }
 
-func GetTransferBlockInfoFromBlockHash(hash string) (models.TransactionInfo, error) {
-	var block models.TransactionInfo
+func GetTransferBlockInfoFromBlockHash(hash string) (models.TransInfo, error) {
+	var block models.TransInfo
 
 	if err := database.ReadDB.Where("block_hash = ?", hash).First(&block).Error; err != nil {
 		return block, err
