@@ -51,7 +51,7 @@ type Transactions struct {
 
 type EventTransaction struct {
 	Transaction *Transactions `json:"transaction"`
-	Status      int           `json:"status"`
+	Status      bool          `json:"status"`
 	Message     string        `json:"message"`
 }
 

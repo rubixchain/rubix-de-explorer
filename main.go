@@ -25,6 +25,7 @@ func main() {
 	// CLI Flags
 	testNet := flag.Bool("testnet", false, "Connect to Rubix TestNet (default: MainNet)")
 	swarmKeyPath := flag.String("swarmkey", "", "Path to a custom swarm.key file (overrides built-in keys)")
+	publishDummy := flag.Bool("publish-dummy", false, "TODO: DELETE LATER - Publish a dummy transaction for testing")
 	flag.Parse()
 
 	startTime := time.Now()
@@ -55,8 +56,8 @@ func main() {
 	// Initialize IPFS PubSub Listener & Daemon
 	// --------------------------------------------------
 
-	// Initialize the Dynamic Transaction Processor for PubSub messages
-	processor.InitDynamicTxnProcessor()
+	// Initialize the Dynamic Worker Pool for PubSub messages
+	processor.InitDynamicWorkerPool()
 
 	ipfsManager := ipfs.NewIPFSManager()
 
@@ -81,6 +82,12 @@ func main() {
 		err = psClient.SubscribeTopic(topic, processor.TxnCallBack)
 		if err != nil {
 			log.Printf("Warning: Failed to subscribe to PubSub topic %s: %v\n", topic, err)
+		} else if *publishDummy {
+			// TODO: DELETE LATER - Dummy Publisher for testing the new EventTransaction struct
+			go func() {
+				time.Sleep(5 * time.Second) // Delay to ensure explorer is fully ready
+				processor.PublishDummyTransaction(psClient)
+			}()
 		}
 	}
 
@@ -133,9 +140,9 @@ func main() {
 		log.Println("HTTP server stopped gracefully")
 	}
 
-	// 2) Stop IPFS Daemon & Transaction Processor
-	if processor.GlobalTxnProcessor != nil {
-		processor.GlobalTxnProcessor.Shutdown()
+	// 2) Stop IPFS Daemon & Worker Pool
+	if processor.GlobalWorkerPool != nil {
+		processor.GlobalWorkerPool.Shutdown()
 	}
 	ipfsManager.Stop()
 	log.Println("IPFS Daemon & TxnProcessor stopped gracefully")

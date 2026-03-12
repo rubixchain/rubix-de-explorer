@@ -2,7 +2,7 @@ package processor
 
 import (
 	"context"
-	"explorer-server/model"
+	"explorer-server/database/models"
 	"log"
 	"runtime"
 	"sync"
@@ -10,12 +10,12 @@ import (
 	"time"
 )
 
-// GlobalTxnProcessor is the singleton instance of the dynamic transaction processor
-var GlobalTxnProcessor *DynamicTxnProcessor
+// GlobalWorkerPool is the singleton instance of the dynamic worker pool
+var GlobalWorkerPool *DynamicWorkerPool
 
-// DynamicTxnProcessor handles adaptive concurrent transaction processing for the Explorer
-type DynamicTxnProcessor struct {
-	txnQueue      chan *model.PubSubTxnInfo
+// DynamicWorkerPool handles adaptive concurrent transaction processing for the Explorer
+type DynamicWorkerPool struct {
+	txnQueue      chan *models.EventTransaction
 	processedTxns sync.Map
 	ctx           context.Context
 	cancel        context.CancelFunc
@@ -47,9 +47,9 @@ type DynamicTxnProcessor struct {
 	resourceMonitor *ResourceMonitor
 }
 
-// InitDynamicTxnProcessor initializes the global dynamic transaction processor
-func InitDynamicTxnProcessor() {
-	if GlobalTxnProcessor != nil {
+// InitDynamicWorkerPool initializes the global dynamic worker pool
+func InitDynamicWorkerPool() {
+	if GlobalWorkerPool != nil {
 		return
 	}
 
@@ -57,21 +57,20 @@ func InitDynamicTxnProcessor() {
 
 	numCPU := runtime.NumCPU()
 
-	// Determine max workers. We reserve at least 1 core for the HTTP server
-	// and DB connections to ensure the UI remains seamless under heavy load.
+	// Determine max workers.
 	maxW := numCPU - 1
 	if maxW < 1 {
 		maxW = 1
 	}
 
-	GlobalTxnProcessor = &DynamicTxnProcessor{
-		txnQueue:        make(chan *model.PubSubTxnInfo, 2000), // Slightly larger buffer for Explorer
+	GlobalWorkerPool = &DynamicWorkerPool{
+		txnQueue:        make(chan *models.EventTransaction, 2000),
 		ctx:             ctx,
 		cancel:          cancel,
 		minWorkers:      mathMax(1, numCPU/4),
 		maxWorkers:      maxW,
 		currentWorkers:  mathMax(1, numCPU/2),
-		memoryThreshold: 75.0, // Scale down/avoid scale up if memory usage > 75%
+		memoryThreshold: 75.0,
 		queueThreshold:  100,
 		scaleUpDelay:    time.Second * 10,
 		scaleDownDelay:  time.Second * 30,
@@ -79,20 +78,20 @@ func InitDynamicTxnProcessor() {
 		resourceMonitor: &ResourceMonitor{},
 	}
 
-	log.Printf("Initializing Dynamic Transaction Processor: Min=%d, Max=%d, Current=%d workers\n",
-		GlobalTxnProcessor.minWorkers, GlobalTxnProcessor.maxWorkers, GlobalTxnProcessor.currentWorkers)
+	log.Printf("Initializing Dynamic Worker Pool: Min=%d, Max=%d, Current=%d workers\n",
+		GlobalWorkerPool.minWorkers, GlobalWorkerPool.maxWorkers, GlobalWorkerPool.currentWorkers)
 
 	// Start initial workers
-	for i := 0; i < GlobalTxnProcessor.currentWorkers; i++ {
-		GlobalTxnProcessor.startWorker(i)
+	for i := 0; i < GlobalWorkerPool.currentWorkers; i++ {
+		GlobalWorkerPool.startWorker(i)
 	}
 
 	// Start system monitor
-	go GlobalTxnProcessor.systemMonitor()
+	go GlobalWorkerPool.systemMonitor()
 }
 
-// EnqueueTransaction adds a transaction to the processing queue with timeout handling
-func (p *DynamicTxnProcessor) EnqueueTransaction(txnEvent *model.PubSubTxnInfo) {
+// EnqueueTransaction adds a transaction to the processing queue
+func (p *DynamicWorkerPool) EnqueueTransaction(txnEvent *models.EventTransaction) {
 	currentQueueLen := int64(len(p.txnQueue))
 	p.queueLength = currentQueueLen
 
@@ -102,22 +101,17 @@ func (p *DynamicTxnProcessor) EnqueueTransaction(txnEvent *model.PubSubTxnInfo) 
 
 	case <-time.After(5 * time.Second):
 		log.Printf("Warning: Failed to queue transaction %s - queue full (length=%d)\n",
-			txnEvent.BlockHash, len(p.txnQueue))
-
-		if currentQueueLen > int64(p.queueThreshold) {
-			log.Printf("Warning: Queue threshold exceeded - dynamic scaling active (current=%d, threshold=%d)\n",
-				currentQueueLen, p.queueThreshold)
-		}
+			txnEvent.Transaction.TransactionID, len(p.txnQueue))
 		return
 
 	case <-p.ctx.Done():
-		log.Println("Transaction processor is shutting down, dropping transaction")
+		log.Println("Worker pool is shutting down, dropping transaction")
 		return
 	}
 }
 
 // Monitor system resources and adjust worker count
-func (p *DynamicTxnProcessor) systemMonitor() {
+func (p *DynamicWorkerPool) systemMonitor() {
 	ticker := time.NewTicker(time.Second * 5)
 	defer ticker.Stop()
 
@@ -132,23 +126,17 @@ func (p *DynamicTxnProcessor) systemMonitor() {
 }
 
 // Evaluate system conditions and decide on scaling
-func (p *DynamicTxnProcessor) evaluateAndScale() {
-	// Get memory stats
+func (p *DynamicWorkerPool) evaluateAndScale() {
 	resourceStats := p.resourceMonitor.GetResourceStats()
 	memoryUsagePercent := resourceStats["memory_usage_pct"].(float64)
-
-	// Get queue metrics
 	queueLen := int64(len(p.txnQueue))
 
 	p.workersMutex.RLock()
 	currentWorkers := p.currentWorkers
 	p.workersMutex.RUnlock()
 
-	// Determine scaling action
-	// (Excluding CPU percent for cross-platform simplicity, relying on memory and queue)
 	scalingDecision := p.determineScalingAction(memoryUsagePercent, queueLen, currentWorkers)
 
-	// Apply scaling decision
 	switch scalingDecision {
 	case "scale_up":
 		p.scaleUp()
@@ -157,11 +145,9 @@ func (p *DynamicTxnProcessor) evaluateAndScale() {
 	}
 }
 
-// Determine scaling action based on metrics
-func (p *DynamicTxnProcessor) determineScalingAction(memoryPercent float64, queueLen int64, currentWorkers int) string {
+func (p *DynamicWorkerPool) determineScalingAction(memoryPercent float64, queueLen int64, currentWorkers int) string {
 	now := time.Now()
 
-	// Scale up conditions
 	queuePressure := queueLen > int64(p.queueThreshold)
 	resourcesAvailable := memoryPercent < p.memoryThreshold
 	hasWorkload := queueLen > 10
@@ -172,7 +158,6 @@ func (p *DynamicTxnProcessor) determineScalingAction(memoryPercent float64, queu
 		canScaleUp &&
 		scaleUpDelayMet
 
-	// Scale down conditions
 	highResourceUsage := memoryPercent > p.memoryThreshold
 	lowWorkload := queueLen == 0 && currentWorkers > p.minWorkers
 	canScaleDown := currentWorkers > p.minWorkers
@@ -191,8 +176,7 @@ func (p *DynamicTxnProcessor) determineScalingAction(memoryPercent float64, queu
 	return "no_change"
 }
 
-// Scale up worker count
-func (p *DynamicTxnProcessor) scaleUp() {
+func (p *DynamicWorkerPool) scaleUp() {
 	p.workersMutex.Lock()
 	defer p.workersMutex.Unlock()
 
@@ -212,8 +196,7 @@ func (p *DynamicTxnProcessor) scaleUp() {
 	p.lastScaleAction = time.Now()
 }
 
-// Scale down worker count
-func (p *DynamicTxnProcessor) scaleDown() {
+func (p *DynamicWorkerPool) scaleDown() {
 	p.workersMutex.Lock()
 	defer p.workersMutex.Unlock()
 
@@ -240,8 +223,7 @@ func (p *DynamicTxnProcessor) scaleDown() {
 	p.lastScaleAction = time.Now()
 }
 
-// Start a new worker
-func (p *DynamicTxnProcessor) startWorker(workerID int) {
+func (p *DynamicWorkerPool) startWorker(workerID int) {
 	stopChan := make(chan struct{})
 
 	p.workerChanMutex.Lock()
@@ -252,8 +234,7 @@ func (p *DynamicTxnProcessor) startWorker(workerID int) {
 	go p.dynamicWorker(workerID, stopChan)
 }
 
-// Dynamic worker that can be individually stopped
-func (p *DynamicTxnProcessor) dynamicWorker(workerID int, stopChan chan struct{}) {
+func (p *DynamicWorkerPool) dynamicWorker(workerID int, stopChan chan struct{}) {
 	defer p.wg.Done()
 
 	for {
@@ -261,10 +242,9 @@ func (p *DynamicTxnProcessor) dynamicWorker(workerID int, stopChan chan struct{}
 		case txnEvent := <-p.txnQueue:
 			startTime := time.Now()
 
-			// Process the transaction
-			ProcessSingleTransaction(txnEvent, workerID)
+			// Handle the actual DB processing
+			ProcessDBTransaction(txnEvent, workerID)
 
-			// Incremement count and tracking
 			atomic.AddInt64(&p.processedTxnCount, 1)
 			processingTime := time.Since(startTime)
 			p.updateProcessingMetrics(processingTime)
@@ -278,8 +258,7 @@ func (p *DynamicTxnProcessor) dynamicWorker(workerID int, stopChan chan struct{}
 	}
 }
 
-// Update processing metrics for better scaling decisions
-func (p *DynamicTxnProcessor) updateProcessingMetrics(processingTime time.Duration) {
+func (p *DynamicWorkerPool) updateProcessingMetrics(processingTime time.Duration) {
 	if p.averageProcessTime == 0 {
 		p.averageProcessTime = processingTime
 	} else {
@@ -292,8 +271,8 @@ func (p *DynamicTxnProcessor) updateProcessingMetrics(processingTime time.Durati
 }
 
 // Shutdown gracefully stops all workers
-func (p *DynamicTxnProcessor) Shutdown() {
-	log.Println("Shutting down dynamic transaction processor...")
+func (p *DynamicWorkerPool) Shutdown() {
+	log.Println("Shutting down dynamic worker pool...")
 	p.cancel()
 	close(p.txnQueue)
 
@@ -305,23 +284,10 @@ func (p *DynamicTxnProcessor) Shutdown() {
 
 	select {
 	case <-done:
-		log.Println("All transaction workers shut down gracefully")
+		log.Println("All workers shut down gracefully")
 	case <-time.After(30 * time.Second):
-		log.Println("Warning: Transaction workers shutdown timeout - forcing termination")
+		log.Println("Warning: Workers shutdown timeout - forcing termination")
 	}
-}
-
-// ProcessSingleTransaction handles the actual logic of logging/inserting to DB
-func ProcessSingleTransaction(newEvent *model.PubSubTxnInfo, workerID int) {
-	// For now, mimic the existing TxnCallBack logging
-	log.Printf("[Worker %d] Processed transaction from PubSub:", workerID)
-	log.Printf("   BlockHash:    %s", newEvent.BlockHash)
-	log.Printf("   BlockType:    %s", newEvent.BlockType)
-	log.Printf("   AssetType:    %d", newEvent.AssetType)
-	log.Printf("   PublisherDID: %s", newEvent.PublisherDID)
-	log.Printf("   ReceiverDID:  %s", newEvent.ReceiverDID)
-	log.Printf("   TxnValue:     %f", newEvent.TransactionValue)
-	log.Printf("   TokenValue:   %f", newEvent.TokenValue)
 }
 
 // mathMin helper
@@ -340,8 +306,8 @@ func mathMax(a, b int) int {
 	return b
 }
 
-// GetStats returns current status of the dynamic processor for monitoring endpoints
-func (p *DynamicTxnProcessor) GetStats() map[string]interface{} {
+// GetStats returns current status of the dynamic worker pool
+func (p *DynamicWorkerPool) GetStats() map[string]interface{} {
 	p.workersMutex.RLock()
 	currentWorkers := p.currentWorkers
 	p.workersMutex.RUnlock()
