@@ -6,20 +6,20 @@ import (
 	"net/http"
 )
 
-func GetFTCountHandler(w http.ResponseWriter, r *http.Request) {
-	count, err := api.GetFTCount()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	response := map[string]int64{"all_ft_count": count}
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-	}
-}
+// func GetFTCountHandler(w http.ResponseWriter, r *http.Request) {
+// 	count, err := api.GetFTCount()
+// 	if err != nil {
+// 		http.Error(w, err.Error(), http.StatusInternalServerError)
+// 		return
+// 	}
+//
+// 	response := map[string]int64{"all_ft_count": count}
+//
+// 	w.Header().Set("Content-Type", "application/json")
+// 	if err := json.NewEncoder(w).Encode(response); err != nil {
+// 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+// 	}
+// }
 
 func GetFTInfoFromFTID(w http.ResponseWriter, r *http.Request) {
 	ftId := r.URL.Query().Get("ftid")

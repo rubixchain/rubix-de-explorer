@@ -7,20 +7,20 @@ import (
 	"strconv"
 )
 
-func GetDIDCountHandler(w http.ResponseWriter, r *http.Request) {
-	count, err := api.GetRBTCount()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	response := map[string]int64{"all_did_count": count}
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-	}
-}
+// func GetDIDCountHandler(w http.ResponseWriter, r *http.Request) {
+// 	count, err := api.GetRBTCount()
+// 	if err != nil {
+// 		http.Error(w, err.Error(), http.StatusInternalServerError)
+// 		return
+// 	}
+//
+// 	response := map[string]int64{"all_did_count": count}
+//
+// 	w.Header().Set("Content-Type", "application/json")
+// 	if err := json.NewEncoder(w).Encode(response); err != nil {
+// 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+// 	}
+// }
 
 // func GetDIDInfoHandler(w http.ResponseWriter, r *http.Request) {
 

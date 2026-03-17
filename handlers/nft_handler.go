@@ -7,21 +7,21 @@ import (
 	"explorer-server/api"
 )
 
-func GetNFTsCountHandler(w http.ResponseWriter, r *http.Request) {
-	count, err := api.GetNFTCount()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	response := map[string]int64{"all_nft_count": count}
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-	}
-
-}
+// func GetNFTsCountHandler(w http.ResponseWriter, r *http.Request) {
+// 	count, err := api.GetNFTCount()
+// 	if err != nil {
+// 		http.Error(w, err.Error(), http.StatusInternalServerError)
+// 		return
+// 	}
+//
+// 	response := map[string]int64{"all_nft_count": count}
+//
+// 	w.Header().Set("Content-Type", "application/json")
+// 	if err := json.NewEncoder(w).Encode(response); err != nil {
+// 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+// 	}
+//
+// }
 
 func GetNFTInfoFromNFTID(w http.ResponseWriter, r *http.Request) {
 	nftId := r.URL.Query().Get("nftid")

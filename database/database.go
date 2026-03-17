@@ -66,11 +66,13 @@ func ConnectAndMigrate(drop bool) {
 	log.Println("Connected to PostgreSQL (WriteDB=20, ReadDB=30)")
 
 	allModels := []interface{}{
-		&models.RBT{},
-		&models.FT{},
-		&models.NFT{},
-		&models.SC{},
-		&models.DIDs{},
+		&models.Transactions{},
+		&models.EventTransaction{},
+		&models.TransactionInfo{},
+		&models.Token{},
+		&models.TokenChain{},
+		&models.TokenChainArray{},
+		&models.DIDBalance{},
 	}
 
 	err = WriteDB.AutoMigrate(allModels...)

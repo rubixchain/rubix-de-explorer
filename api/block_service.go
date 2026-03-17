@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"explorer-server/config"
 	"explorer-server/database"
-	"explorer-server/database/models"
 	"explorer-server/model"
 	"fmt"
 	"io"
@@ -18,7 +17,7 @@ func GetTxnsCount() (int64, error) {
 		return cached.(int64), nil
 	}
 	var count int64
-	if err := database.ReadDB.Model(&models.TransInfo{}).Count(&count).Error; err != nil {
+	if err := database.ReadDB.Model(&model.TransactionInfo{}).Count(&count).Error; err != nil {
 		return 0, err
 	}
 	responseCache.Set("txns_count", count, 5*time.Second)
@@ -26,7 +25,7 @@ func GetTxnsCount() (int64, error) {
 }
 
 func GetTransferBlocksList(limit, page int) (model.TransactionsResponse, error) {
-	var blocks []models.TransInfo
+	var blocks []model.TransactionInfo
 	var response model.TransactionsResponse
 
 	if page < 1 {
@@ -50,7 +49,7 @@ func GetTransferBlocksList(limit, page int) (model.TransactionsResponse, error) 
 	// Count total records
 	var count int64
 	if err := database.ReadDB.
-		Model(&models.TransInfo{}).
+		Model(&model.TransactionInfo{}).
 		Where("epoch IS NOT NULL AND epoch <> 0").
 		Count(&count).Error; err != nil {
 		return response, err
@@ -78,8 +77,8 @@ func GetTransferBlocksList(limit, page int) (model.TransactionsResponse, error) 
 	return response, nil
 }
 
-func GetTransferBlockInfoFromTxnID(hash string) (models.TransInfo, error) {
-	var block models.TransInfo
+func GetTransferBlockInfoFromTxnID(hash string) (model.TransactionInfo, error) {
+	var block model.TransactionInfo
 
 	if err := database.ReadDB.Where("txn_id = ?", hash).First(&block).Error; err != nil {
 		return block, err
@@ -100,8 +99,8 @@ func GetTransferBlockInfoFromTxnID(hash string) (models.TransInfo, error) {
 	return block, nil
 }
 
-func GetTransferBlockInfoFromBlockHash(hash string) (models.TransInfo, error) {
-	var block models.TransInfo
+func GetTransferBlockInfoFromBlockHash(hash string) (model.TransactionInfo, error) {
+	var block model.TransactionInfo
 
 	if err := database.ReadDB.Where("block_hash = ?", hash).First(&block).Error; err != nil {
 		return block, err

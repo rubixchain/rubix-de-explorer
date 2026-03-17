@@ -11,15 +11,15 @@ import (
 //  READ-ONLY PUBLIC API HANDLERS
 // ============================================================================
 
-func GetTxnsCountHandler(w http.ResponseWriter, r *http.Request) {
-	count, err := api.GetTxnsCount()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]int64{"all_block_count": count})
-}
+// func GetTxnsCountHandler(w http.ResponseWriter, r *http.Request) {
+// 	count, err := api.GetTxnsCount()
+// 	if err != nil {
+// 		http.Error(w, err.Error(), http.StatusInternalServerError)
+// 		return
+// 	}
+// 	w.Header().Set("Content-Type", "application/json")
+// 	json.NewEncoder(w).Encode(map[string]int64{"all_block_count": count})
+// }
 
 func GetTransferBlockListHandler(w http.ResponseWriter, r *http.Request) {
 	limitStr := r.URL.Query().Get("limit")

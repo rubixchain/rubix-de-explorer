@@ -2,7 +2,7 @@ package processor
 
 import (
 	"context"
-	"explorer-server/database/models"
+	"explorer-server/model"
 	"log"
 	"runtime"
 	"sync"
@@ -15,7 +15,7 @@ var GlobalWorkerPool *DynamicWorkerPool
 
 // DynamicWorkerPool handles adaptive concurrent transaction processing for the Explorer
 type DynamicWorkerPool struct {
-	txnQueue      chan *models.EventTransaction
+	txnQueue      chan *model.EventTransaction
 	processedTxns sync.Map
 	ctx           context.Context
 	cancel        context.CancelFunc
@@ -64,7 +64,7 @@ func InitDynamicWorkerPool() {
 	}
 
 	GlobalWorkerPool = &DynamicWorkerPool{
-		txnQueue:        make(chan *models.EventTransaction, 2000),
+		txnQueue:        make(chan *model.EventTransaction, 2000),
 		ctx:             ctx,
 		cancel:          cancel,
 		minWorkers:      mathMax(1, numCPU/4),
@@ -91,7 +91,7 @@ func InitDynamicWorkerPool() {
 }
 
 // EnqueueTransaction adds a transaction to the processing queue
-func (p *DynamicWorkerPool) EnqueueTransaction(txnEvent *models.EventTransaction) {
+func (p *DynamicWorkerPool) EnqueueTransaction(txnEvent *model.EventTransaction) {
 	currentQueueLen := int64(len(p.txnQueue))
 	p.queueLength = currentQueueLen
 

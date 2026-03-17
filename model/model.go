@@ -57,8 +57,8 @@ type TransactionsResponse struct {
 }
 
 type RBTListResponse struct {
-	Tokens []Token `json:"tokens"`
-	Count  int64   `json:"count"`
+	Tokens []models.RBT `json:"tokens"`
+	Count  int64        `json:"count"`
 }
 
 type SCListResponse struct {
@@ -118,20 +118,71 @@ type IncomingBlockInfo struct {
 	BlockMap          map[string]interface{} `json:"block_map"`
 	TokenDetails      []TokenDetails         `json:"token_details"`
 }
-
 // PubSubTxnInfo matches the Fullnode's published struct exactly.
-// No json tags = PascalCase JSON keys (Go default marshaling).
 type PubSubTxnInfo struct {
-	BlockHash         string  `gorm:"column:block_hash;primaryKey"`
-	TransactionID     string  `gorm:"column:transaction_id"`
-	BlockType         string  `gorm:"column:block_type"`
-	AssetType         int     `gorm:"column:asset_type"`
-	FTName            string  `gorm:"column:ft_name"`
-	CreatorDID        string  `gorm:"column:creator_did"`
-	PublisherDID      string  `gorm:"column:publisher_did"`
-	ReceiverDID       string  `gorm:"column:receiver_did"`
-	TxnBlock          []byte  `gorm:"column:block"`
-	LatestBlockHeight uint64  `gorm:"column:block_height"`
-	TransactionValue  float64 `gorm:"column:transaction_value"`
-	TokenValue        float64 `gorm:"column:token_value"`
+	BlockHash         string  `json:"block_hash"`
+	TransactionID     string  `json:"transaction_id"`
+	BlockType         string  `json:"block_type"`
+	AssetType         int     `json:"asset_type"`
+	FTName            string  `json:"ft_name"`
+	CreatorDID        string  `json:"creator_did"`
+	PublisherDID      string  `json:"publisher_did"`
+	ReceiverDID       string  `json:"receiver_did"`
+	TxnBlock          []byte  `json:"block"`
+	LatestBlockHeight uint64  `json:"block_height"`
+	TransactionValue  float64 `json:"transaction_value"`
+	TokenValue        float64 `json:"token_value"`
+}
+
+// --- Transaction DTOs (Received from PubSub/Network, matches Rubix node format) ---
+
+type TransactionInfo struct {
+	Initiator       string             `json:"initiator"`
+	Owner           string             `json:"owner"`
+	Epoch           int                `json:"epoch"`
+	Network         string             `json:"network"`
+	Tokens          *TransactionTokens `json:"tokens"`
+	CommittedTokens []*TokenInfo       `json:"committedTokens"`
+	Quorums         []*QuorumInfo      `json:"quorums"`
+	Memo            string             `json:"memo"`
+}
+
+type TransactionTokens struct {
+	RBT           []*TokenInfo `json:"rbt"`
+	NFT           []*TokenInfo `json:"nft"`
+	FT            []*TokenInfo `json:"ft"`
+	SmartContract []*TokenInfo `json:"smartContract"`
+}
+
+type TokenInfo struct {
+	TokenID               string `json:"tokenId"`
+	PreviousTransactionID string `json:"previousTransactionID"`
+	Data                  string `json:"data"`
+}
+
+type QuorumInfo struct {
+	Did    string       `json:"did"`
+	Tokens []*TokenInfo `json:"tokens"`
+}
+
+type QuorumSignature struct {
+	Did       string `json:"did"`
+	Signature string `json:"signature"`
+}
+
+type Signature struct {
+	InitiatorSignature string            `json:"initiatorSignature"`
+	Quorums            []QuorumSignature `json:"quorums"`
+}
+
+type Transactions struct {
+	TransactionID   string           `json:"transaction_id"`
+	TransactionInfo *TransactionInfo `json:"transaction_info"`
+	Signatures      *Signature       `json:"signatures"`
+}
+
+type EventTransaction struct {
+	Transaction *Transactions `json:"transaction"`
+	Status      bool          `json:"status"`
+	Message     string        `json:"message"`
 }

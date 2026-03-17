@@ -53,8 +53,8 @@ func GetRBTList(limit, page int) (interface{}, error) {
 
 	// Wrap in response
 	response := model.RBTListResponse{
-		Tokens: tokens,
-		Count:  count,
+		// Tokens: tokens,
+		Count: count,
 	}
 
 	return response, nil
@@ -82,7 +82,7 @@ func GetRBTListFromDID(did string, limit, page int) ([]models.RBT, int64, error)
 		Find(&rbts).Error; err != nil {
 		return nil, 0, err
 	}
-    println("Fetched RBTs for DID:", did, "Page:", page, "Limit:", limit, "Total Count:", totalCount)
+	println("Fetched RBTs for DID:", did, "Page:", page, "Limit:", limit, "Total Count:", totalCount)
 	return rbts, totalCount, nil
 }
 
