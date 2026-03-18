@@ -6,6 +6,7 @@ import (
 	"explorer-server/database/models"
 	"explorer-server/model"
 	"gorm.io/gorm"
+	"strings"
 	"time"
 )
 
@@ -185,7 +186,7 @@ func tokenTypeName(t int16) string {
 // updateBalances handles DIDBalances (granular) table
 func updateBalances(tx *gorm.DB, did string, token *models.Token, direction float64) error {
 	now := time.Now().Unix()
-	
+
 	typeName := tokenTypeName(token.TokenType)
 
 	// Determine value to add (TokenValue for RBT, 1 for others)
@@ -196,8 +197,14 @@ func updateBalances(tx *gorm.DB, did string, token *models.Token, direction floa
 		valueToAdd = 1.0 * direction
 	}
 
-	// Token Name fallback
-	assetName := typeName // If FT, should ideally fetch FTName
+	// Token Name: extract from TokenID for FTs
+	assetName := typeName
+	if token.TokenType == TokenTypeFT {
+		parts := strings.Split(token.TokenID, "_")
+		if len(parts) > 0 && parts[0] != "" {
+			assetName = parts[0]
+		}
+	}
 
 	var balance models.DIDBalance
 	err := tx.Where("did = ? AND asset_type = ? AND token_name = ?", did, typeName, assetName).First(&balance).Error
@@ -212,11 +219,11 @@ func updateBalances(tx *gorm.DB, did string, token *models.Token, direction floa
 		return tx.Create(&balance).Error
 	} else if err != nil {
 		return err
-	} 
-	
+	}
+
 	balance.Balance += valueToAdd
 	balance.LastUpdate = now
-	
+
 	return tx.Save(&balance).Error
 }
 

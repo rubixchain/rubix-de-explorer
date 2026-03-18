@@ -3,7 +3,6 @@ package api
 import (
 	"explorer-server/database"
 	"explorer-server/database/models"
-	"explorer-server/model"
 )
 
 // GetRBTCount returns the total number of RBTs in the database
@@ -23,36 +22,29 @@ func GetDIDInfoFromDID(did string) (*models.DIDs, error) {
 	return &didInfo, nil
 }
 
-func GetDIDHoldersList(limit, page int) (interface{}, error) {
-	var dids []models.DIDs
+func GetDIDHoldersList(limit, page int) ([]models.DIDBalance, error) {
+	var balances []models.DIDBalance
+
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 10
+	}
 	offset := (page - 1) * limit
 
-	// Fetch paginated DIDs ordered by TotalRBTs descending
-	if err := database.ReadDB.Where("did IS NOT NULL AND did != '0'").Order("total_rbts desc").Limit(limit).Offset(offset).Find(&dids).Error; err != nil {
-		return nil, err
-	}
-	// Map to response format
-	holders := make([]model.HolderResponse, len(dids))
-	for i, d := range dids {
-		holders[i] = model.HolderResponse{
-			OwnerDID:   d.DID,
-			TokenCount: d.TotalRBTs,
-		}
-	}
-
-	// Get total count of DIDs
-	var count int64
-	if err := database.ReadDB.Model(&models.DIDs{}).Count(&count).Error; err != nil {
+	// Fetch top RBT holders from DIDBalances table
+	if err := database.ReadDB.
+		Table("DIDBalances").
+		Where("asset_type = ? AND balance > 0", "RBT").
+		Order("balance DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&balances).Error; err != nil {
 		return nil, err
 	}
 
-	// Wrap in HoldersResponse
-	response := model.HoldersResponse{
-		HoldersResponse: holders,
-		Count:           count,
-	}
-
-	return response, nil
+	return balances, nil
 }
 
 // // GetRBTInfoFromRBTID fetches a single RBT by its ID

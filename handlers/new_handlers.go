@@ -139,13 +139,13 @@ func GetDIDHoldersListHandler(w http.ResponseWriter, r *http.Request) {
 		page = 1
 	}
 
-	holders, err := api.GetDIDHoldersList(limit, page)
+	balances, err := api.GetDIDHoldersList(limit, page)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"holders_response": holders})
+	json.NewEncoder(w).Encode(balances)
 }
 
 func GetFTGroupListHandler(w http.ResponseWriter, r *http.Request) {
