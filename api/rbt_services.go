@@ -3,7 +3,6 @@ package api
 import (
 	"explorer-server/database"
 	"explorer-server/database/models"
-	"explorer-server/model"
 )
 
 // GetRBTCount returns the total number of RBTs in the database
@@ -23,41 +22,21 @@ func GetRBTInfoFromRBTID(rbtID string) (*models.RBT, error) {
 	return &rbt, nil
 }
 
-func GetRBTList(limit, page int) (interface{}, error) {
-	var rbtModels []models.RBT
+func GetRBTList(limit, page int) ([]models.Token, error) {
+	var tokens []models.Token
 	offset := (page - 1) * limit
 
-	// Fetch paginated RBTs
-	if err := database.ReadDB.
+	// Fetch paginated RBTs (TokenType = 1)
+	if err := database.ReadDB.Model(&models.Token{}).
+		Where("token_type = ?", 1).
+		Order("updated_at DESC").
 		Limit(limit).
 		Offset(offset).
-		Find(&rbtModels).Error; err != nil {
+		Find(&tokens).Error; err != nil {
 		return nil, err
 	}
 
-	// Map to response Tokens
-	tokens := make([]model.Token, len(rbtModels))
-	for i, r := range rbtModels {
-		tokens[i] = model.Token{
-			TokenId:    r.TokenID,
-			OwnerDID:   r.OwnerDID,
-			TokenValue: r.TokenValue,
-		}
-	}
-
-	// Get total count of RBTs
-	var count int64
-	if err := database.ReadDB.Model(&models.RBT{}).Count(&count).Error; err != nil {
-		return nil, err
-	}
-
-	// Wrap in response
-	response := model.RBTListResponse{
-		// Tokens: tokens,
-		Count: count,
-	}
-
-	return response, nil
+	return tokens, nil
 }
 
 func GetRBTListFromDID(did string, limit, page int) ([]models.RBT, int64, error) {

@@ -189,12 +189,7 @@ type EventTransaction struct {
 }
 
 type FTGroup struct {
-	FTName      string  `json:"ftName"`
-	NumberOfFts float64 `json:"numberOfFts"`
-	CreatorDID  string  `json:"creatorDID"`
-}
-
-type FTGroupResponse struct {
-	FTGroups []FTGroup `json:"ftGroups"`
-	Count    int64     `json:"count"`
+	FTName     string  `json:"ftName"`
+	Count      float64 `json:"count"`
+	CreatorDID string  `json:"creatorDID"`
 }

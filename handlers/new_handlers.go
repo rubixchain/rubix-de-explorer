@@ -5,6 +5,7 @@ import (
 	"explorer-server/api"
 	"explorer-server/database"
 	"explorer-server/database/models"
+	"explorer-server/model"
 	"net/http"
 	"strconv"
 )
@@ -148,27 +149,6 @@ func GetDIDHoldersListHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(balances)
 }
 
-func GetFTGroupListHandler(w http.ResponseWriter, r *http.Request) {
-	limitStr := r.URL.Query().Get("limit")
-	pageStr := r.URL.Query().Get("page")
-	limit, _ := strconv.Atoi(limitStr)
-	page, _ := strconv.Atoi(pageStr)
-	if limit <= 0 {
-		limit = 10
-	}
-	if page <= 0 {
-		page = 1
-	}
-
-	data, err := api.GetFTGroupList(limit, page)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
-}
-
 func GetRBTListHandler(w http.ResponseWriter, r *http.Request) {
 	limitStr := r.URL.Query().Get("limit")
 	pageStr := r.URL.Query().Get("page")
@@ -187,5 +167,58 @@ func GetRBTListHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if data == nil {
+		data = []models.Token{}
+	}
+	json.NewEncoder(w).Encode(data)
+}
+
+func GetFTGroupListHandler(w http.ResponseWriter, r *http.Request) {
+	limitStr := r.URL.Query().Get("limit")
+	pageStr := r.URL.Query().Get("page")
+	limit, _ := strconv.Atoi(limitStr)
+	page, _ := strconv.Atoi(pageStr)
+	if limit <= 0 {
+		limit = 10
+	}
+	if page <= 0 {
+		page = 1
+	}
+
+	data, err := api.GetFTGroupList(limit, page)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if data == nil {
+		data = []model.FTGroup{}
+	}
+	json.NewEncoder(w).Encode(data)
+}
+
+func GetFTListByFTNameHandler(w http.ResponseWriter, r *http.Request) {
+	ftName := r.URL.Query().Get("ftName")
+	creatorDID := r.URL.Query().Get("creatorDID")
+	limitStr := r.URL.Query().Get("limit")
+	pageStr := r.URL.Query().Get("page")
+	limit, _ := strconv.Atoi(limitStr)
+	page, _ := strconv.Atoi(pageStr)
+	if limit <= 0 {
+		limit = 10
+	}
+	if page <= 0 {
+		page = 1
+	}
+
+	data, err := api.GetFTListByFTName(ftName, creatorDID, limit, page)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if data == nil {
+		data = []models.Token{}
+	}
 	json.NewEncoder(w).Encode(data)
 }

@@ -36,13 +36,13 @@ func GetFTListFromDID(did string) ([]models.FT, error) {
 	return ftList, nil
 }
 
-func GetFTGroupList(limit, page int) (model.FTGroupResponse, error) {
+func GetFTGroupList(limit, page int) ([]model.FTGroup, error) {
 	var tokens []models.Token
 	// We need to fetch all FTs to group them properly.
 	// In a real production scenario with millions of FTs, this would be slow
 	// and we should ideally have a separate table for FT groups/classes.
 	if err := database.ReadDB.Model(&models.Token{}).Where("token_type = ?", 2).Find(&tokens).Error; err != nil {
-		return model.FTGroupResponse{}, err
+		return nil, err
 	}
 
 	groupsMap := make(map[string]*model.FTGroup)
@@ -53,12 +53,12 @@ func GetFTGroupList(limit, page int) (model.FTGroupResponse, error) {
 			creatorDID := parts[len(parts)-1]
 			key := ftName + "_" + creatorDID
 			if g, ok := groupsMap[key]; ok {
-				g.NumberOfFts++
+				g.Count++
 			} else {
 				groupsMap[key] = &model.FTGroup{
-					FTName:      ftName,
-					NumberOfFts: 1,
-					CreatorDID:  creatorDID,
+					FTName:     ftName,
+					Count:      1,
+					CreatorDID: creatorDID,
 				}
 			}
 		}
@@ -69,7 +69,6 @@ func GetFTGroupList(limit, page int) (model.FTGroupResponse, error) {
 		allGroups = append(allGroups, *g)
 	}
 
-	totalCount := int64(len(allGroups))
 	start := (page - 1) * limit
 	if start > len(allGroups) {
 		start = len(allGroups)
@@ -81,10 +80,32 @@ func GetFTGroupList(limit, page int) (model.FTGroupResponse, error) {
 
 	paginatedGroups := allGroups[start:end]
 
-	return model.FTGroupResponse{
-		FTGroups: paginatedGroups,
-		Count:    totalCount,
-	}, nil
+	return paginatedGroups, nil
+}
+
+func GetFTListByFTName(ftName string, creatorDID string, limit, page int) ([]models.Token, error) {
+	var tokens []models.Token
+	offset := (page - 1) * limit
+
+	// FT TokenID format: {Name}_{Index}_{CreatorDID}
+	// We filter by name prefix and creatorDID suffix
+	query := database.ReadDB.Model(&models.Token{}).
+		Where("token_type = ?", 2).
+		Where("token_id LIKE ?", ftName+"_%")
+
+	if creatorDID != "" {
+		query = query.Where("token_id LIKE ?", "%_"+creatorDID)
+	}
+
+	if err := query.
+		Order("updated_at DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&tokens).Error; err != nil {
+		return nil, err
+	}
+
+	return tokens, nil
 }
 
 // // GetRBTInfoFromRBTID fetches a single RBT by its ID

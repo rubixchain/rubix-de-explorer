@@ -54,6 +54,7 @@ func NewRouter() *mux.Router {
 	r.HandleFunc("/api/get-rbt-list", handlers.GetRBTListHandler).Methods(http.MethodGet)
 	// FT
 	r.HandleFunc("/api/get-ft-group-list", handlers.GetFTGroupListHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-ft-list-by-ftname", handlers.GetFTListByFTNameHandler).Methods(http.MethodGet)
 
 	//SC
 	r.HandleFunc("/api/get-sc-list", handlers.GetSCListHandler).Methods(http.MethodGet)
