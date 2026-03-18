@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"explorer-server/api"
 	"net/http"
-	"strconv"
 )
 
 // func GetRBTCountHandler(w http.ResponseWriter, r *http.Request) {
@@ -39,34 +38,34 @@ func GetRBTInfoFromRBTID(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func GetRBTListHandler(w http.ResponseWriter, r *http.Request) {
-	// Parse query parameters: ?limit=10&page=2
-	limitStr := r.URL.Query().Get("limit")
-	pageStr := r.URL.Query().Get("page")
+// func GetRBTListHandler(w http.ResponseWriter, r *http.Request) {
+// 	// Parse query parameters: ?limit=10&page=2
+// 	limitStr := r.URL.Query().Get("limit")
+// 	pageStr := r.URL.Query().Get("page")
 
-	limit, err := strconv.Atoi(limitStr)
-	if err != nil || limit <= 0 {
-		limit = 10 // default limit
-	}
+// 	limit, err := strconv.Atoi(limitStr)
+// 	if err != nil || limit <= 0 {
+// 		limit = 10 // default limit
+// 	}
 
-	page, err := strconv.Atoi(pageStr)
-	if err != nil || page <= 0 {
-		page = 1 // default page
-	}
+// 	page, err := strconv.Atoi(pageStr)
+// 	if err != nil || page <= 0 {
+// 		page = 1 // default page
+// 	}
 
-	// Fetch data using service
-	data, err := api.GetRBTList(limit, page)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+// 	// Fetch data using service
+// 	data, err := api.GetRBTList(limit, page)
+// 	if err != nil {
+// 		http.Error(w, err.Error(), http.StatusInternalServerError)
+// 		return
+// 	}
 
-	// Send JSON response
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-	}
-}
+// 	// Send JSON response
+// 	w.Header().Set("Content-Type", "application/json")
+// 	if err := json.NewEncoder(w).Encode(data); err != nil {
+// 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+// 	}
+// }
 
 // func GetRBTInfoFromRBTIDHandler(w http.ResponseWriter, r *http.Request)  {
 // 	rbtId:= r.URL.Query().Get("rbtId")

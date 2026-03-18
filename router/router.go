@@ -35,26 +35,38 @@ func NewRouter() *mux.Router {
 		w.Write([]byte(`{"status":"ok"}`))
 	}).Methods("GET")
 
-	r.HandleFunc("/api/allrbtcount", handlers.GetRBTCountHandler).Methods(http.MethodGet)
-	r.HandleFunc("/api/allftcount", handlers.GetFTCountHandler).Methods(http.MethodGet)
-	r.HandleFunc("/api/alldidcount", handlers.GetDIDCountHandler).Methods(http.MethodGet)
-	r.HandleFunc("/api/alltransactionscount", handlers.GetTxnsCountHandler).Methods(http.MethodGet)
-	r.HandleFunc("/api/allsmartcontractscount", handlers.GetSCsCountHandler).Methods(http.MethodGet)
-	r.HandleFunc("/api/allnftcount", handlers.GetNFTsCountHandler).Methods(http.MethodGet)
+	// Stats
+	r.HandleFunc("/api/get-rbt-count", handlers.GetRBTCountHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-ft-count", handlers.GetFTCountHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-nft-count", handlers.GetNFTsCountHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-sc-count", handlers.GetSCsCountHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-txn-count", handlers.GetTxnsCountHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-did-count", handlers.GetDIDCountHandler).Methods(http.MethodGet)
 
-	r.HandleFunc("/api/didwithmostrbts", handlers.GetDIDHoldersListHandler).Methods(http.MethodGet)
-	r.HandleFunc("/api/txnblocks", handlers.GetTransferBlockListHandler).Methods(http.MethodGet)
-	r.HandleFunc("/api/getdidinfo", handlers.GetDIDInfoHandler).Methods(http.MethodGet)
-	r.HandleFunc("/api/txnhash", handlers.GetBlockInfoFromTxnHash).Methods(http.MethodGet)
-	r.HandleFunc("/api/blockhash", handlers.GetBlockInfoFromBlockHash).Methods(http.MethodGet)
-	r.HandleFunc("/api/smartcontract", handlers.GetSmartContractInfoFromSCID).Methods(http.MethodGet)
-	r.HandleFunc("/api/nft", handlers.GetNFTInfoFromNFTID).Methods(http.MethodGet)
-	r.HandleFunc("/api/rbt", handlers.GetRBTInfoFromRBTID).Methods(http.MethodGet)
-	r.HandleFunc("/api/ft", handlers.GetFTInfoFromFTID).Methods(http.MethodGet)
-	r.HandleFunc("/api/getrbtlist", handlers.GetRBTListHandler).Methods(http.MethodGet)
+	// Latest transactions
+	r.HandleFunc("/api/get-latest-transactions", handlers.GetLatestTransactionsListHandler).Methods(http.MethodGet)
 
-	r.HandleFunc("/api/search", handlers.GetInfo).Methods(http.MethodGet)
-	r.HandleFunc("/api/token-chain", handlers.GetLatestTokenChainFromTokenID).Methods(http.MethodGet)
+	// Top Holders
+	r.HandleFunc("/api/get-did-with-most-rbts", handlers.GetDIDHoldersListHandler).Methods(http.MethodGet)
+
+	// Tokens
+	// RBT
+	r.HandleFunc("/api/get-rbt-list", handlers.GetRBTListHandler).Methods(http.MethodGet)
+	// FT
+	r.HandleFunc("/api/get-ft-group-list", handlers.GetFTGroupListHandler).Methods(http.MethodGet)
+
+	//SC
+	r.HandleFunc("/api/get-sc-list", handlers.GetSCListHandler).Methods(http.MethodGet)
+
+	r.HandleFunc("/api/get-txn-hash", handlers.GetBlockInfoFromTxnHash).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-block-hash", handlers.GetBlockInfoFromBlockHash).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-smart-contract-info", handlers.GetSmartContractInfoFromSCID).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-nft-info", handlers.GetNFTInfoFromNFTID).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-rbt-info", handlers.GetRBTInfoFromRBTID).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-ft-info", handlers.GetFTInfoFromFTID).Methods(http.MethodGet)
+
+	r.HandleFunc("/api/get-info", handlers.GetInfo).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-token-chain", handlers.GetLatestTokenChainFromTokenID).Methods(http.MethodGet)
 	r.HandleFunc("/api/token-blocks", handlers.GetLatestTokenBlocksFromTokenID).Methods(http.MethodGet)
 	r.HandleFunc("/api/sclist", handlers.GetSCListHandler).Methods(http.MethodGet)
 	r.HandleFunc("/api/sc-blocks", handlers.GetSCBlockList).Methods(http.MethodGet)

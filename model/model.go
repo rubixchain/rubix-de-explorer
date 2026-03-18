@@ -118,6 +118,7 @@ type IncomingBlockInfo struct {
 	BlockMap          map[string]interface{} `json:"block_map"`
 	TokenDetails      []TokenDetails         `json:"token_details"`
 }
+
 // PubSubTxnInfo matches the Fullnode's published struct exactly.
 type PubSubTxnInfo struct {
 	BlockHash         string  `json:"block_hash"`
@@ -185,4 +186,15 @@ type EventTransaction struct {
 	Transaction *Transactions `json:"transaction"`
 	Status      bool          `json:"status"`
 	Message     string        `json:"message"`
+}
+
+type FTGroup struct {
+	FTName      string  `json:"ftName"`
+	NumberOfFts float64 `json:"numberOfFts"`
+	CreatorDID  string  `json:"creatorDID"`
+}
+
+type FTGroupResponse struct {
+	FTGroups []FTGroup `json:"ftGroups"`
+	Count    int64     `json:"count"`
 }
