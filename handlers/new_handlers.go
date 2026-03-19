@@ -272,3 +272,55 @@ func GetTokenInfoHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)
 }
+
+// GetTransactionIDListHandler returns TokenChain records for a specific token
+func GetTransactionIDListHandler(w http.ResponseWriter, r *http.Request) {
+	tokenID := r.URL.Query().Get("tokenID")
+	limitStr := r.URL.Query().Get("limit")
+	pageStr := r.URL.Query().Get("page")
+	limit, _ := strconv.Atoi(limitStr)
+	page, _ := strconv.Atoi(pageStr)
+	if limit <= 0 {
+		limit = 10
+	}
+	if page <= 0 {
+		page = 1
+	}
+
+	data, err := api.GetTransactionIDList(tokenID, page, limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if data == nil {
+		data = []models.TokenChain{}
+	}
+	json.NewEncoder(w).Encode(data)
+}
+
+// GetTransactionInfoListHandler returns full TransactionInfo for a specific token
+func GetTransactionInfoListHandler(w http.ResponseWriter, r *http.Request) {
+	tokenID := r.URL.Query().Get("tokenID")
+	limitStr := r.URL.Query().Get("limit")
+	pageStr := r.URL.Query().Get("page")
+	limit, _ := strconv.Atoi(limitStr)
+	page, _ := strconv.Atoi(pageStr)
+	if limit <= 0 {
+		limit = 10
+	}
+	if page <= 0 {
+		page = 1
+	}
+
+	data, err := api.GetTransactionInfoListByToken(tokenID, page, limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if data == nil {
+		data = []models.TransactionInfo{}
+	}
+	json.NewEncoder(w).Encode(data)
+}

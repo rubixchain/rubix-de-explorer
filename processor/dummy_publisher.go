@@ -13,7 +13,7 @@ import (
 // PublishDummyTransaction publishes multiple dummy transactions covering different scenarios.
 // TODO: DELETE LATER
 func PublishDummyTransaction(ps *pubsub.PubSub) {
-	log.Printf("Publishing 60 randomized dummy transactions to test APIs...")
+	log.Printf("Publishing merged dummy transactions: Multiple assets, DID balances, and token chains...")
 
 	dids := []string{
 		"bafybmihy4panvvrjssdjqksrwjcxza6xpgnxvcyufn2wuam75idnqlugdq", // Alice
@@ -21,43 +21,63 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 		"bafybmguu5v5v5v5v5v5v5v5v5v5v5v5v5v5v5v5v5v5v5v5v5v5v5v5v5v", // Charlie
 		"bafybmexxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", // David
 		"bafybmeyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy", // Eve
-		"bafybmfzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", // Frank
-		"bafybmgaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", // Grace
-		"bafybmhbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", // Heidi
-		"bafybmicccccccccccccccccccccccccccccccccccccccccccccccccccc", // Ivan
-		"bafybmidddddddddddddddddddddddddddddddddddddddddddddddddddd", // Judy
 	}
 
 	ftNames := []string{"APPLE", "MANGO", "ORANGE", "PEAR", "BANANA"}
 
-	for i := 0; i < 86; i++ {
-		time.Sleep(50 * time.Millisecond) // Faster publishing
+	// 1. Create Token Pools (10 of each type)
+	rbtPool := make([]string, 10)
+	ftPool := make([]string, 10)
+	nftPool := make([]string, 10)
+	scPool := make([]string, 10)
+	
+	now := time.Now().Unix()
+	for i := 0; i < 10; i++ {
+		rbtPool[i] = fmt.Sprintf("1_%d_%d_%d", i, i+100, now)
+		ftPool[i] = fmt.Sprintf("%s_%d_%s", ftNames[i%len(ftNames)], i, dids[i%len(dids)])
+		nftPool[i] = fmt.Sprintf("QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6u%c%c", 'a'+i, 'a'+i)
+		scPool[i] = fmt.Sprintf("QmR7XvF6T7T7T7T7T7T7T7T7T7T7T7T7T7T7T7T7T7%c%c%c%c", 's', 'c', 'a'+i, 'a'+i)
+	}
 
-		senderIdx := (i * 3) % len(dids)
-		receiverIdx := (i * 7) % len(dids)
-		if senderIdx == receiverIdx {
-			receiverIdx = (receiverIdx + 1) % len(dids)
-		}
+	lastTxnForToken := make(map[string]string)
 
-		assetType := i % 4 // 0: RBT, 1: FT, 2: NFT, 3: SC
-		sender := dids[senderIdx]
-		receiver := dids[receiverIdx]
+	// 2. Publish 100 Transactions
+	for i := 0; i < 100; i++ {
+		txnID := fmt.Sprintf("TXN_%04d_%d", i, time.Now().UnixNano()%1000)
+		sender := dids[i%len(dids)]
+		receiver := dids[(i+1)%len(dids)]
 		
-		// Special Test Scenario: Shared FT name 'TITAN' from different creators
-		testName := ""
-		if i >= 80 {
-			assetType = 1 // Force FT
-			testName = "TITAN"
-			if i < 83 {
-				sender = dids[0] // Alice creates TITAN
-			} else {
-				sender = dids[1] // Bob also creates TITAN
-			}
-			receiver = dids[2] // Charlie receives all TITANs
+		assetType := i % 4 // 0: RBT, 1: FT, 2: NFT, 3: SC
+		var pool []string
+		switch assetType {
+		case 0: pool = rbtPool
+		case 1: pool = ftPool
+		case 2: pool = nftPool
+		case 3: pool = scPool
 		}
 
-		txnID := fmt.Sprintf("TXN_%04d_%d", i, time.Now().Unix()%1000)
-		epoch := int(time.Now().Unix()) - (90-i)*60
+		// Pick 1-2 tokens from the pool
+		numTokens := (i % 2) + 1
+		tokenInfos := make([]*model.TokenInfo, numTokens)
+		for k := 0; k < numTokens; k++ {
+			tokenID := pool[(i+k)%len(pool)]
+			tokenInfos[k] = &model.TokenInfo{
+				TokenID:               tokenID,
+				PreviousTransactionID: lastTxnForToken[tokenID],
+			}
+			lastTxnForToken[tokenID] = txnID
+		}
+
+		// Prepare Event
+		tokens := &model.TransactionTokens{}
+		switch assetType {
+		case 0: tokens.RBT = tokenInfos
+		case 1: tokens.FT = tokenInfos
+		case 2: tokens.NFT = tokenInfos
+			for _, t := range tokenInfos { t.Data = "ipfs://nft-metadata" }
+		case 3: tokens.SmartContract = tokenInfos
+			for _, t := range tokenInfos { t.Data = "contract_call" }
+		}
 
 		event := model.EventTransaction{
 			Status: true,
@@ -66,60 +86,25 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 				TransactionInfo: &model.TransactionInfo{
 					Initiator: sender,
 					Owner:     receiver,
-					Epoch:     epoch,
+					Epoch:     int(time.Now().Unix()) - (100-i)*60,
 					Network:   "TestNet",
-					Memo:      fmt.Sprintf("Dummy Txn %d - Asset Type %d", i, assetType),
+					Memo:      fmt.Sprintf("Step %d - %s", i, txnID),
+					Tokens:    tokens,
 				},
 				Signatures: &model.Signature{
-					InitiatorSignature: fmt.Sprintf("sig_%s", txnID),
+					InitiatorSignature: "sig_" + txnID,
 				},
 			},
 		}
 
-		// Vary the number of tokens to create different balances
-		numTokens := (i % 3) + 1 // 1, 2, or 3 tokens
-		tokens := &model.TransactionTokens{}
-
-		switch assetType {
-		case 0: // RBT
-			tokens.RBT = make([]*model.TokenInfo, numTokens)
-			for k := 0; k < numTokens; k++ {
-				tokens.RBT[k] = &model.TokenInfo{TokenID: fmt.Sprintf("1_%d_%d_%d", i, k, epoch)}
-			}
-		case 1: // FT
-			name := ftNames[i%len(ftNames)]
-			if testName != "" {
-				name = testName
-			}
-			tokens.FT = make([]*model.TokenInfo, numTokens)
-			for k := 0; k < numTokens; k++ {
-				// Must map strictly to {Name}_{Index}_{CreatorDID} to pass validation
-				tokens.FT[k] = &model.TokenInfo{TokenID: fmt.Sprintf("%s_%d_%s", name, (i*10)+k, sender)}
-			}
-		case 2: // NFT
-			// Exactly 46 characters: Qm + 44 base58 chars.
-			tokens.NFT = make([]*model.TokenInfo, numTokens)
-			for k := 0; k < numTokens; k++ {
-				id := fmt.Sprintf("QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6u%c%c", 'a'+(i/26), 'a'+(k%26))
-				tokens.NFT[k] = &model.TokenInfo{TokenID: id, Data: "ipfs://artwork"}
-			}
-		case 3: // SC
-			// Exactly 46 characters: Qm + 44 base58 chars.
-			tokens.SmartContract = make([]*model.TokenInfo, numTokens)
-			for k := 0; k < numTokens; k++ {
-				id := fmt.Sprintf("QmR7XvF6T7T7T7T7T7T7T7T7T7T7T7T7T7T7T7T7T7%c%c%c%c", 'a'+(i/26), 'a'+(k%26), 's', 'c')
-				tokens.SmartContract[k] = &model.TokenInfo{TokenID: id, Data: "contract_init"}
-			}
-		}
-		event.Transaction.TransactionInfo.Tokens = tokens
-
 		data, _ := json.Marshal(event)
 		ps.Publish("rubix_txns", data)
 
-		if i%20 == 0 {
-			log.Printf("Progress: Published %d/%d dummy transactions", i, 86)
+		if i%25 == 0 {
+			log.Printf("Progress: Published %d/100 transactions", i)
 		}
+		time.Sleep(30 * time.Millisecond)
 	}
 
-	log.Printf("All 86 randomized dummy transactions published! Including shared FT 'TITAN' test case.")
+	log.Printf("Finished publishing 100 merged dummy transactions with consistent chains.")
 }

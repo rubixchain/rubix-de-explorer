@@ -246,7 +246,7 @@ func appendTokenHistory(tx *gorm.DB, tokenID, txnID, prevTxnID string, role int1
 	
 	var chain []uint64
 	if err == nil {
-		json.Unmarshal(tca.Chain, &chain)
+		json.Unmarshal(tca.Index, &chain)
 	} else if err != gorm.ErrRecordNotFound {
 		return err
 	}
@@ -293,10 +293,10 @@ func appendTokenHistory(tx *gorm.DB, tokenID, txnID, prevTxnID string, role int1
 	if err == gorm.ErrRecordNotFound {
 		tca = models.TokenChainArray{
 			TokenID: tokenID,
-			Chain:   chainJSON,
+			Index:   chainJSON,
 		}
 		return tx.Create(&tca).Error
 	}
 
-	return tx.Model(&tca).Update("chain", chainJSON).Error
+	return tx.Model(&tca).Update("index", chainJSON).Error
 }

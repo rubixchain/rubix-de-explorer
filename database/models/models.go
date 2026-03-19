@@ -84,7 +84,7 @@ func (TokenChain) TableName() string { return "TokenChain" }
 // TokenChainArray stores the sequence of TokenChain record IDs for each token
 type TokenChainArray struct {
 	TokenID   string          `json:"token_id" gorm:"primaryKey;column:token_id"`
-	Chain     json.RawMessage `json:"chain" gorm:"column:chain;type:jsonb"` // JSON array of TokenChain.ID (uint64)
+	Index     json.RawMessage `json:"index" gorm:"column:index;type:jsonb"` // JSON array of TokenChain.ID in sequence for a token.
 	CreatedAt time.Time       `json:"created_at" gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt time.Time       `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
 }
