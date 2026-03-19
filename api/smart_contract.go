@@ -38,29 +38,3 @@ func GetSCList(limit, page int) ([]models.Token, error) {
 	return tokens, nil
 }
 
-func GetSCBlockList(limit, page int) (interface{}, error) {
-	// var blocks []models.SCBlocks
-
-	// offset := (page - 1) * limit
-
-	// Fetch all blocks with pagination
-	// if err := database.ReadDB.
-	// 	Limit(int(limit)).
-	// 	Offset(int(offset)).
-	// 	Find(&blocks).Error; err != nil {
-	// 	return nil, err
-	// }
-
-	// var count int64
-	// if err := database.ReadDB.Model(&models.SCBlocks{}).Count(&count).Error; err != nil {
-	// 	return model.SCBlocksListResponse{}, err
-	// }
-
-	// Wrap in response struct
-	// response := model.SCBlocksListResponse{
-	// 	SC_Blocks: blocks,
-	// 	Count:     count,
-	// }
-
-	return nil, nil
-}

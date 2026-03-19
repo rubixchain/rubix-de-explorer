@@ -59,23 +59,18 @@ func NewRouter() *mux.Router {
 	//SC
 	r.HandleFunc("/api/get-sc-list", handlers.GetSCListHandler).Methods(http.MethodGet)
 
-	r.HandleFunc("/api/get-txn-hash", handlers.GetBlockInfoFromTxnHash).Methods(http.MethodGet)
-	r.HandleFunc("/api/get-block-hash", handlers.GetBlockInfoFromBlockHash).Methods(http.MethodGet)
-	r.HandleFunc("/api/get-smart-contract-info", handlers.GetSmartContractInfoFromSCID).Methods(http.MethodGet)
-	r.HandleFunc("/api/get-nft-info", handlers.GetNFTInfoFromNFTID).Methods(http.MethodGet)
-	r.HandleFunc("/api/get-rbt-info", handlers.GetRBTInfoFromRBTID).Methods(http.MethodGet)
-	r.HandleFunc("/api/get-ft-info", handlers.GetFTInfoFromFTID).Methods(http.MethodGet)
+	// Transaction Info (Transcation explorer)
+	r.HandleFunc("/api/get-txn-info", handlers.GetTransactionInfoHandler).Methods(http.MethodGet)
+
+	// Token Info (Token explorer)
+	r.HandleFunc("/api/get-token-info", handlers.GetTokenInfoHandler).Methods(http.MethodGet)
 
 	r.HandleFunc("/api/get-info", handlers.GetInfo).Methods(http.MethodGet)
 	r.HandleFunc("/api/get-token-chain", handlers.GetLatestTokenChainFromTokenID).Methods(http.MethodGet)
 	r.HandleFunc("/api/token-blocks", handlers.GetLatestTokenBlocksFromTokenID).Methods(http.MethodGet)
 	r.HandleFunc("/api/sclist", handlers.GetSCListHandler).Methods(http.MethodGet)
-	r.HandleFunc("/api/sc-blocks", handlers.GetSCBlockList).Methods(http.MethodGet)
-	r.HandleFunc("/api/burnt-blocks", handlers.GetBurntBlockList).Methods(http.MethodGet)
 
 	r.HandleFunc("/api/sctxn-info", handlers.GetSCBlockInfoFromTxnHash).Methods(http.MethodGet)
-	r.HandleFunc("/api/burnttxn-info", handlers.GetBurntTxnInfoFromTxnHash).Methods(http.MethodGet)
-	r.HandleFunc("/api/ftholdings", handlers.GetFtHoldingList).Methods(http.MethodGet)
 
 	return r
 }

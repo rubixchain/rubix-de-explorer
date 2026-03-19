@@ -42,8 +42,6 @@ func GetInfo(w http.ResponseWriter, r *http.Request) {
 			data, err = api.GetSCInfoFromSCID(id)
 		case "DID":
 			data, err = api.GetDIDInfoFromDID(id)
-		case "TransferBlock":
-			data, err = api.GetTransferBlockInfoFromTxnID(id)
 		default:
 			http.Error(w, fmt.Sprintf("Unknown asset type for ID: %s", id), http.StatusBadRequest)
 			return
@@ -66,13 +64,13 @@ func GetInfo(w http.ResponseWriter, r *http.Request) {
 			case "SmartContract":
 				data, err = api.GetSCInfoFromSCID(id)
 			default:
-				data, err = api.GetTransferBlockInfoFromTxnID(id)
+				data, err = api.GetTransactionInfo(id)
 				assetType = "TransferBlock"
 			}
 		} else {
 			// Not a token — try as a transaction hash
 			assetType = "TransferBlock"
-			data, err = api.GetTransferBlockInfoFromTxnID(id)
+			data, err = api.GetTransactionInfo(id)
 		}
 	}
 
@@ -193,12 +191,12 @@ func GetSCBlockInfoFromTxnHash(w http.ResponseWriter, r *http.Request) {
 
 	var response interface{}
 
-	scBlockInfo, err := api.GetSCBlockInfoFromTxnId(hash)
-	if err != nil {
-		http.Error(w, "Failed to fetch SC block info", http.StatusInternalServerError)
-		return
-	}
-	response = scBlockInfo
+	// scBlockInfo, err := api.GetSCBlockInfoFromTxnId(hash)
+	// if err != nil {
+	// 	http.Error(w, "Failed to fetch SC block info", http.StatusInternalServerError)
+	// 	return
+	// }
+	response = nil
 
 	// Send JSON response
 	w.Header().Set("Content-Type", "application/json")

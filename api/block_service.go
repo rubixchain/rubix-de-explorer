@@ -1,14 +1,8 @@
 package api
 
 import (
-	"encoding/json"
-	"explorer-server/config"
 	"explorer-server/database"
 	"explorer-server/database/models"
-	"explorer-server/model"
-	"fmt"
-	"io"
-	"net/http"
 )
 
 // GetTxnsCount returns total number of TransferBlocks records (cached 5s)
@@ -24,7 +18,7 @@ import (
 // 	return count, nil
 // }
 
-func GetTransferBlocksList(limit, page int) ([]models.TransactionInfo, error) {
+func GetTransactionInfoList(limit, page int) ([]models.TransactionInfo, error) {
 	var transactions []models.TransactionInfo
 
 	if page < 1 {
@@ -48,215 +42,22 @@ func GetTransferBlocksList(limit, page int) ([]models.TransactionInfo, error) {
 	return transactions, nil
 }
 
-func GetTransferBlockInfoFromTxnID(hash string) (model.TransactionInfo, error) {
-	var block model.TransactionInfo
+func GetTransactionInfo(txnID string) (models.TransactionInfo, error) {
+	var transaction models.TransactionInfo
 
-	if err := database.ReadDB.Where("txn_id = ?", hash).First(&block).Error; err != nil {
-		return block, err
+	if err := database.ReadDB.Table("TransactionInfo").Where("transaction_id = ?", txnID).First(&transaction).Error; err != nil {
+		return transaction, err
 	}
 
-	return block, nil
+	return transaction, nil
 }
 
-func GetTransferBlockInfoFromBlockHash(hash string) (model.TransactionInfo, error) {
-	var block model.TransactionInfo
+func GetTokenInfo(tokenID string) (models.Token, error) {
+	var token models.Token
 
-	if err := database.ReadDB.Where("block_hash = ?", hash).First(&block).Error; err != nil {
-		return block, err
+	if err := database.ReadDB.Table("Tokens").Where("token_id = ?", tokenID).First(&token).Error; err != nil {
+		return token, err
 	}
 
-	// If amount is missing, fetch it from fullnode
-	// if (block.Amount == nil || *block.Amount == 0) && block.TxnID != nil && *block.TxnID != "" {
-	// 	apiURL := fmt.Sprintf("%s/api/de-exp/get-txn-amount-by-txnID?txnID=%s",
-	// 		config.RubixNodeURL, *block.TxnID,
-	// 	)
-
-	// 	client := GetNodeHTTPClient()
-	// 	release := acquireNodeSlot()
-	// 	defer release()
-
-	// 	resp, err := client.Get(apiURL)
-	// 	if err != nil {
-	// 		log.Printf("⚠️ Failed to call fullnode for txn %s: %v", *block.TxnID, err)
-	// 	} else {
-	// 		defer resp.Body.Close()
-
-	// 		if resp.StatusCode != http.StatusOK {
-	// 			log.Printf("⚠️ Fullnode returned %d for txn %s", resp.StatusCode, *block.TxnID)
-	// 		} else {
-	// 			var result struct {
-	// 				Status  bool   `json:"status"`
-	// 				Message string `json:"message"`
-	// 				Result  struct {
-	// 					TransactionID    string  `json:"TransactionID"`
-	// 					TransactionValue float64 `json:"TransactionValue"`
-	// 					BlockHash        string  `json:"BlockHash"`
-	// 				} `json:"result"`
-	// 			}
-
-	// 			if err := json.NewDecoder(resp.Body).Decode(&result); err == nil && result.Status {
-	// 				if result.Result.TransactionValue != 0 {
-	// 					block.Amount = &result.Result.TransactionValue
-
-	// 					_ = database.WriteDB.
-	// 						Model(&models.TransactionBlocks{}).
-	// 						Where("txn_id = ?", block.TxnID).
-	// 						Update("amount", block.Amount).Error
-	// 				}
-	// 			}
-	// 		}
-	// 	}
-	// }
-
-	return block, nil
-}
-
-func fetchTxnAmountFromFullNode(txnID string) *float64 {
-	url := fmt.Sprintf("%s/api/de-exp/get-txn-amount-by-txnID?txnID=%s",
-		config.RubixNodeURL, txnID,
-	)
-
-	client := GetNodeHTTPClient()
-	release := acquireNodeSlot()
-	defer release()
-
-	resp, err := client.Get(url)
-	if err != nil {
-		fmt.Printf("❌ Failed to call fullnode for txnID %s: %v\n", txnID, err)
-		return nil
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		fmt.Printf("⚠️ Fullnode API returned %d for txnID %s\n", resp.StatusCode, txnID)
-		io.Copy(io.Discard, resp.Body)
-		return nil
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Printf("⚠️ Error reading response for txnID %s: %v\n", txnID, err)
-		return nil
-	}
-
-	var result struct {
-		Status  bool   `json:"status"`
-		Message string `json:"message"`
-		Result  struct {
-			TransactionID    string  `json:"TransactionID"`
-			TransactionValue float64 `json:"TransactionValue"`
-			BlockHash        string  `json:"BlockHash"`
-		} `json:"result"`
-	}
-
-	if err := json.Unmarshal(body, &result); err != nil || !result.Status {
-		fmt.Printf("⚠️ Could not parse amount for txnID %s: %v\n", txnID, err)
-		return nil
-	}
-
-	return &result.Result.TransactionValue
-}
-
-func GetBlockType(txnId string) (int64, error) {
-	// NOTE: DB column block_type is string (transfer/burnt/etc.).
-	// Keeping signature as int64 to match existing usage.
-	var blockTypeStr string
-
-	err := database.ReadDB.
-		Table("AllBlocks").
-		Select("block_type").
-		Where("txn_id = ?", txnId).
-		Scan(&blockTypeStr).Error
-
-	if err != nil {
-		return 0, fmt.Errorf("❌ failed to get block_type for txn_id %s: %v", txnId, err)
-	}
-
-	// Map string types to numeric codes if needed (keeping simple & backward-compatible).
-	switch blockTypeStr {
-	case "transfer":
-		return 1, nil
-	case "burnt":
-		return 2, nil
-	case "burnt_for_ft":
-		return 3, nil
-	case "deploy":
-		return 4, nil
-	case "execute":
-		return 5, nil
-	case "mint":
-		return 6, nil
-	default:
-		return 0, nil
-	}
-}
-
-func GetSCBlockInfoFromTxnId(hash string) (interface{}, error) {
-	// var block models.SCBlocks
-
-	// if err := database.ReadDB.
-	// 	Where("block_id = ?", hash).
-	// 	First(&block).Error; err != nil {
-	// 	return models.SCBlocks{}, err
-	// }
-
-	return nil, nil
-}
-
-func GetBurntBlockInfo(hash string) (interface{}, error) {
-	// var block models.BurntBlocks
-
-	// if err := database.ReadDB.
-	// 	Where("block_hash = ?", hash).
-	// 	First(&block).Error; err != nil {
-	// 	return models.BurntBlocks{}, err
-	// }
-
-	return nil, nil
-}
-
-func GetBurntBlockList(limit, page int) (interface{}, error) {
-	// var blocks []models.BurntBlocks
-
-	if page < 1 {
-		page = 1
-	}
-	if limit < 1 {
-		limit = 10
-	}
-	// offset := (page - 1) * limit
-
-	// if err := database.ReadDB.
-	// 	Order("epoch DESC").
-	// 	Limit(limit).
-	// 	Offset(offset).
-	// 	Find(&blocks).Error; err != nil {
-	// 	return nil, err
-
-	// var count int64
-	// if err := database.ReadDB.Model(&models.BurntBlocks{}).Count(&count).Error; err != nil {
-	// 	return model.BurntBlocksListResponse{}, err
-	// }
-
-	// response := model.BurntBlocksListResponse{
-	// 	BurntBlocks: blocks,
-	// 	Count:       count,
-	// }
-
-	return nil, nil
-}
-
-// helper functions
-func deref(ptr *string) string {
-	if ptr == nil {
-		return ""
-	}
-	return *ptr
-}
-
-func derefFloat(ptr *float64) float64 {
-	if ptr == nil {
-		return 0
-	}
-	return *ptr
+	return token, nil
 }

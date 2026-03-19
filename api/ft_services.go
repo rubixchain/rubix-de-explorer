@@ -23,18 +23,6 @@ func GetFTInfoFromFTID(ftID string) (*models.FT, error) {
 	}
 	return &ftInfo, nil
 }
-func GetFTListFromDID(did string) ([]models.FT, error) {
-	var ftList []models.FT
-
-	// Fetch all FTs where owner_did = given DID
-	if err := database.ReadDB.
-		Where("owner_did = ?", did).
-		Find(&ftList).Error; err != nil {
-		return nil, err
-	}
-
-	return ftList, nil
-}
 
 func GetFTGroupList(limit, page int) ([]model.FTGroup, error) {
 	var tokens []models.Token
@@ -109,10 +97,11 @@ func GetFTListByFTName(ftName string, creatorDID string, limit, page int) ([]mod
 }
 
 // // GetRBTInfoFromRBTID fetches a single RBT by its ID
-// func GetRBTInfoFromRBTID(rbtID string) (*models.RBT, error) {
-// 	var rbt models.RBT
-// 	if err := database.ReadDB.First(&rbt, "rbt_id = ?", rbtID).Error; err != nil {
-// 		return nil, err
-// 	}
-// 	return &rbt, nil
-// }
+//
+//	func GetRBTInfoFromRBTID(rbtID string) (*models.RBT, error) {
+//		var rbt models.RBT
+//		if err := database.ReadDB.First(&rbt, "rbt_id = ?", rbtID).Error; err != nil {
+//			return nil, err
+//		}
+//		return &rbt, nil
+//	}

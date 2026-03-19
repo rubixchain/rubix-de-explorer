@@ -119,7 +119,7 @@ func GetLatestTransactionsListHandler(w http.ResponseWriter, r *http.Request) {
 		page = 1
 	}
 
-	transactions, err := api.GetTransferBlocksList(limit, page)
+	transactions, err := api.GetTransactionInfoList(limit, page)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -244,5 +244,31 @@ func GetSCListHandler(w http.ResponseWriter, r *http.Request) {
 	if data == nil {
 		data = []models.Token{}
 	}
+	json.NewEncoder(w).Encode(data)
+}
+
+func GetTransactionInfoHandler(w http.ResponseWriter, r *http.Request) {
+	txnID := r.URL.Query().Get("transactionID")
+
+	data, err := api.GetTransactionInfo(txnID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(data)
+}
+
+func GetTokenInfoHandler(w http.ResponseWriter, r *http.Request) {
+	tokenID := r.URL.Query().Get("tokenID")
+
+	data, err := api.GetTokenInfo(tokenID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)
 }
