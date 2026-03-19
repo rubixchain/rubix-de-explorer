@@ -3,43 +3,39 @@ package api
 import (
 	"explorer-server/database"
 	"explorer-server/database/models"
-	"explorer-server/model"
 )
 
 func GetSCCount() (int64, error) {
 	var count int64
-	if err := database.ReadDB.Model(&models.SC{}).Count(&count).Error; err != nil {
+	if err := database.ReadDB.Model(&models.Token{}).Where("token_type = ?", 4).Count(&count).Error; err != nil {
 		return 0, err
 	}
 	return count, nil
 }
 
-func GetSCInfoFromSCID(scID string) (*models.SC, error) {
-	var scInfo models.SC
-	if err := database.ReadDB.First(&scInfo, "token_id = ?", scID).Error; err != nil {
+func GetSCInfoFromSCID(scID string) (*models.Token, error) {
+	var token models.Token
+	if err := database.ReadDB.Where("token_id = ? AND token_type = ?", scID, 4).First(&token).Error; err != nil {
 		return nil, err
 	}
-	return &scInfo, nil
+	return &token, nil
 }
 
-func GetSCList(limit, page int) (model.SCListResponse, error) {
-	var scs []models.SC
-
+func GetSCList(limit, page int) ([]models.Token, error) {
+	var tokens []models.Token
 	offset := (page - 1) * limit
 
-	if err := database.ReadDB.
+	// Fetch paginated Smart Contracts (TokenType = 4)
+	if err := database.ReadDB.Model(&models.Token{}).
+		Where("token_type = ?", 4).
+		Order("updated_at DESC").
 		Limit(limit).
 		Offset(offset).
-		Find(&scs).Error; err != nil {
-		return model.SCListResponse{}, err
+		Find(&tokens).Error; err != nil {
+		return nil, err
 	}
 
-	var count int64
-	if err := database.ReadDB.Model(&models.SC{}).Count(&count).Error; err != nil {
-		return model.SCListResponse{}, err
-	}
-
-	return model.SCListResponse{SCs: scs, Count: count}, nil
+	return tokens, nil
 }
 
 func GetSCBlockList(limit, page int) (interface{}, error) {
