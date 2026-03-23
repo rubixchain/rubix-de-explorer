@@ -35,6 +35,9 @@ func NewRouter() *mux.Router {
 		w.Write([]byte(`{"status":"ok"}`))
 	}).Methods("GET")
 
+	// Search
+	r.HandleFunc("/api/get-info", handlers.GetInfo).Methods(http.MethodGet)
+
 	// Stats
 	r.HandleFunc("/api/get-rbt-count", handlers.GetRBTCountHandler).Methods(http.MethodGet)
 	r.HandleFunc("/api/get-ft-count", handlers.GetFTCountHandler).Methods(http.MethodGet)
@@ -66,13 +69,6 @@ func NewRouter() *mux.Router {
 
 	// Token Info
 	r.HandleFunc("/api/get-token-info", handlers.GetTokenInfoHandler).Methods(http.MethodGet)
-
-	r.HandleFunc("/api/get-info", handlers.GetInfo).Methods(http.MethodGet)
-	r.HandleFunc("/api/get-token-chain", handlers.GetLatestTokenChainFromTokenID).Methods(http.MethodGet)
-	r.HandleFunc("/api/token-blocks", handlers.GetLatestTokenBlocksFromTokenID).Methods(http.MethodGet)
-	r.HandleFunc("/api/sclist", handlers.GetSCListHandler).Methods(http.MethodGet)
-
-	r.HandleFunc("/api/sctxn-info", handlers.GetSCBlockInfoFromTxnHash).Methods(http.MethodGet)
 
 	return r
 }
