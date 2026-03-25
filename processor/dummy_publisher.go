@@ -21,7 +21,7 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 	// 1. Generate 20 DIDs (Must match didRegex: bafy + 55 chars of Base32)
 	dids := make([]string, 20)
 	for i := 0; i < 20; i++ {
-		dids[i] = fmt.Sprintf("bafy%s%02d", randomBase32(53), i)
+		dids[i] = fmt.Sprintf("bafy%s", randomBase32(55))
 	}
 
 	// 2. Token Storage for tracking ownership and chains
@@ -65,14 +65,14 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 	// 50 NFT, 50 SC (Must match ipfsRegex: Qm + 44 chars of Base58)
 	for i := 0; i < 50; i++ {
 		allTokens = append(allTokens, &TokenStore{
-			ID:    fmt.Sprintf("Qm%s%02d", randomBase58(42), i),
+			ID:    fmt.Sprintf("Qm%s", randomBase58(44)),
 			Type:  "NFT",
 			Value: 1.0,
 		})
 	}
 	for i := 0; i < 50; i++ {
 		allTokens = append(allTokens, &TokenStore{
-			ID:    fmt.Sprintf("Qm%s%02d", randomBase58(42), i),
+			ID:    fmt.Sprintf("Qm%s", randomBase58(44)),
 			Type:  "SC",
 			Value: 1.0,
 		})
