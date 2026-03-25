@@ -125,6 +125,41 @@ All requests follow standard REST principles. Pagination parameters `limit` (def
 
 ### 3. Lists and Holders
 
+- **`GET /api/dagtxn/{txnID}?depth=<n>`**
+  - **Description**: Returns an anchor transaction and all of its ancestors up to `depth` levels back, traversing the token chain DAG via `previous_transaction_id` links. Returns nodes (full `TransactionInfo`) and directed edges (`from` → `to`, child → parent).
+  - **Path Param**: `txnID` — the transaction to start from.
+  - **Query Param**: `depth` (optional) — how many hops back to traverse (default/max `100`).
+  - **Infinite Scroll**: When the user scrolls to the bottom of the visible DAG, take the oldest transaction currently visible and call `GET /api/dagtxn/{oldestTxnID}`. Merge the new nodes and edges into the existing graph.
+  - **Example**: `GET /api/dagtxn/Qmabc123...?depth=100`
+  - **Output Example**:
+    ```json
+    {
+      "transactions": [
+        { "transaction_id": "Qmabc...", "initiator": "bafybm...", "epoch": 1710234567, "tokens": {...} },
+        { "transaction_id": "Qmxyz...", "initiator": "bafybm...", "epoch": 1710234500, "tokens": {...} }
+      ],
+      "edges": [
+        { "from": "Qmabc...", "to": "Qmxyz..." }
+      ]
+    }
+    ```
+
+- **`GET /api/dagtxns`**
+  - **Description**: Returns the latest 1000 transactions ordered by epoch descending. No parameters required.
+  - **Output Example**:
+    ```json
+    [
+      {
+        "transaction_id": "Qm...",
+        "initiator": "bafybm...",
+        "owner": "bafybm...",
+        "epoch": 1679567400,
+        "tokens": { "rbt": [...] },
+        "memo": "Payment for services"
+      }
+    ]
+    ```
+
 - **`GET /api/get-latest-transactions?limit=2`**
   - **Output Example**:
     ```json
@@ -165,6 +200,35 @@ All requests follow standard REST principles. Pagination parameters `limit` (def
     ]
     ```
 
+- **`GET /api/search-rbt-suggestions?query=<prefix>&limit=<n>`**
+  - **Description**: Autocomplete suggestions for RBT token IDs. Returns token IDs that start with the given prefix.
+  - **Query Params**:
+    - `query` (required) — prefix to match against token IDs.
+    - `limit` (optional) — max results to return (default `10`, max `20`).
+  - **Example**: `GET /api/search-rbt-suggestions?query=123&limit=5`
+  - **Output Example**:
+    ```json
+    [
+      { "token_id": "123_1" },
+      { "token_id": "123_2" },
+      { "token_id": "1234_1" }
+    ]
+    ```
+
+- **`GET /api/get-rbt-info?tokenId=<id>`**
+  - **Description**: Returns owner and value details for a single RBT token. Used to populate the detail card when a user selects an RBT suggestion.
+  - **Query Params**:
+    - `tokenId` (required) — full RBT token ID.
+  - **Example**: `GET /api/get-rbt-info?tokenId=123_1`
+  - **Output Example**:
+    ```json
+    {
+      "token_id": "123_1",
+      "owner_did": "bafybmeiowner...",
+      "token_value": 1.0
+    }
+    ```
+
 - **`GET /api/get-ft-group-list`**
   - **Output Example**:
     ```json
@@ -177,8 +241,66 @@ All requests follow standard REST principles. Pagination parameters `limit` (def
     ]
     ```
 
+- **`GET /api/search-ft-suggestions?query=<prefix>&limit=<n>`**
+  - **Description**: Autocomplete endpoint for FT name search. Returns distinct `(ft_name, creator_did)` pairs where the FT name starts with the given prefix (case-insensitive). Useful for building search-as-you-type dropdowns — multiple results can share the same name but have different creator DIDs.
+  - **Query Params**:
+    - `query` (required) — prefix to match against FT names.
+    - `limit` (optional) — max results to return (default `10`, max `20`).
+  - **Example**: `GET /api/search-ft-suggestions?query=rub&limit=5`
+  - **Output Example**:
+    ```json
+    [
+      {
+        "ft_name": "RubixPoints",
+        "creator_did": "bafybmeibnbqcgqnhobznoqmhmdqd..."
+      },
+      {
+        "ft_name": "RubixRewards",
+        "creator_did": "bafybmeiaaabbbcccdddeeefffggg..."
+      }
+    ]
+    ```
+
 - **`GET /api/get-ft-list-by-ftname?ftName=RubixPoints`**
   - **Output**: List of individual FT tokens matching the name.
+
+- **`GET /api/get-ft-info?ftName=<name>&creatorDID=<did>`**
+  - **Description**: Returns aggregate details for a specific FT, uniquely identified by its name and creator DID. Used to populate the detail card when a user selects an FT suggestion.
+  - **Query Params**:
+    - `ftName` (required) — exact FT name.
+    - `creatorDID` (required) — creator's DID.
+  - **Example**: `GET /api/get-ft-info?ftName=RubixPoints&creatorDID=bafybmeibnbqcgqnhobznoqmhmdqd...`
+  - **Output Example**:
+    ```json
+    {
+      "ft_name": "RubixPoints",
+      "creator_did": "bafybmeibnbqcgqnhobznoqmhmdqd...",
+      "ft_value": 1.0,
+      "total_amount": 10000,
+      "created_time": 1710234567
+    }
+    ```
+
+- **`GET /api/get-ft-top-holders?ftName=<name>&creatorDID=<did>&limit=<n>&page=<n>`**
+  - **Description**: Returns the top holders of a specific FT (identified by its name + creator DID), ranked by token count in descending order. Supports pagination.
+  - **Query Params**:
+    - `ftName` (required) — exact FT name (e.g. `RubixPoints`).
+    - `creatorDID` (required) — creator DID of the FT (e.g. `bafybm...`).
+    - `limit` (optional) — results per page (default `10`).
+    - `page` (optional) — page number (default `1`).
+  - **Example**: `GET /api/get-ft-top-holders?ftName=RubixPoints&creatorDID=bafybmeibnbqcgqnhobznoqmhmdqd...&limit=5&page=1`
+  - **Output Example**:
+    ```json
+    {
+      "holders": [
+        { "did": "bafybmeiaaabbbcccdddeeefffggg...", "token_count": 500 },
+        { "did": "bafybmeihhhjjjkkkllllmmmnnnooo...", "token_count": 320 }
+      ],
+      "total_count": 87,
+      "page": 1,
+      "limit": 5
+    }
+    ```
 
 - **`GET /api/get-sc-list`**
   - **Output**: List of Smart Contract tokens (`token_type: 4`).
@@ -212,6 +334,7 @@ All requests follow standard REST principles. Pagination parameters `limit` (def
 
 - **`GET /api/get-transaction-info-list?tokenID=<id>`**
   - **Description**: Returns the full transaction history for a specific token.
+  
 - **`GET /api/get-transaction-id-list?tokenID=<id>`**
   - **Output Example**:
     ```json

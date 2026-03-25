@@ -48,6 +48,8 @@ func NewRouter() *mux.Router {
 
 	// Latest transactions
 	r.HandleFunc("/api/get-latest-transactions", handlers.GetLatestTransactionsListHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/dagtxns", handlers.GetDAGTransactionsHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/dagtxn/{txnID}", handlers.GetDAGTxnHandler).Methods(http.MethodGet)
 
 	// Top Holders
 	r.HandleFunc("/api/get-did-with-most-rbts", handlers.GetDIDHoldersListHandler).Methods(http.MethodGet)
@@ -55,9 +57,14 @@ func NewRouter() *mux.Router {
 	// Tokens
 	// RBT
 	r.HandleFunc("/api/get-rbt-list", handlers.GetRBTListHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/search-rbt-suggestions", handlers.GetRBTSuggestionsHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-rbt-info", handlers.GetRBTInfoHandler).Methods(http.MethodGet)
 	// FT
 	r.HandleFunc("/api/get-ft-group-list", handlers.GetFTGroupListHandler).Methods(http.MethodGet)
 	r.HandleFunc("/api/get-ft-list-by-ftname", handlers.GetFTListByFTNameHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/search-ft-suggestions", handlers.GetFTSuggestionsHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-ft-top-holders", handlers.GetFTTopHoldersHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-ft-info", handlers.GetFTInfoHandler).Methods(http.MethodGet)
 
 	//SC
 	r.HandleFunc("/api/get-sc-list", handlers.GetSCListHandler).Methods(http.MethodGet)

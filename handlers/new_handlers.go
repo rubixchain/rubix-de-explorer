@@ -7,6 +7,8 @@ import (
 	"explorer-server/model"
 	"net/http"
 	"strconv"
+
+	"github.com/gorilla/mux"
 )
 
 // ==========================================
@@ -204,6 +206,39 @@ func GetSCListHandler(w http.ResponseWriter, r *http.Request) {
 //   4. Specific Info and History Handlers
 // ==========================================
 
+// GetDAGTxnHandler returns an anchor transaction and its ancestors up to 100 levels deep.
+// Path param: txnID. Optional query param: depth (default/max 100).
+// For infinite scroll: pass the oldest transaction from the previous response as the new txnID.
+func GetDAGTxnHandler(w http.ResponseWriter, r *http.Request) {
+	txnID := mux.Vars(r)["txnID"]
+	if txnID == "" {
+		http.Error(w, "Missing txnID", http.StatusBadRequest)
+		return
+	}
+	depth, _ := strconv.Atoi(r.URL.Query().Get("depth"))
+	data, err := api.GetDAGFromTxn(txnID, depth)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(data)
+}
+
+// GetDAGTransactionsHandler returns the latest 1000 transactions ordered by epoch descending.
+func GetDAGTransactionsHandler(w http.ResponseWriter, r *http.Request) {
+	data, err := api.GetDAGTransactions()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if data == nil {
+		data = []models.TransactionInfo{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(data)
+}
+
 // GetTransactionInfoHandler returns details for a single transaction
 func GetTransactionInfoHandler(w http.ResponseWriter, r *http.Request) {
 	txnID := r.URL.Query().Get("transactionID")
@@ -258,6 +293,106 @@ func GetTokenInfoHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)
+}
+
+// GetRBTSuggestionsHandler returns autocomplete suggestions for RBT token IDs.
+// Query params: query (required), limit (optional)
+func GetRBTSuggestionsHandler(w http.ResponseWriter, r *http.Request) {
+	prefix := r.URL.Query().Get("query")
+	if prefix == "" {
+		http.Error(w, "Missing 'query' parameter", http.StatusBadRequest)
+		return
+	}
+	limitStr := r.URL.Query().Get("limit")
+	limit, _ := strconv.Atoi(limitStr)
+	suggestions, err := api.SearchRBTSuggestions(prefix, limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if suggestions == nil {
+		suggestions = []model.RBTSuggestion{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(suggestions)
+}
+
+// GetRBTInfoHandler returns owner and value details for a single RBT token.
+// Query params: tokenId (required)
+func GetRBTInfoHandler(w http.ResponseWriter, r *http.Request) {
+	tokenID := r.URL.Query().Get("tokenId")
+	if tokenID == "" {
+		http.Error(w, "Missing 'tokenId' parameter", http.StatusBadRequest)
+		return
+	}
+	info, err := api.GetRBTInfo(tokenID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(info)
+}
+
+// GetFTInfoHandler returns aggregate details for a specific FT.
+// Query params: ftName (required), creatorDID (required)
+func GetFTInfoHandler(w http.ResponseWriter, r *http.Request) {
+	ftName := r.URL.Query().Get("ftName")
+	creatorDID := r.URL.Query().Get("creatorDID")
+	if ftName == "" || creatorDID == "" {
+		http.Error(w, "Missing required parameters: ftName, creatorDID", http.StatusBadRequest)
+		return
+	}
+	info, err := api.GetFTInfo(ftName, creatorDID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(info)
+}
+
+// GetFTTopHoldersHandler returns the top holders of a specific FT, paginated.
+// Query params: ftName (required), creatorDID (required), limit, page
+func GetFTTopHoldersHandler(w http.ResponseWriter, r *http.Request) {
+	ftName := r.URL.Query().Get("ftName")
+	creatorDID := r.URL.Query().Get("creatorDID")
+	if ftName == "" || creatorDID == "" {
+		http.Error(w, "Missing required parameters: ftName, creatorDID", http.StatusBadRequest)
+		return
+	}
+	limit, page := getPagination(r)
+	data, err := api.GetFTTopHolders(ftName, creatorDID, limit, page)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(data)
+}
+
+// GetFTSuggestionsHandler returns autocomplete suggestions for FT names.
+// Query param: query (required), limit (optional, default 10, max 20)
+// Example: GET /api/search-ft-suggestions?query=app&limit=10
+// Response: [{"ft_name":"apple","creator_did":"bafybm..."},...]
+func GetFTSuggestionsHandler(w http.ResponseWriter, r *http.Request) {
+	prefix := r.URL.Query().Get("query")
+	if prefix == "" {
+		http.Error(w, "Missing 'query' parameter", http.StatusBadRequest)
+		return
+	}
+	limitStr := r.URL.Query().Get("limit")
+	limit, _ := strconv.Atoi(limitStr)
+	suggestions, err := api.SearchFTSuggestions(prefix, limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if suggestions == nil {
+		suggestions = []model.FTSuggestion{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(suggestions)
 }
 
 // -------------------------------------------------------------------
