@@ -106,6 +106,93 @@ func GetDIDCount() (int64, error) {
 // 3. Lists and Holders
 // -------------------------------------------------------------------
 
+// GetDAGFromTxn returns the anchor transaction plus up to `depth` levels of ancestors,
+// traversing the TokenChain backwards via previous_transaction_id.
+// Nodes are all unique TransactionInfo records. Edges are directed child → parent links.
+func GetDAGFromTxn(txnID string, depth int) (model.DAGResponse, error) {
+	if depth <= 0 || depth > 100 {
+		depth = 100
+	}
+
+	// Recursive CTE: walk backwards through TokenChain up to `depth` hops.
+	// UNION (not UNION ALL) deduplicates rows and prevents cycles.
+	type edgeRow struct {
+		ChildTxnID  string `gorm:"column:child_txn_id"`
+		ParentTxnID string `gorm:"column:parent_txn_id"`
+	}
+	var edges []edgeRow
+	if err := database.ReadDB.Raw(`
+		WITH RECURSIVE dag_edges AS (
+			SELECT DISTINCT
+				transaction_id          AS child_txn_id,
+				previous_transaction_id AS parent_txn_id,
+				1                       AS depth
+			FROM "TokenChain"
+			WHERE transaction_id = ?
+			  AND previous_transaction_id IS NOT NULL
+			  AND previous_transaction_id <> ''
+
+			UNION
+
+			SELECT
+				tc.transaction_id,
+				tc.previous_transaction_id,
+				de.depth + 1
+			FROM "TokenChain" tc
+			INNER JOIN dag_edges de ON tc.transaction_id = de.parent_txn_id
+			WHERE de.depth < ?
+			  AND tc.previous_transaction_id IS NOT NULL
+			  AND tc.previous_transaction_id <> ''
+		)
+		SELECT DISTINCT child_txn_id, parent_txn_id FROM dag_edges
+	`, txnID, depth).Scan(&edges).Error; err != nil {
+		return model.DAGResponse{}, err
+	}
+
+	// Collect all unique txnIDs (anchor + all nodes from edges).
+	seen := map[string]struct{}{txnID: {}}
+	for _, e := range edges {
+		seen[e.ChildTxnID] = struct{}{}
+		seen[e.ParentTxnID] = struct{}{}
+	}
+	txnIDs := make([]string, 0, len(seen))
+	for id := range seen {
+		txnIDs = append(txnIDs, id)
+	}
+
+	// Fetch TransactionInfo for all collected txnIDs.
+	var txns []models.TransactionInfo
+	if err := database.ReadDB.Table("TransactionInfo").
+		Where("transaction_id IN ?", txnIDs).
+		Order("epoch DESC").
+		Find(&txns).Error; err != nil {
+		return model.DAGResponse{}, err
+	}
+
+	// Build the DAGEdge slice for the response.
+	dagEdges := make([]model.DAGEdge, len(edges))
+	for i, e := range edges {
+		dagEdges[i] = model.DAGEdge{From: e.ChildTxnID, To: e.ParentTxnID}
+	}
+
+	if txns == nil {
+		txns = []models.TransactionInfo{}
+	}
+	if dagEdges == nil {
+		dagEdges = []model.DAGEdge{}
+	}
+	return model.DAGResponse{Transactions: txns, Edges: dagEdges}, nil
+}
+
+// GetDAGTransactions returns the latest 1000 transactions ordered by epoch descending.
+func GetDAGTransactions() ([]models.TransactionInfo, error) {
+	var transactions []models.TransactionInfo
+	if err := database.ReadDB.Table("TransactionInfo").Order("epoch DESC").Limit(1000).Find(&transactions).Error; err != nil {
+		return nil, err
+	}
+	return transactions, nil
+}
+
 func GetTransactionInfoList(limit, page int) ([]models.TransactionInfo, error) {
 	var transactions []models.TransactionInfo
 	if page < 1 {
@@ -281,4 +368,123 @@ func GetTokenInfo(tokenID string) (models.Token, error) {
 		return token, err
 	}
 	return token, nil
+}
+
+// SearchRBTSuggestions returns token IDs for RBT tokens whose ID starts with the given prefix.
+func SearchRBTSuggestions(prefix string, limit int) ([]model.RBTSuggestion, error) {
+	if limit <= 0 || limit > 20 {
+		limit = 10
+	}
+	var suggestions []model.RBTSuggestion
+	err := database.ReadDB.Raw(`
+		SELECT token_id
+		FROM "Tokens"
+		WHERE token_type = 1
+			AND token_id LIKE ?
+		ORDER BY token_id
+		LIMIT ?
+	`, prefix+"%", limit).Scan(&suggestions).Error
+	return suggestions, err
+}
+
+// GetRBTInfo returns owner and value for a single RBT token.
+func GetRBTInfo(tokenID string) (model.RBTInfo, error) {
+	var token models.Token
+	if err := database.ReadDB.Table("Tokens").
+		Where("token_id = ? AND token_type = ?", tokenID, 1).
+		First(&token).Error; err != nil {
+		return model.RBTInfo{}, err
+	}
+	return model.RBTInfo{
+		TokenID:    token.TokenID,
+		OwnerDID:   token.DID,
+		TokenValue: token.TokenValue,
+	}, nil
+}
+
+// GetFTInfo returns aggregate details for a specific FT (identified by name + creator DID).
+func GetFTInfo(ftName, creatorDID string) (model.FTInfo, error) {
+	var info model.FTInfo
+	err := database.ReadDB.Raw(`
+		SELECT
+			split_part(token_id, '_', 1)                              AS ft_name,
+			reverse(split_part(reverse(token_id), '_', 1))            AS creator_did,
+			MAX(token_value)                                           AS ft_value,
+			COUNT(*)                                                   AS total_amount,
+			EXTRACT(EPOCH FROM MIN(created_at))::bigint                AS created_time
+		FROM "Tokens"
+		WHERE token_type = 2
+			AND split_part(token_id, '_', 1) = ?
+			AND reverse(split_part(reverse(token_id), '_', 1)) = ?
+		GROUP BY ft_name, creator_did
+	`, ftName, creatorDID).Scan(&info).Error
+	return info, err
+}
+
+// GetFTTopHolders returns the top holders (by token count) for a specific FT,
+// identified by its name and creator DID, in descending order with pagination.
+func GetFTTopHolders(ftName, creatorDID string, limit, page int) (model.FTTopHoldersResponse, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	if page < 1 {
+		page = 1
+	}
+	offset := (page - 1) * limit
+
+	var holders []model.FTHolder
+	err := database.ReadDB.Raw(`
+		SELECT did, COUNT(*) AS token_count
+		FROM "Tokens"
+		WHERE token_type = 2
+			AND split_part(token_id, '_', 1) = ?
+			AND reverse(split_part(reverse(token_id), '_', 1)) = ?
+		GROUP BY did
+		ORDER BY token_count DESC
+		LIMIT ? OFFSET ?
+	`, ftName, creatorDID, limit, offset).Scan(&holders).Error
+	if err != nil {
+		return model.FTTopHoldersResponse{}, err
+	}
+
+	var countResult struct{ Count int64 }
+	if err := database.ReadDB.Raw(`
+		SELECT COUNT(DISTINCT did) AS count
+		FROM "Tokens"
+		WHERE token_type = 2
+			AND split_part(token_id, '_', 1) = ?
+			AND reverse(split_part(reverse(token_id), '_', 1)) = ?
+	`, ftName, creatorDID).Scan(&countResult).Error; err != nil {
+		return model.FTTopHoldersResponse{}, err
+	}
+
+	if holders == nil {
+		holders = []model.FTHolder{}
+	}
+	return model.FTTopHoldersResponse{
+		Holders:    holders,
+		TotalCount: countResult.Count,
+		Page:       page,
+		Limit:      limit,
+	}, nil
+}
+
+// SearchFTSuggestions returns distinct (ft_name, creator_did) pairs where
+// the FT name starts with the given prefix (case-insensitive). Used for autocomplete.
+func SearchFTSuggestions(prefix string, limit int) ([]model.FTSuggestion, error) {
+	if limit <= 0 || limit > 20 {
+		limit = 10
+	}
+	var suggestions []model.FTSuggestion
+	err := database.ReadDB.Raw(`
+		SELECT DISTINCT
+			split_part(token_id, '_', 1) AS ft_name,
+			reverse(split_part(reverse(token_id), '_', 1)) AS creator_did
+		FROM "Tokens"
+		WHERE token_type = 2
+			AND split_part(token_id, '_', 1) ILIKE ?
+		ORDER BY ft_name
+		LIMIT ?
+	`, prefix+"%", limit).Scan(&suggestions).Error
+	return suggestions, err
 }

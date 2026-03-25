@@ -193,3 +193,54 @@ type FTGroup struct {
 	Count      float64 `json:"count"`
 	CreatorDID string  `json:"creatorDID"`
 }
+
+type FTSuggestion struct {
+	FTName     string `json:"ft_name" gorm:"column:ft_name"`
+	CreatorDID string `json:"creator_did" gorm:"column:creator_did"`
+}
+
+type RBTSuggestion struct {
+	TokenID string `json:"token_id" gorm:"column:token_id"`
+}
+
+type RBTInfo struct {
+	TokenID    string  `json:"token_id"`
+	OwnerDID   string  `json:"owner_did"`
+	TokenValue float64 `json:"token_value"`
+}
+
+type FTInfo struct {
+	FTName      string  `json:"ft_name" gorm:"column:ft_name"`
+	CreatorDID  string  `json:"creator_did" gorm:"column:creator_did"`
+	FTValue     float64 `json:"ft_value" gorm:"column:ft_value"`
+	TotalAmount int64   `json:"total_amount" gorm:"column:total_amount"`
+	CreatedTime int64   `json:"created_time" gorm:"column:created_time"`
+}
+
+// DAGEdge represents a directed connection between two transactions in the DAG.
+// From is the child (newer), To is the parent (older).
+type DAGEdge struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+// DAGResponse is returned by /api/dagtxn/{txnID}.
+// Transactions contains all nodes (including the anchor), Edges contains all directed links.
+// For infinite scroll: use the oldest transaction in the current response as the
+// anchor for the next call to extend the graph further back.
+type DAGResponse struct {
+	Transactions []models.TransactionInfo `json:"transactions"`
+	Edges        []DAGEdge                `json:"edges"`
+}
+
+type FTHolder struct {
+	DID        string `json:"did" gorm:"column:did"`
+	TokenCount int64  `json:"token_count" gorm:"column:token_count"`
+}
+
+type FTTopHoldersResponse struct {
+	Holders    []FTHolder `json:"holders"`
+	TotalCount int64      `json:"total_count"`
+	Page       int        `json:"page"`
+	Limit      int        `json:"limit"`
+}
