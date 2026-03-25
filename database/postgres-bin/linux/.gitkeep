@@ -1,0 +1,7 @@
+# This file ensures the linux directory is tracked by git
+# PostgreSQL Linux binaries should be placed in this directory structure:
+# linux/
+#   ├── bin/
+#   ├── lib/
+#   ├── share/
+#   └── data/ (runtime - ignored by git)

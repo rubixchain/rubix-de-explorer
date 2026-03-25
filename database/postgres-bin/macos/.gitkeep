@@ -1,0 +1,7 @@
+# This file ensures the macos directory is tracked by git
+# PostgreSQL macOS binaries should be placed in this directory structure:
+# macos/
+#   ├── bin/
+#   ├── lib/
+#   ├── share/
+#   └── data/ (runtime - ignored by git)
