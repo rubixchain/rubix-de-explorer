@@ -92,14 +92,13 @@ go build -o explorer.exe .
 
 ## API Reference
 
-All requests follow standard REST principles. Pagination parameters `limit` (default 10) and `page` (default 1) are supported on list endpoints.
+All requests follow standard REST principles. Pagination parameters `limit` (default 10) and `page` (default 1) are supported on all list endpoints.
 
 ### 1. Unified Search
 
 - **`GET /api/get-info?id=<string>`**
-  - **Description**: Routes queries based on format (DID, Token, or Transaction).
-  - **Input**: `id` - DID, TokenID, or TransactionID.
-  - **Output Example (DID)**:
+  - **Input**: `id` - DID (starts with `bafybm`), TokenID (`Qm...`), or TransactionID.
+  - **Output Example (DID Search)**:
     ```json
     {
       "type": "DID",
@@ -108,7 +107,7 @@ All requests follow standard REST principles. Pagination parameters `limit` (def
           "did": "bafybm...",
           "asset_type": "RBT",
           "token_name": "RBT",
-          "balance": 10.5,
+          "balance": 150.0,
           "last_update": 1679567400
         }
       ]
@@ -125,7 +124,9 @@ All requests follow standard REST principles. Pagination parameters `limit` (def
 
 ### 3. Lists and Holders
 
-- **`GET /api/get-latest-transactions?limit=2`**
+List endpoints return a plain JSON array of objects.
+
+- **`GET /api/get-latest-transactions?limit=10&page=1`**
   - **Output Example**:
     ```json
     [
@@ -134,33 +135,64 @@ All requests follow standard REST principles. Pagination parameters `limit` (def
         "initiator": "bafybm...",
         "owner": "bafybm...",
         "epoch": 1679567400,
-        "tokens": { "rbt": [...] },
-        "memo": "Payment for services"
+        "network": "rubix",
+        "tokens": { "rbt": [{"tokenId": "Qm...", "previousTransactionID": "", "data": ""}] },
+        "committedTokens": [],
+        "quorums": [],
+        "memo": "Initial mint",
+        "created_at": "2023-03-23T10:00:00Z"
+      },
+      {
+        "transaction_id": "Qm...",
+        "initiator": "bafybm...",
+        "owner": "bafybm...",
+        "epoch": 1679567450,
+        "network": "rubix",
+        "tokens": { "rbt": [{"tokenId": "Qm...", "previousTransactionID": "Qm...", "data": ""}] },
+        "committedTokens": [],
+        "quorums": [],
+        "memo": "Transfer",
+        "created_at": "2023-03-23T10:00:50Z"
       }
     ]
     ```
 
-- **`GET /api/get-did-with-most-rbts?limit=2`**
+- **`GET /api/get-did-with-most-rbts?limit=10`**
   - **Output Example**:
     ```json
     [
       {
         "did": "bafybm...",
-        "balance": 500.75,
+        "asset_type": "RBT",
+        "token_name": "RBT",
+        "balance": 5000.0,
         "last_update": 1679567400
+      },
+      {
+        "did": "bafybm...",
+        "asset_type": "RBT",
+        "token_name": "RBT",
+        "balance": 2500.5,
+        "last_update": 1679567500
       }
     ]
     ```
 
-- **`GET /api/get-rbt-list?limit=2`**
+- **`GET /api/get-rbt-list`**, **`GET /api/get-nft-list`**, **`GET /api/get-sc-list`**
   - **Output Example**:
     ```json
     [
       {
         "token_id": "Qm...",
+        "parent_token_id": "",
         "token_value": 1.0,
+        "token_status": 1,
         "did": "bafybm...",
-        "token_status": 1
+        "transaction_id": "txn_123",
+        "token_type": 1,
+        "data": "",
+        "created_at": "2023-03-23T10:00:00Z",
+        "updated_at": "2023-03-23T10:00:00Z"
       }
     ]
     ```
@@ -171,56 +203,49 @@ All requests follow standard REST principles. Pagination parameters `limit` (def
     [
       {
         "ftName": "RubixPoints",
-        "count": 1000,
+        "count": 1200,
+        "creatorDID": "bafybm..."
+      },
+      {
+        "ftName": "LoyaltyToken",
+        "count": 450,
         "creatorDID": "bafybm..."
       }
     ]
     ```
 
-- **`GET /api/get-ft-list-by-ftname?ftName=RubixPoints`**
-  - **Output**: List of individual FT tokens matching the name.
-
-- **`GET /api/get-sc-list`**
-  - **Output**: List of Smart Contract tokens (`token_type: 4`).
-
 ### 4. Details and History
 
 - **`GET /api/get-transaction-info?transactionID=<id>`**
-  - **Output Example**:
-    ```json
-    {
-      "transaction_id": "Qm...",
-      "initiator": "bafybm...",
-      "owner": "bafybm...",
-      "epoch": 1679567400,
-      "quorums": [...],
-      "memo": "Initial mint"
-    }
-    ```
+  - **Output**: Single `TransactionInfo` object (see list example above for schema).
 
 - **`GET /api/get-token-info?tokenID=<id>`**
-  - **Output Example**:
-    ```json
-    {
-      "token_id": "Qm...",
-      "token_value": 1.0,
-      "did": "bafybm...",
-      "token_status": 1,
-      "token_type": 1
-    }
-    ```
+  - **Output**: Single `Token` object (see list example above for schema).
 
 - **`GET /api/get-transaction-info-list?tokenID=<id>`**
-  - **Description**: Returns the full transaction history for a specific token.
+  - **Output**: Array of `TransactionInfo` objects.
+
 - **`GET /api/get-transaction-id-list?tokenID=<id>`**
   - **Output Example**:
     ```json
     [
       {
-        "id": 1,
+        "id": 145,
         "token_id": "Qm...",
-        "transaction_id": "txn_123",
-        "previous_transaction_id": ""
+        "transaction_id": "txn_abc",
+        "role": 0,
+        "previous_transaction_id": "txn_prev",
+        "created_at": "2023-03-23T10:00:00Z",
+        "updated_at": "2023-03-23T10:00:00Z"
+      },
+      {
+        "id": 142,
+        "token_id": "Qm...",
+        "transaction_id": "txn_prev",
+        "role": 0,
+        "previous_transaction_id": "txn_orig",
+        "created_at": "2023-03-23T09:00:00Z",
+        "updated_at": "2023-03-23T09:00:00Z"
       }
     ]
     ```

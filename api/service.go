@@ -141,6 +141,7 @@ func GetDIDHoldersList(limit, page int) ([]models.DIDBalance, error) {
 func GetRBTList(limit, page int) ([]models.Token, error) {
 	var tokens []models.Token
 	offset := (page - 1) * limit
+
 	if err := database.ReadDB.Model(&models.Token{}).Where("token_type = ?", 1).Order("updated_at DESC").Limit(limit).Offset(offset).Find(&tokens).Error; err != nil {
 		return nil, err
 	}
@@ -191,6 +192,7 @@ func GetFTListByFTName(ftName string, creatorDID string, limit, page int) ([]mod
 	if creatorDID != "" {
 		query = query.Where("token_id LIKE ?", "%_"+creatorDID)
 	}
+
 	if err := query.Order("updated_at DESC").Limit(limit).Offset(offset).Find(&tokens).Error; err != nil {
 		return nil, err
 	}
@@ -200,6 +202,7 @@ func GetFTListByFTName(ftName string, creatorDID string, limit, page int) ([]mod
 func GetSCList(limit, page int) ([]models.Token, error) {
 	var tokens []models.Token
 	offset := (page - 1) * limit
+
 	if err := database.ReadDB.Model(&models.Token{}).Where("token_type = ?", 4).Order("updated_at DESC").Limit(limit).Offset(offset).Find(&tokens).Error; err != nil {
 		return nil, err
 	}
