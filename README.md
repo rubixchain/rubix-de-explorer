@@ -138,7 +138,42 @@ List endpoints return a plain JSON array of objects. All support `limit` and `pa
   - **Response Model**: `[]model.FTGroup`
   - **Fields**: `ftName`, `count`, `creatorDID`.
 
-### 4. Details and History
+### 4. Search and Suggestions (Autocomplete)
+
+Returns simple ID/Name lists for frontend address bar suggestions.
+
+- **`GET /api/search-rbt-suggestions?query=<prefix>&limit=10`**
+  - **Input Sample**: `/api/search-rbt-suggestions?query=1_&limit=5`
+  - **Response Model**: `[]model.RBTSuggestion`
+
+- **`GET /api/search-ft-suggestions?query=<prefix>&limit=10`**
+  - **Input Sample**: `/api/search-ft-suggestions?query=app`
+  - **Response Model**: `[]model.FTSuggestion`
+
+### 5. Detailed Asset Info
+
+- **`GET /api/get-rbt-info?tokenId=<id>`**
+  - **Response Model**: `model.RBTInfo` (TokenID, OwnerDID, TokenValue)
+
+- **`GET /api/get-ft-info?ftName=<name>&creatorDID=<did>`**
+  - **Response Model**: `model.FTInfo` (FTName, CreatorDID, TotalAmount, CreatedTime)
+
+- **`GET /api/get-ft-top-holders?ftName=<name>&creatorDID=<did>`**
+  - **Response Model**: `model.FTTopHoldersResponse` (Holders array, TotalCount, Page/Limit)
+
+### 6. DAG and Visualization
+
+Supports the network graph view by providing ancestor linkages.
+
+- **`GET /api/dagtxns`**
+  - **Description**: Returns the latest 1000 transactions for the global graph view.
+  - **Response Model**: `[]models.TransactionInfo`
+
+- **`GET /api/dagtxn/{txnID}?depth=100`**
+  - **Description**: Returns the specific transaction and its ancestors up to `depth` levels, following the `TokenChain`.
+  - **Response Model**: `model.DAGResponse` (Transactions array + Edges array)
+
+### 7. Details and History
 
 - **`GET /api/get-transaction-info?transactionID=<id>`**
   - **Input Sample**: `/api/get-transaction-info?transactionID=txn_123`

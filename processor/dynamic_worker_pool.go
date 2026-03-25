@@ -42,9 +42,6 @@ type DynamicWorkerPool struct {
 	// Worker management
 	workerChannels  map[int]chan struct{}
 	workerChanMutex sync.RWMutex
-
-	// Resource monitor
-	resourceMonitor *ResourceMonitor
 }
 
 // InitDynamicWorkerPool initializes the global dynamic worker pool
@@ -75,7 +72,6 @@ func InitDynamicWorkerPool() {
 		scaleUpDelay:    time.Second * 10,
 		scaleDownDelay:  time.Second * 30,
 		workerChannels:  make(map[int]chan struct{}),
-		resourceMonitor: &ResourceMonitor{},
 	}
 
 	log.Printf("Initializing Dynamic Worker Pool: Min=%d, Max=%d, Current=%d workers\n",
@@ -127,8 +123,17 @@ func (p *DynamicWorkerPool) systemMonitor() {
 
 // Evaluate system conditions and decide on scaling
 func (p *DynamicWorkerPool) evaluateAndScale() {
-	resourceStats := p.resourceMonitor.GetResourceStats()
-	memoryUsagePercent := resourceStats["memory_usage_pct"].(float64)
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+
+	usedMB := float64(m.Alloc) / 1024 / 1024
+	sysMB := float64(m.Sys) / 1024 / 1024
+
+	var memoryUsagePercent float64
+	if sysMB > 0 {
+		memoryUsagePercent = (usedMB / sysMB) * 100.0
+	}
+
 	queueLen := int64(len(p.txnQueue))
 
 	p.workersMutex.RLock()
