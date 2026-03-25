@@ -18,10 +18,10 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 
 	rand.Seed(time.Now().UnixNano())
 
-	// 1. Generate 20 DIDs
+	// 1. Generate 20 DIDs (Must match didRegex: bafy + 55 chars of Base32)
 	dids := make([]string, 20)
 	for i := 0; i < 20; i++ {
-		dids[i] = fmt.Sprintf("bafybm%s%04d", randomString(40), i)
+		dids[i] = fmt.Sprintf("bafy%s%02d", randomBase32(53), i)
 	}
 
 	// 2. Token Storage for tracking ownership and chains
@@ -62,17 +62,17 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 		}
 	}
 
-	// 50 NFT, 50 SC
+	// 50 NFT, 50 SC (Must match ipfsRegex: Qm + 44 chars of Base58)
 	for i := 0; i < 50; i++ {
 		allTokens = append(allTokens, &TokenStore{
-			ID:    fmt.Sprintf("QmNFT%s%04d", randomString(30), i),
+			ID:    fmt.Sprintf("Qm%s%02d", randomBase58(42), i),
 			Type:  "NFT",
 			Value: 1.0,
 		})
 	}
 	for i := 0; i < 50; i++ {
 		allTokens = append(allTokens, &TokenStore{
-			ID:    fmt.Sprintf("QmSC%s%04d", randomString(30), i),
+			ID:    fmt.Sprintf("Qm%s%02d", randomBase58(42), i),
 			Type:  "SC",
 			Value: 1.0,
 		})
@@ -210,8 +210,17 @@ func publish(ps *pubsub.PubSub, id, from, to, memo string, tokens *model.Transac
 	ps.Publish("rubix_txns", data)
 }
 
-func randomString(n int) string {
-	var letters = []rune("abcdefghijklmnopqrstuvwxyz0123456789")
+func randomBase32(n int) string {
+	var letters = []rune("abcdefghijklmnopqrstuvwxyz234567")
+	s := make([]rune, n)
+	for i := range s {
+		s[i] = letters[rand.Intn(len(letters))]
+	}
+	return string(s)
+}
+
+func randomBase58(n int) string {
+	var letters = []rune("123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz")
 	s := make([]rune, n)
 	for i := range s {
 		s[i] = letters[rand.Intn(len(letters))]
