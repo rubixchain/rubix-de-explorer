@@ -112,6 +112,11 @@ func (m *IPFSManager) EnsureInitialized(testNet bool, customSwarmKeyPath string)
 	}
 	m.ipfsPath = ipfsPath
 
+	// Ensure the binary is executable (critical for Linux/macOS after sync from Windows)
+	if runtime.GOOS != "windows" {
+		os.Chmod(ipfsPath, 0755)
+	}
+
 	// 2. Check if .ipfs repository exists
 	ipfsRepo, err := getIPFSRepoPath()
 	if err != nil {
