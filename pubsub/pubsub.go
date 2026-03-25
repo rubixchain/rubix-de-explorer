@@ -55,3 +55,8 @@ func (ps *PubSub) receivePub(topic string, p *ipfsnode.PubSubSubscription) {
 		}
 	}
 }
+
+// TODO: DELETE LATER - Dummy Publisher for testing
+func (ps *PubSub) Publish(topic string, data []byte) error {
+	return ps.ipfs.PubSubPublish(topic, string(data))
+}

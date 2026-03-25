@@ -35,34 +35,47 @@ func NewRouter() *mux.Router {
 		w.Write([]byte(`{"status":"ok"}`))
 	}).Methods("GET")
 
-	r.HandleFunc("/api/allrbtcount", handlers.GetRBTCountHandler).Methods(http.MethodGet)
-	r.HandleFunc("/api/allftcount", handlers.GetFTCountHandler).Methods(http.MethodGet)
-	r.HandleFunc("/api/alldidcount", handlers.GetDIDCountHandler).Methods(http.MethodGet)
-	r.HandleFunc("/api/alltransactionscount", handlers.GetTxnsCountHandler).Methods(http.MethodGet)
-	r.HandleFunc("/api/allsmartcontractscount", handlers.GetSCsCountHandler).Methods(http.MethodGet)
-	r.HandleFunc("/api/allnftcount", handlers.GetNFTsCountHandler).Methods(http.MethodGet)
+	// Search
+	r.HandleFunc("/api/get-info", handlers.GetInfo).Methods(http.MethodGet)
 
-	r.HandleFunc("/api/didwithmostrbts", handlers.GetDIDHoldersListHandler).Methods(http.MethodGet)
-	r.HandleFunc("/api/txnblocks", handlers.GetTransferBlockListHandler).Methods(http.MethodGet)
-	r.HandleFunc("/api/getdidinfo", handlers.GetDIDInfoHandler).Methods(http.MethodGet)
-	r.HandleFunc("/api/txnhash", handlers.GetBlockInfoFromTxnHash).Methods(http.MethodGet)
-	r.HandleFunc("/api/blockhash", handlers.GetBlockInfoFromBlockHash).Methods(http.MethodGet)
-	r.HandleFunc("/api/smartcontract", handlers.GetSmartContractInfoFromSCID).Methods(http.MethodGet)
-	r.HandleFunc("/api/nft", handlers.GetNFTInfoFromNFTID).Methods(http.MethodGet)
-	r.HandleFunc("/api/rbt", handlers.GetRBTInfoFromRBTID).Methods(http.MethodGet)
-	r.HandleFunc("/api/ft", handlers.GetFTInfoFromFTID).Methods(http.MethodGet)
-	r.HandleFunc("/api/getrbtlist", handlers.GetRBTListHandler).Methods(http.MethodGet)
+	// Stats
+	r.HandleFunc("/api/get-rbt-count", handlers.GetRBTCountHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-ft-count", handlers.GetFTCountHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-nft-count", handlers.GetNFTsCountHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-sc-count", handlers.GetSCsCountHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-txn-count", handlers.GetTxnsCountHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-did-count", handlers.GetDIDCountHandler).Methods(http.MethodGet)
 
-	r.HandleFunc("/api/search", handlers.GetInfo).Methods(http.MethodGet)
-	r.HandleFunc("/api/token-chain", handlers.GetLatestTokenChainFromTokenID).Methods(http.MethodGet)
-	r.HandleFunc("/api/token-blocks", handlers.GetLatestTokenBlocksFromTokenID).Methods(http.MethodGet)
-	r.HandleFunc("/api/sclist", handlers.GetSCListHandler).Methods(http.MethodGet)
-	r.HandleFunc("/api/sc-blocks", handlers.GetSCBlockList).Methods(http.MethodGet)
-	r.HandleFunc("/api/burnt-blocks", handlers.GetBurntBlockList).Methods(http.MethodGet)
+	// Latest transactions
+	r.HandleFunc("/api/get-latest-transactions", handlers.GetLatestTransactionsListHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/dagtxns", handlers.GetDAGTransactionsHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/dagtxn/{txnID}", handlers.GetDAGTxnHandler).Methods(http.MethodGet)
 
-	r.HandleFunc("/api/sctxn-info", handlers.GetSCBlockInfoFromTxnHash).Methods(http.MethodGet)
-	r.HandleFunc("/api/burnttxn-info", handlers.GetBurntTxnInfoFromTxnHash).Methods(http.MethodGet)
-	r.HandleFunc("/api/ftholdings", handlers.GetFtHoldingList).Methods(http.MethodGet)
+	// Top Holders
+	r.HandleFunc("/api/get-did-with-most-rbts", handlers.GetDIDHoldersListHandler).Methods(http.MethodGet)
+
+	// Tokens
+	// RBT
+	r.HandleFunc("/api/get-rbt-list", handlers.GetRBTListHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/search-rbt-suggestions", handlers.GetRBTSuggestionsHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-rbt-info", handlers.GetRBTInfoHandler).Methods(http.MethodGet)
+	// FT
+	r.HandleFunc("/api/get-ft-group-list", handlers.GetFTGroupListHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-ft-list-by-ftname", handlers.GetFTListByFTNameHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/search-ft-suggestions", handlers.GetFTSuggestionsHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-ft-top-holders", handlers.GetFTTopHoldersHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-ft-info", handlers.GetFTInfoHandler).Methods(http.MethodGet)
+
+	//SC
+	r.HandleFunc("/api/get-sc-list", handlers.GetSCListHandler).Methods(http.MethodGet)
+
+	// Transaction Info
+	r.HandleFunc("/api/get-transaction-info", handlers.GetTransactionInfoHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-transaction-info-list", handlers.GetTransactionInfoListHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-transaction-id-list", handlers.GetTransactionIDListHandler).Methods(http.MethodGet)
+
+	// Token Info
+	r.HandleFunc("/api/get-token-info", handlers.GetTokenInfoHandler).Methods(http.MethodGet)
 
 	return r
 }

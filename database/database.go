@@ -65,24 +65,14 @@ func ConnectAndMigrate(drop bool) {
 
 	log.Println("Connected to PostgreSQL (WriteDB=20, ReadDB=30)")
 
-	if drop {
-		log.Println("Warning: Dropping existing tables...")
-		dropTables()
-		log.Println("Tables dropped successfully")
-	}
-
 	allModels := []interface{}{
-		&models.RBT{},
-		&models.FT{},
-		&models.NFT{},
-		&models.SC{},
-		&models.DIDs{},
-		&models.AllTokens{},
-		&models.AllBlocks{},
-		&models.TransactionBlocks{},
-		&models.BurntBlocks{},
-		&models.SCBlocks{},
-		&models.MintBlocks{},
+		&models.Transactions{},
+		&models.EventTransaction{},
+		&models.TransactionInfo{},
+		&models.Token{},
+		&models.TokenChain{},
+		&models.TokenChainArray{},
+		&models.DIDBalance{},
 	}
 
 	err = WriteDB.AutoMigrate(allModels...)
@@ -131,15 +121,6 @@ func ensureUniqueConstraints(db *gorm.DB, models []interface{}) {
 		}
 	}
 	log.Println("All primary key constraints verified")
-}
-
-// dropTables drops only the TransferBlocks table
-func dropTables() {
-	if WriteDB.Migrator().HasTable(&models.TransactionBlocks{}) {
-		if err := WriteDB.Migrator().DropTable(&models.TransactionBlocks{}); err != nil {
-			log.Fatalf("Failed to drop TransferBlocks table: %v", err)
-		}
-	}
 }
 
 // getEnv fetches environment variable or returns fallback
