@@ -7,104 +7,214 @@ import (
 	"explorer-server/pubsub"
 	"fmt"
 	"log"
+	"math/rand"
 	"time"
 )
 
 // PublishDummyTransaction publishes multiple dummy transactions covering different scenarios.
-// TODO: DELETE LATER
+// Scale: 100 Transactions, 1000 Tokens (300 RBT, 600 FT, 50 NFT, 50 SC)
 func PublishDummyTransaction(ps *pubsub.PubSub) {
-	log.Printf("Publishing merged dummy transactions: Multiple assets, DID balances, and token chains...")
+	log.Printf("Publishing Realistic Dummy Data: 1000 Tokens, 100 Transactions...")
 
-	dids := []string{
-		"bafybmihy4panvvrjssdjqksrwjcxza6xpgnxvcyufn2wuam75idnqlugdq", // Alice
-		"bafybmf6j7n5e4v4z7v7v7v7v7v7v7v7v7v7v7v7v7v7v7v7v7v7v7v7v7v", // Bob
-		"bafybmguu5v5v5v5v5v5v5v5v5v5v5v5v5v5v5v5v5v5v5v5v5v5v5v5v5v", // Charlie
-		"bafybmexxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", // David
-		"bafybmeyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy", // Eve
+	rand.Seed(time.Now().UnixNano())
+
+	// 1. Generate 20 DIDs
+	dids := make([]string, 20)
+	for i := 0; i < 20; i++ {
+		dids[i] = fmt.Sprintf("bafybm%s%04d", randomString(40), i)
 	}
 
-	ftNames := []string{"APPLE", "MANGO", "ORANGE", "PEAR", "BANANA"}
-
-	// 1. Create Token Pools (10 of each type)
-	rbtPool := make([]string, 10)
-	ftPool := make([]string, 10)
-	nftPool := make([]string, 10)
-	scPool := make([]string, 10)
-	
-	now := time.Now().Unix()
-	for i := 0; i < 10; i++ {
-		rbtPool[i] = fmt.Sprintf("1_%d_%d_%d", i, i+100, now)
-		ftPool[i] = fmt.Sprintf("%s_%d_%s", ftNames[i%len(ftNames)], i, dids[i%len(dids)])
-		nftPool[i] = fmt.Sprintf("QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6u%c%c", 'a'+i, 'a'+i)
-		scPool[i] = fmt.Sprintf("QmR7XvF6T7T7T7T7T7T7T7T7T7T7T7T7T7T7T7T7T7%c%c%c%c", 's', 'c', 'a'+i, 'a'+i)
+	// 2. Token Storage for tracking ownership and chains
+	type TokenStore struct {
+		ID      string
+		Type    string // RBT, FT, NFT, SC
+		Value   float64
+		LastTxn string
+		Owner   string
 	}
 
-	lastTxnForToken := make(map[string]string)
+	allTokens := make([]*TokenStore, 0, 1000)
+	rbtPool := make([]*TokenStore, 0, 300)
 
-	// 2. Publish 100 Transactions
-	for i := 0; i < 100; i++ {
-		txnID := fmt.Sprintf("TXN_%04d_%d", i, time.Now().UnixNano()%1000)
-		sender := dids[i%len(dids)]
-		receiver := dids[(i+1)%len(dids)]
-		
-		assetType := i % 4 // 0: RBT, 1: FT, 2: NFT, 3: SC
-		var pool []string
-		switch assetType {
-		case 0: pool = rbtPool
-		case 1: pool = ftPool
-		case 2: pool = nftPool
-		case 3: pool = scPool
+	// 300 RBT
+	for i := 0; i < 300; i++ {
+		t := &TokenStore{
+			ID:    fmt.Sprintf("1_%d_%d", i, time.Now().UnixNano()%1000000),
+			Type:  "RBT",
+			Value: 1.0,
 		}
+		allTokens = append(allTokens, t)
+		rbtPool = append(rbtPool, t)
+	}
 
-		// Pick 1-2 tokens from the pool
-		numTokens := (i % 2) + 1
-		tokenInfos := make([]*model.TokenInfo, numTokens)
-		for k := 0; k < numTokens; k++ {
-			tokenID := pool[(i+k)%len(pool)]
-			tokenInfos[k] = &model.TokenInfo{
-				TokenID:               tokenID,
-				PreviousTransactionID: lastTxnForToken[tokenID],
+	// 600 FT (APPLE, MANGO, ORANGE)
+	ftGroups := []string{"APPLE", "MANGO", "ORANGE"}
+	for _, group := range ftGroups {
+		for i := 0; i < 200; i++ {
+			// ORANGE is created by multiple DIDs randomly
+			creator := dids[rand.Intn(len(dids))]
+			t := &TokenStore{
+				ID:    fmt.Sprintf("%s_%d_%s", group, i, creator),
+				Type:  "FT",
+				Value: 1.0,
 			}
-			lastTxnForToken[tokenID] = txnID
+			allTokens = append(allTokens, t)
 		}
-
-		// Prepare Event
-		tokens := &model.TransactionTokens{}
-		switch assetType {
-		case 0: tokens.RBT = tokenInfos
-		case 1: tokens.FT = tokenInfos
-		case 2: tokens.NFT = tokenInfos
-			for _, t := range tokenInfos { t.Data = "ipfs://nft-metadata" }
-		case 3: tokens.SmartContract = tokenInfos
-			for _, t := range tokenInfos { t.Data = "contract_call" }
-		}
-
-		event := model.EventTransaction{
-			Status: true,
-			Transaction: &model.Transactions{
-				TransactionID: txnID,
-				TransactionInfo: &model.TransactionInfo{
-					Initiator: sender,
-					Owner:     receiver,
-					Epoch:     int(time.Now().Unix()) - (100-i)*60,
-					Network:   "TestNet",
-					Memo:      fmt.Sprintf("Step %d - %s", i, txnID),
-					Tokens:    tokens,
-				},
-				Signatures: &model.Signature{
-					InitiatorSignature: "sig_" + txnID,
-				},
-			},
-		}
-
-		data, _ := json.Marshal(event)
-		ps.Publish("rubix_txns", data)
-
-		if i%25 == 0 {
-			log.Printf("Progress: Published %d/100 transactions", i)
-		}
-		time.Sleep(30 * time.Millisecond)
 	}
 
-	log.Printf("Finished publishing 100 merged dummy transactions with consistent chains.")
+	// 50 NFT, 50 SC
+	for i := 0; i < 50; i++ {
+		allTokens = append(allTokens, &TokenStore{
+			ID:    fmt.Sprintf("QmNFT%s%04d", randomString(30), i),
+			Type:  "NFT",
+			Value: 1.0,
+		})
+	}
+	for i := 0; i < 50; i++ {
+		allTokens = append(allTokens, &TokenStore{
+			ID:    fmt.Sprintf("QmSC%s%04d", randomString(30), i),
+			Type:  "SC",
+			Value: 1.0,
+		})
+	}
+
+	// --------------------------------------------------
+	// Phase 1: Genesis Distribution (20 Transactions)
+	// --------------------------------------------------
+	for i := 0; i < 20; i++ {
+		txnID := fmt.Sprintf("TXN_GENESIS_%02d", i)
+		owner := dids[i]
+
+		// Distribute ~50 tokens per txn
+		start := i * 50
+		end := (i + 1) * 50
+		if i == 19 { end = 1000 }
+
+		batch := allTokens[start:end]
+		tokens := &model.TransactionTokens{}
+		for _, t := range batch {
+			t.Owner = owner
+			t.LastTxn = txnID
+			info := &model.TokenInfo{TokenID: t.ID}
+			switch t.Type {
+			case "RBT": tokens.RBT = append(tokens.RBT, info)
+			case "FT":  tokens.FT = append(tokens.FT, info)
+			case "NFT": 
+				info.Data = "ipfs://nft-metadata-uri"
+				tokens.NFT = append(tokens.NFT, info)
+			case "SC":  
+				info.Data = "contract_init_payload"
+				tokens.SmartContract = append(tokens.SmartContract, info)
+			}
+		}
+
+		publish(ps, txnID, "", owner, "Genesis Distribution", tokens, nil, nil)
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	log.Printf("Genesis complete. Starting 80 random transfers...")
+
+	// --------------------------------------------------
+	// Phase 2: Transfers (80 Transactions)
+	// --------------------------------------------------
+	for i := 0; i < 80; i++ {
+		txnID := fmt.Sprintf("TXN_TRANSFER_%04d", i)
+		
+		// Find a DID with tokens
+		var sender string
+		var senderTokens []*TokenStore
+		for {
+			sender = dids[rand.Intn(len(dids))]
+			senderTokens = nil
+			for _, t := range allTokens {
+				if t.Owner == sender {
+					senderTokens = append(senderTokens, t)
+				}
+			}
+			if len(senderTokens) > 5 { break }
+		}
+
+		receiver := dids[rand.Intn(len(dids))]
+		for receiver == sender { receiver = dids[rand.Intn(len(dids))] }
+
+		// Send 5-15 tokens
+		num := rand.Intn(10) + 5
+		if num > len(senderTokens) { num = len(senderTokens) }
+		
+		selected := senderTokens[:num]
+		tokens := &model.TransactionTokens{}
+		for _, t := range selected {
+			info := &model.TokenInfo{
+				TokenID:               t.ID,
+				PreviousTransactionID: t.LastTxn,
+			}
+			t.Owner = receiver
+			t.LastTxn = txnID
+			switch t.Type {
+			case "RBT": tokens.RBT = append(tokens.RBT, info)
+			case "FT":  tokens.FT = append(tokens.FT, info)
+			case "NFT": tokens.NFT = append(tokens.NFT, info)
+			case "SC":  tokens.SmartContract = append(tokens.SmartContract, info)
+			}
+		}
+
+		// Populated Quorums (3 random DIDs, each with 1 RBT)
+		quorums := make([]*model.QuorumInfo, 3)
+		for q := 0; q < 3; q++ {
+			qDID := dids[rand.Intn(len(dids))]
+			qRBT := rbtPool[rand.Intn(len(rbtPool))]
+			quorums[q] = &model.QuorumInfo{
+				Did: qDID,
+				Tokens: []*model.TokenInfo{{TokenID: qRBT.ID}},
+			}
+		}
+
+		// Populated Committed Tokens (5 random RBTs)
+		committed := make([]*model.TokenInfo, 5)
+		for c := 0; c < 5; c++ {
+			committed[c] = &model.TokenInfo{TokenID: rbtPool[rand.Intn(len(rbtPool))].ID}
+		}
+
+		publish(ps, txnID, sender, receiver, fmt.Sprintf("Transfer #%d", i), tokens, committed, quorums)
+		
+		if i%20 == 0 {
+			log.Printf("Progress: %d/80 transfers published", i)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	log.Printf("Finished publishing 100 realistic dummy transactions.")
+}
+
+func publish(ps *pubsub.PubSub, id, from, to, memo string, tokens *model.TransactionTokens, committed []*model.TokenInfo, quorums []*model.QuorumInfo) {
+	event := model.EventTransaction{
+		Status: true,
+		Transaction: &model.Transactions{
+			TransactionID: id,
+			TransactionInfo: &model.TransactionInfo{
+				Initiator:       from,
+				Owner:           to,
+				Epoch:           int(time.Now().Unix()),
+				Network:         "TestNet",
+				Memo:            memo,
+				Tokens:          tokens,
+				CommittedTokens: committed,
+				Quorums:         quorums,
+			},
+			Signatures: &model.Signature{
+				InitiatorSignature: "sig_" + id,
+			},
+		},
+	}
+	data, _ := json.Marshal(event)
+	ps.Publish("rubix_txns", data)
+}
+
+func randomString(n int) string {
+	var letters = []rune("abcdefghijklmnopqrstuvwxyz0123456789")
+	s := make([]rune, n)
+	for i := range s {
+		s[i] = letters[rand.Intn(len(letters))]
+	}
+	return string(s)
 }
