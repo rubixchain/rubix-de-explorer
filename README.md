@@ -96,156 +96,63 @@ All requests follow standard REST principles. Pagination parameters `limit` (def
 
 ### 1. Unified Search
 
-- **`GET /api/get-info?id=<string>`**
-  - **Input**: `id` - DID (starts with `bafybm`), TokenID (`Qm...`), or TransactionID.
-  - **Output Example (DID Search)**:
-    ```json
-    {
-      "type": "DID",
-      "data": [
-        {
-          "did": "bafybm...",
-          "asset_type": "RBT",
-          "token_name": "RBT",
-          "balance": 150.0,
-          "last_update": 1679567400
-        }
-      ]
-    }
-    ```
+- **`GET /api/get-info?id=<id>`**
+  - **Input Sample (DID)**: `/api/get-info?id=bafybm...`
+  - **Input Sample (Token)**: `/api/get-info?id=Qm...`
+  - **Input Sample (Transaction)**: `/api/get-info?id=txn_...` (or IPFS hash)
+  - **Parameters**: `id` (string, required)
+  - **Response Model**: `api.SearchResult` (polymorphic)
 
 ### 2. Network Statistics (Counts)
-- **`GET /api/get-rbt-count`** -> `{ "all_rbt_count": 1250 }`
-- **`GET /api/get-ft-count`** -> `{ "all_ft_count": 5400 }`
-- **`GET /api/get-nft-count`** -> `{ "all_nft_count": 320 }`
-- **`GET /api/get-sc-count`** -> `{ "all_sc_count": 45 }`
-- **`GET /api/get-txn-count`** -> `{ "all_transaction_count": 89000 }`
-- **`GET /api/get-did-count`** -> `{ "all_did_count": 1200 }`
+
+All count APIs take **no inputs** and return a JSON object with a single key-value pair.
+
+- **`GET /api/get-rbt-count`** -> `{"all_rbt_count": 1250}`
+- **`GET /api/get-ft-count`** -> `{"all_ft_count": 5400}`
+- **`GET /api/get-nft-count`** -> `{"all_nft_count": 320}`
+- **`GET /api/get-sc-count`** -> `{"all_sc_count": 45}`
+- **`GET /api/get-txn-count`** -> `{"all_transaction_count": 89000}`
+- **`GET /api/get-did-count`** -> `{"all_did_count": 1200}`
 
 ### 3. Lists and Holders
 
-List endpoints return a plain JSON array of objects.
+List endpoints return a plain JSON array of objects. All support `limit` and `page` query parameters. Returns an empty array `[]` if no records found.
 
-- **`GET /api/get-latest-transactions?limit=10&page=1`**
-  - **Output Example**:
-    ```json
-    [
-      {
-        "transaction_id": "Qm...",
-        "initiator": "bafybm...",
-        "owner": "bafybm...",
-        "epoch": 1679567400,
-        "network": "rubix",
-        "tokens": { "rbt": [{"tokenId": "Qm...", "previousTransactionID": "", "data": ""}] },
-        "committedTokens": [],
-        "quorums": [],
-        "memo": "Initial mint",
-        "created_at": "2023-03-23T10:00:00Z"
-      },
-      {
-        "transaction_id": "Qm...",
-        "initiator": "bafybm...",
-        "owner": "bafybm...",
-        "epoch": 1679567450,
-        "network": "rubix",
-        "tokens": { "rbt": [{"tokenId": "Qm...", "previousTransactionID": "Qm...", "data": ""}] },
-        "committedTokens": [],
-        "quorums": [],
-        "memo": "Transfer",
-        "created_at": "2023-03-23T10:00:50Z"
-      }
-    ]
-    ```
+- **`GET /api/get-latest-transactions`**
+  - **Input Sample**: `/api/get-latest-transactions?limit=10&page=1`
+  - **Response Model**: `[]models.TransactionInfo`
+  - **Fields**: `transaction_id`, `initiator`, `owner`, `epoch`, `network`, `tokens`, `committedTokens`, `quorums`, `memo`, `created_at`.
 
-- **`GET /api/get-did-with-most-rbts?limit=10`**
-  - **Output Example**:
-    ```json
-    [
-      {
-        "did": "bafybm...",
-        "asset_type": "RBT",
-        "token_name": "RBT",
-        "balance": 5000.0,
-        "last_update": 1679567400
-      },
-      {
-        "did": "bafybm...",
-        "asset_type": "RBT",
-        "token_name": "RBT",
-        "balance": 2500.5,
-        "last_update": 1679567500
-      }
-    ]
-    ```
+- **`GET /api/get-did-with-most-rbts`**
+  - **Input Sample**: `/api/get-did-with-most-rbts?limit=5`
+  - **Response Model**: `[]models.DIDBalance`
+  - **Fields**: `did`, `asset_type`, `token_name`, `balance`, `last_update`.
 
 - **`GET /api/get-rbt-list`**, **`GET /api/get-nft-list`**, **`GET /api/get-sc-list`**
-  - **Output Example**:
-    ```json
-    [
-      {
-        "token_id": "Qm...",
-        "parent_token_id": "",
-        "token_value": 1.0,
-        "token_status": 1,
-        "did": "bafybm...",
-        "transaction_id": "txn_123",
-        "token_type": 1,
-        "data": "",
-        "created_at": "2023-03-23T10:00:00Z",
-        "updated_at": "2023-03-23T10:00:00Z"
-      }
-    ]
-    ```
+  - **Input Sample**: `/api/get-rbt-list?limit=10`
+  - **Response Model**: `[]models.Token`
+  - **Fields**: `token_id`, `parent_token_id`, `token_value`, `token_status`, `did`, `transaction_id`, `token_type`, `data`, `created_at`, `updated_at`.
 
 - **`GET /api/get-ft-group-list`**
-  - **Output Example**:
-    ```json
-    [
-      {
-        "ftName": "RubixPoints",
-        "count": 1200,
-        "creatorDID": "bafybm..."
-      },
-      {
-        "ftName": "LoyaltyToken",
-        "count": 450,
-        "creatorDID": "bafybm..."
-      }
-    ]
-    ```
+  - **Input Sample**: `/api/get-ft-group-list`
+  - **Response Model**: `[]model.FTGroup`
+  - **Fields**: `ftName`, `count`, `creatorDID`.
 
 ### 4. Details and History
 
 - **`GET /api/get-transaction-info?transactionID=<id>`**
-  - **Output**: Single `TransactionInfo` object (see list example above for schema).
+  - **Input Sample**: `/api/get-transaction-info?transactionID=txn_123`
+  - **Response Model**: `models.TransactionInfo`
 
 - **`GET /api/get-token-info?tokenID=<id>`**
-  - **Output**: Single `Token` object (see list example above for schema).
+  - **Input Sample**: `/api/get-token-info?tokenID=Qm...`
+  - **Response Model**: `models.Token`
 
 - **`GET /api/get-transaction-info-list?tokenID=<id>`**
-  - **Output**: Array of `TransactionInfo` objects.
+  - **Input Sample**: `/api/get-transaction-info-list?tokenID=Qm...&limit=5`
+  - **Response Model**: `[]models.TransactionInfo`
 
 - **`GET /api/get-transaction-id-list?tokenID=<id>`**
-  - **Output Example**:
-    ```json
-    [
-      {
-        "id": 145,
-        "token_id": "Qm...",
-        "transaction_id": "txn_abc",
-        "role": 0,
-        "previous_transaction_id": "txn_prev",
-        "created_at": "2023-03-23T10:00:00Z",
-        "updated_at": "2023-03-23T10:00:00Z"
-      },
-      {
-        "id": 142,
-        "token_id": "Qm...",
-        "transaction_id": "txn_prev",
-        "role": 0,
-        "previous_transaction_id": "txn_orig",
-        "created_at": "2023-03-23T09:00:00Z",
-        "updated_at": "2023-03-23T09:00:00Z"
-      }
-    ]
-    ```
+  - **Input Sample**: `/api/get-transaction-id-list?tokenID=Qm...`
+  - **Response Model**: `[]models.TokenChain`
+  - **Fields**: `id`, `token_id`, `transaction_id`, `role`, `previous_transaction_id`, `created_at`.
