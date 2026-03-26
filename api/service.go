@@ -33,18 +33,18 @@ func GetSearchInfo(query string) (*SearchResult, error) {
 		}
 	}
 
-	// 2. Token Search (starts with Qm or contains _)
+	// 2. Transaction Search (prioritize DB check to avoid ID collisions)
+	var txn models.TransactionInfo
+	if err := database.ReadDB.Table("TransactionInfo").Where("transaction_id = ?", query).First(&txn).Error; err == nil {
+		return &SearchResult{Type: "Transaction", Data: txn}, nil
+	}
+
+	// 3. Token Search (starts with Qm or contains _)
 	if strings.HasPrefix(query, "Qm") || strings.Contains(query, "_") {
 		var token models.Token
 		if err := database.ReadDB.Table("Tokens").Where("token_id = ?", query).First(&token).Error; err == nil {
 			return &SearchResult{Type: "Token", Data: token}, nil
 		}
-	}
-
-	// 3. Transaction Search (fallback)
-	var txn models.TransactionInfo
-	if err := database.ReadDB.Table("TransactionInfo").Where("transaction_id = ?", query).First(&txn).Error; err == nil {
-		return &SearchResult{Type: "Transaction", Data: txn}, nil
 	}
 
 	return nil, fmt.Errorf("no data found for ID: %s", query)

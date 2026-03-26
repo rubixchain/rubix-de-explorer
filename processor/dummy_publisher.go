@@ -82,7 +82,7 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 	// Phase 1: Genesis Distribution (20 Transactions)
 	// --------------------------------------------------
 	for i := 0; i < 20; i++ {
-		txnID := fmt.Sprintf("TXN_GENESIS_%02d", i)
+		txnID := randomHex(64)
 		owner := dids[i]
 
 		// Distribute ~50 tokens per txn
@@ -118,7 +118,7 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 	// Phase 2: Transfers (80 Transactions)
 	// --------------------------------------------------
 	for i := 0; i < 80; i++ {
-		txnID := fmt.Sprintf("TXN_TRANSFER_%04d", i)
+		txnID := randomHex(64)
 		
 		// Find a DID with tokens
 		var sender string
@@ -221,6 +221,15 @@ func randomBase32(n int) string {
 
 func randomBase58(n int) string {
 	var letters = []rune("123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz")
+	s := make([]rune, n)
+	for i := range s {
+		s[i] = letters[rand.Intn(len(letters))]
+	}
+	return string(s)
+}
+
+func randomHex(n int) string {
+	var letters = []rune("0123456789abcdef")
 	s := make([]rune, n)
 	for i := range s {
 		s[i] = letters[rand.Intn(len(letters))]
