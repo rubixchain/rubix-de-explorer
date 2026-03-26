@@ -178,9 +178,6 @@ func GetDAGFromTxn(txnID string, depth int) (model.DAGResponse, error) {
 	if txns == nil {
 		txns = []models.TransactionInfo{}
 	}
-	if dagEdges == nil {
-		dagEdges = []model.DAGEdge{}
-	}
 	return model.DAGResponse{Transactions: txns, Edges: dagEdges}, nil
 }
 

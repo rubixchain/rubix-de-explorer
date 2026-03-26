@@ -61,6 +61,7 @@ type Token struct {
 	LatestPosition int64     `json:"latest_position" gorm:"column:latest_position"`
 	LatestRole     int16     `json:"latest_role" gorm:"column:latest_role"`
 	Data           string    `json:"data" gorm:"column:data"`                           // Metadata for NFTs/Smart Contracts
+	DeployerDID    string    `json:"deployer" gorm:"column:deployer_did;index"`    // Original deployer/creator
 	NeedsSync      bool      `json:"needs_sync" gorm:"column:needs_sync;default:false"` // Track missing history
 	CreatedAt      time.Time `json:"created_at" gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt      time.Time `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`

@@ -80,11 +80,19 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 					tokenToSave = models.Token{
 						TokenID:       info.TokenID,
 						TokenType:     typeID,
-						DID:           txn.Owner,
 						TransactionID: txnID,
-						TokenStatus:   1, // Active
+						DeployerDID:   txn.Initiator,
+						TokenStatus:   1,    // Active
 						NeedsSync:     true, // Flag for the background job to fetch true history from node
 					}
+
+					// Use Initiator as DID (Owner) for SCs, else use txn.Owner
+					if typeID == TokenTypeSC {
+						tokenToSave.DID = txn.Initiator
+					} else {
+						tokenToSave.DID = txn.Owner
+					}
+					
 					// Always assign Data if present (NFTs, Smart Contracts, etc.)
 					if info.Data != "" {
 						tokenToSave.Data = info.Data
@@ -106,7 +114,13 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 						tokenToSave.NeedsSync = true
 					}
 
-					tokenToSave.DID = txn.Owner
+					// Use Initiator as DID (Owner) for SCs, else use txn.Owner
+					if typeID == TokenTypeSC {
+						tokenToSave.DID = txn.Initiator
+					} else {
+						tokenToSave.DID = txn.Owner
+					}
+
 					tokenToSave.TransactionID = txnID
 					tokenToSave.TokenStatus = 1
 					

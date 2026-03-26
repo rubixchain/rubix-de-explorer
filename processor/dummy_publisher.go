@@ -108,7 +108,7 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 			}
 		}
 
-		publish(ps, txnID, "", owner, "Genesis Distribution", tokens, nil, nil)
+		publish(ps, txnID, owner, owner, "Genesis Distribution", tokens, nil, nil)
 		time.Sleep(100 * time.Millisecond)
 	}
 
