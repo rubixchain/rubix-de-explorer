@@ -211,22 +211,27 @@ func updateBalances(tx *gorm.DB, did string, token *models.Token, direction floa
 		valueToAdd = 1.0 * direction
 	}
 
-	// Token Name: extract from TokenID for FTs
-	assetName := typeName
+	// Token Name and CreatorDID: only populated for FTs
+	assetName := ""
+	creatorDID := ""
 	if token.TokenType == TokenTypeFT {
 		parts := strings.Split(token.TokenID, "_")
-		if len(parts) > 0 && parts[0] != "" {
+		if len(parts) >= 3 {
+			assetName = parts[0]
+			creatorDID = parts[len(parts)-1]
+		} else if len(parts) > 0 && parts[0] != "" {
 			assetName = parts[0]
 		}
 	}
 
 	var balance models.DIDBalance
-	err := tx.Where("did = ? AND asset_type = ? AND token_name = ?", did, typeName, assetName).First(&balance).Error
+	err := tx.Where("did = ? AND asset_type = ? AND token_name = ? AND creator_did = ?", did, typeName, assetName, creatorDID).First(&balance).Error
 	if err == gorm.ErrRecordNotFound {
 		balance = models.DIDBalance{
 			DID:        did,
 			AssetType:  typeName,
 			TokenName:  assetName,
+			CreatorDID: creatorDID,
 			Balance:    valueToAdd,
 			LastUpdate: now,
 		}
@@ -235,10 +240,13 @@ func updateBalances(tx *gorm.DB, did string, token *models.Token, direction floa
 		return err
 	}
 
-	balance.Balance += valueToAdd
-	balance.LastUpdate = now
-
-	return tx.Save(&balance).Error
+	// Use explicit WHERE-based update (GORM's Save treats empty-string PKs as zero-values)
+	return tx.Model(&models.DIDBalance{}).
+		Where("did = ? AND asset_type = ? AND token_name = ? AND creator_did = ?", did, typeName, assetName, creatorDID).
+		Updates(map[string]interface{}{
+			"balance":     balance.Balance + valueToAdd,
+			"last_update": now,
+		}).Error
 }
 
 // appendTokenHistory records the token's movement and ensures the TokenChainArray is logically sequenced

@@ -61,7 +61,7 @@ type Token struct {
 	LatestPosition int64     `json:"latest_position" gorm:"column:latest_position"`
 	LatestRole     int16     `json:"latest_role" gorm:"column:latest_role"`
 	Data           string    `json:"data" gorm:"column:data"`                           // Metadata for NFTs/Smart Contracts
-	DeployerDID    string    `json:"deployer" gorm:"column:deployer_did;index"`    // Original deployer/creator
+	DeployerDID    string    `json:"deployer" gorm:"column:deployer_did;index"`         // Original deployer/creator
 	NeedsSync      bool      `json:"needs_sync" gorm:"column:needs_sync;default:false"` // Track missing history
 	CreatedAt      time.Time `json:"created_at" gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt      time.Time `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
@@ -100,7 +100,8 @@ func (TokenChainArray) TableName() string { return "TokenChainArray" }
 type DIDBalance struct {
 	DID        string  `json:"did" gorm:"primaryKey;column:did"`
 	AssetType  string  `json:"asset_type" gorm:"primaryKey;column:asset_type"`
-	TokenName  string  `json:"token_name" gorm:"primaryKey;column:token_name"`
+	TokenName  string  `json:"token_name" gorm:"primaryKey;column:token_name"`   // FT Name (empty for RBT/NFT/SC)
+	CreatorDID string  `json:"creator_did" gorm:"primaryKey;column:creator_did"` // FT creator (empty for RBT/NFT/SC)
 	Balance    float64 `json:"balance" gorm:"column:balance"`
 	LastUpdate int64   `json:"last_update" gorm:"column:last_update"`
 }

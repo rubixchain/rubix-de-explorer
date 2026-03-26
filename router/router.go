@@ -53,6 +53,7 @@ func NewRouter() *mux.Router {
 
 	// Top Holders
 	r.HandleFunc("/api/get-did-with-most-rbts", handlers.GetDIDHoldersListHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-did-balance", handlers.GetDIDBalanceHandler).Methods(http.MethodGet)
 
 	// Tokens
 	// RBT

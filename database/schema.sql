@@ -90,9 +90,10 @@ CREATE TABLE IF NOT EXISTS "DIDBalances" (
     "did" TEXT,
     "asset_type" TEXT,
     "token_name" TEXT,
+    "creator_did" TEXT DEFAULT '', -- FT creator DID (empty for RBT/NFT/SC)
     "balance" DOUBLE PRECISION DEFAULT 0,
     "last_update" BIGINT,
-    PRIMARY KEY ("did", "asset_type", "token_name")
+    PRIMARY KEY ("did", "asset_type", "token_name", "creator_did")
 );
 
 CREATE INDEX IF NOT EXISTS idx_did_balances_asset ON "DIDBalances"("asset_type", "token_name");

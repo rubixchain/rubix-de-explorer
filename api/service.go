@@ -222,6 +222,14 @@ func GetDIDHoldersList(limit, page int) ([]models.DIDBalance, error) {
 	return balances, nil
 }
 
+func GetDIDBalance(did string) ([]models.DIDBalance, error) {
+	var balances []models.DIDBalance
+	if err := database.ReadDB.Table("DIDBalances").Where("did = ?", did).Find(&balances).Error; err != nil {
+		return nil, err
+	}
+	return balances, nil
+}
+
 func GetRBTList(limit, page int) ([]models.Token, error) {
 	var tokens []models.Token
 	offset := (page - 1) * limit
