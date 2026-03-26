@@ -102,6 +102,7 @@ type DIDBalance struct {
 	AssetType  string  `json:"asset_type" gorm:"primaryKey;column:asset_type"`
 	TokenName  string  `json:"token_name" gorm:"primaryKey;column:token_name"`   // FT Name (empty for RBT/NFT/SC)
 	CreatorDID string  `json:"creator_did" gorm:"primaryKey;column:creator_did"` // FT creator (empty for RBT/NFT/SC)
+	TokenValue float64 `json:"token_value" gorm:"column:token_value"`            // FT Value (empty for RBT/NFT/SC)
 	Balance    float64 `json:"balance" gorm:"column:balance"`
 	LastUpdate int64   `json:"last_update" gorm:"column:last_update"`
 }

@@ -5,9 +5,11 @@ import (
 	"explorer-server/database"
 	"explorer-server/database/models"
 	"explorer-server/model"
-	"gorm.io/gorm"
+	"strconv"
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // Token type constants (aligned with Rubix node's token_type IDs)
@@ -81,14 +83,14 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 						TokenID:       info.TokenID,
 						TokenType:     typeID,
 						TransactionID: txnID,
-						DeployerDID:   txn.Initiator,
 						TokenStatus:   1,    // Active
 						NeedsSync:     true, // Flag for the background job to fetch true history from node
 					}
 
-					// Use Initiator as DID (Owner) for SCs, else use txn.Owner
+					// Use Initiator as DID (Owner) and DeployerDID for SCs
 					if typeID == TokenTypeSC {
 						tokenToSave.DID = txn.Initiator
+						tokenToSave.DeployerDID = txn.Initiator
 					} else {
 						tokenToSave.DID = txn.Owner
 					}
@@ -98,11 +100,21 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 						tokenToSave.Data = info.Data
 					}
 
-					// For RBT, handle whole vs part tokens
-					if typeID == TokenTypeRBT {
-						// Simple check: part RBTs contain more than one underscore (e.g. 1_1000_5)
-						// We'll set a placeholder, but real value comes from node sync
-						tokenToSave.TokenValue = 1.0 
+					// Check if Data contains a dummy Float value (used as an API bridge for dummy testing)
+					if typeID == TokenTypeRBT || typeID == TokenTypeFT {
+						if tokenToSave.Data != "" {
+							if val, err := strconv.ParseFloat(tokenToSave.Data, 64); err == nil {
+								tokenToSave.TokenValue = val
+								tokenToSave.Data = "" // Clear the hacky data so it doesn't pollute the DB
+							}
+						}
+						
+						// Fallback exactly as you had it
+						if tokenToSave.TokenValue == 0 {
+							// Simple check: part RBTs contain more than one underscore (e.g. 1_1000_5)
+							// We'll set a placeholder, but real value comes from node sync
+							tokenToSave.TokenValue = 1.0 
+						}
 					}
 				} else {
 					// Update existing token
@@ -114,7 +126,8 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 						tokenToSave.NeedsSync = true
 					}
 
-					// Use Initiator as DID (Owner) for SCs, else use txn.Owner
+					// Use Initiator as DID (Owner) for SCs (execution/deployment), 
+					// but preserve the original DeployerDID from deployment.
 					if typeID == TokenTypeSC {
 						tokenToSave.DID = txn.Initiator
 					} else {
@@ -203,18 +216,25 @@ func updateBalances(tx *gorm.DB, did string, token *models.Token, direction floa
 
 	typeName := tokenTypeName(token.TokenType)
 
-	// Determine value to add (TokenValue for RBT, 1 for others)
-	var valueToAdd float64
+	// Determine the amount to increment/decrement the balance by:
+	// - RBT: Sum up the actual fractional values
+	// - FT, NFT, SC: Simply count the number of tokens (1.0 each)
+	var balanceIncrement float64
 	if token.TokenType == TokenTypeRBT {
-		valueToAdd = token.TokenValue * direction
+		balanceIncrement = token.TokenValue 
 	} else {
-		valueToAdd = 1.0 * direction
+		balanceIncrement = 1.0 
 	}
 
-	// Token Name and CreatorDID: only populated for FTs
+	valueToAdd := balanceIncrement * direction
+
+	// Token Name, CreatorDID, and TokenValue: only populated for FTs
 	assetName := ""
 	creatorDID := ""
+	var storeTokenValue float64 // Only > 0 for FTs
+	
 	if token.TokenType == TokenTypeFT {
+		storeTokenValue = token.TokenValue // Store face value for FTs
 		parts := strings.Split(token.TokenID, "_")
 		if len(parts) >= 3 {
 			assetName = parts[0]
@@ -232,6 +252,7 @@ func updateBalances(tx *gorm.DB, did string, token *models.Token, direction floa
 			AssetType:  typeName,
 			TokenName:  assetName,
 			CreatorDID: creatorDID,
+			TokenValue: storeTokenValue, // 0 for RBT/NFT/SC, actual value for FT
 			Balance:    valueToAdd,
 			LastUpdate: now,
 		}
@@ -241,12 +262,19 @@ func updateBalances(tx *gorm.DB, did string, token *models.Token, direction floa
 	}
 
 	// Use explicit WHERE-based update (GORM's Save treats empty-string PKs as zero-values)
+	updates := map[string]interface{}{
+		"balance":     balance.Balance + valueToAdd,
+		"last_update": now,
+	}
+	
+	// Only update token_value for FTs
+	if token.TokenType == TokenTypeFT {
+		updates["token_value"] = storeTokenValue
+	}
+
 	return tx.Model(&models.DIDBalance{}).
 		Where("did = ? AND asset_type = ? AND token_name = ? AND creator_did = ?", did, typeName, assetName, creatorDID).
-		Updates(map[string]interface{}{
-			"balance":     balance.Balance + valueToAdd,
-			"last_update": now,
-		}).Error
+		Updates(updates).Error
 }
 
 // appendTokenHistory records the token's movement and ensures the TokenChainArray is logically sequenced
