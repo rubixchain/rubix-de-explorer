@@ -128,6 +128,23 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 					if info.Data != "" {
 						tokenToSave.Data = info.Data
 					}
+
+					// Contextual Role Inference
+					var inferredRole int16 = 2 // Default to Transfer
+					if typeID == TokenTypeSC {
+						if info.PreviousTransactionID == "" {
+							inferredRole = 3 // RoleDeploy
+						} else {
+							inferredRole = 4 // RoleExecute
+						}
+					} else {
+						if info.PreviousTransactionID == "" {
+							inferredRole = 1 // RoleMint
+						} else {
+							inferredRole = 2 // RoleTransfer
+						}
+					}
+					tokenToSave.LatestRole = inferredRole
 				}
 
 				// 1. Write the Token updates to the Token Table First
@@ -136,7 +153,7 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 				}
 
 				// 2. Append to Token History (with sequencing via PreviousTransactionID)
-				if err := appendTokenHistory(tx, info.TokenID, txnID, info.PreviousTransactionID, 0); err != nil {
+				if err := appendTokenHistory(tx, info.TokenID, txnID, info.PreviousTransactionID, tokenToSave.LatestRole); err != nil {
 					return err
 				}
 
@@ -174,6 +191,41 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 		if txn.Tokens.SmartContract != nil {
 			if err := processTokens(txn.Tokens.SmartContract, "SC"); err != nil {
 				return err
+			}
+		}
+
+		// Build a set of quorum pledge token IDs so we can distinguish burn vs pledge in CommittedTokens
+		quorumPledgeIDs := make(map[string]bool)
+		if txn.Quorums != nil {
+			for _, q := range txn.Quorums {
+				for _, info := range q.Tokens {
+					quorumPledgeIDs[info.TokenID] = true
+				}
+			}
+		}
+
+		// Process Committed Tokens
+		// CommittedTokens contains supporting tokens:
+		//   - Quorum pledge tokens (RolePledge = 8)
+		//   - Burned parent RBTs during FT creation (RoleBurn = 5)
+		if txn.CommittedTokens != nil {
+			for _, info := range txn.CommittedTokens {
+				var tokenToSave models.Token
+				if err := tx.Where("token_id = ?", info.TokenID).First(&tokenToSave).Error; err == nil {
+					// Determine role: if this token is also in Quorums, it's a pledge; otherwise it's a burn
+					var role int16 = 5 // Default to RoleBurn
+					if quorumPledgeIDs[info.TokenID] {
+						role = 8 // RolePledge
+					}
+					tokenToSave.LatestRole = role
+					tokenToSave.TransactionID = txnID
+					if err := tx.Save(&tokenToSave).Error; err != nil {
+						return err
+					}
+					if err := appendTokenHistory(tx, info.TokenID, txnID, info.PreviousTransactionID, role); err != nil {
+						return err
+					}
+				}
 			}
 		}
 
