@@ -263,6 +263,25 @@ func GetDAGTransactionsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetTransactionInfoHandler returns details for a single transaction
+func GetTxnsByDIDHandler(w http.ResponseWriter, r *http.Request) {
+	did := r.URL.Query().Get("did")
+	if did == "" {
+		http.Error(w, `{"error":"did parameter is required"}`, http.StatusBadRequest)
+		return
+	}
+	limit, page := getPagination(r)
+	data, err := api.GetTxnsByDID(did, page, limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if data == nil {
+		data = []models.TransactionInfo{}
+	}
+	json.NewEncoder(w).Encode(data)
+}
+
 func GetTransactionInfoHandler(w http.ResponseWriter, r *http.Request) {
 	txnID := r.URL.Query().Get("transactionID")
 	data, err := api.GetTransactionInfo(txnID)

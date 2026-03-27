@@ -313,6 +313,26 @@ func GetTransactionInfo(txnID string) (models.TransactionInfo, error) {
 	return transaction, nil
 }
 
+func GetTxnsByDID(did string, page, limit int) ([]models.TransactionInfo, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 10
+	}
+	offset := (page - 1) * limit
+
+	var transactions []models.TransactionInfo
+	if err := database.ReadDB.Table("TransactionInfo").
+		Where("initiator = ? OR owner = ?", did, did).
+		Order("epoch DESC").
+		Limit(limit).Offset(offset).
+		Find(&transactions).Error; err != nil {
+		return nil, err
+	}
+	return transactions, nil
+}
+
 func GetTransactionInfoListByToken(tokenID string, page, limit int) ([]models.TransactionInfo, error) {
 	ids, err := GetTransactionIDList(tokenID, page, limit)
 	if err != nil {
