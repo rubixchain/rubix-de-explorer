@@ -5,6 +5,7 @@ import (
 	"explorer-server/database"
 	"explorer-server/database/models"
 	"explorer-server/model"
+	"explorer-server/util"
 	"gorm.io/gorm"
 	"strings"
 	"time"
@@ -100,8 +101,13 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 
 					// For RBT, handle whole vs part tokens
 					if typeID == TokenTypeRBT {
-						// Simple check: part RBTs contain more than one underscore (e.g. 1_1000_5)
-						// We'll set a placeholder, but real value comes from node sync
+						val, _ := util.GetTokenValueFromTokenID(info.TokenID)
+						tokenToSave.TokenValue = val
+					}
+					
+					// For FT, value is calculated if it's a mint (handled below)
+					if typeID == TokenTypeFT {
+						// This will be overwritten by a calculated value if it's a mint
 						tokenToSave.TokenValue = 1.0 
 					}
 				} else {
@@ -140,6 +146,27 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 					} else {
 						if info.PreviousTransactionID == "" {
 							inferredRole = 1 // RoleMint
+							
+							// FT dynamic value calculation
+							if typeID == TokenTypeFT {
+								// Calculate total burned value for this transaction
+								var burnedSum float64
+								for _, ct := range txn.CommittedTokens {
+									// Only burned (Role 5) or supporting tokens in CommittedTokens
+									// Note: In some explorer flows, CommittedTokens aren't yet in DB
+									// so we derive their value from their ID format.
+									// We only care about RBT parents being burned here.
+									if !strings.Contains(ct.TokenID, "Qm") && !strings.Contains(ct.TokenID, "_DID") {
+										v, _ := util.GetTokenValueFromTokenID(ct.TokenID)
+										burnedSum += v
+									}
+								}
+								
+								ftCount := len(txn.Tokens.FT)
+								if ftCount > 0 {
+									tokenToSave.TokenValue = burnedSum / float64(ftCount)
+								}
+							}
 						} else {
 							inferredRole = 2 // RoleTransfer
 						}

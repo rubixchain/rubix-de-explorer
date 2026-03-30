@@ -5,6 +5,7 @@ import (
 	"explorer-server/database"
 	"explorer-server/database/models"
 	"explorer-server/model"
+	"explorer-server/util"
 
 	"gorm.io/gorm/clause"
 )
@@ -24,23 +25,51 @@ func SaveEventTransaction(txnID string, status bool, message string) error {
 	return database.WriteDB.Clauses(clause.OnConflict{DoNothing: true}).Create(event).Error
 }
 
-// SaveTransactionDetails saves the flattened TransactionInfo fields for easy querying
-func SaveTransactionDetails(txnID string, info *model.TransactionInfo) error {
+// SaveTransactionDetails saves the flattened TransactionInfo fields for easy querying.
+// If status is false, it saves to FailedTransactionInfo table.
+func SaveTransactionDetails(txnID string, info *model.TransactionInfo, status bool) error {
 	tokensJSON, _ := json.Marshal(info.Tokens)
 	committedJSON, _ := json.Marshal(info.CommittedTokens)
 	quorumsJSON, _ := json.Marshal(info.Quorums)
 
-	details := &models.TransactionInfo{
-		TransactionID:   txnID,
-		Initiator:       info.Initiator,
-		Owner:           info.Owner,
-		Epoch:           info.Epoch,
-		Network:         info.Network,
-		Tokens:          tokensJSON,
-		CommittedTokens: committedJSON,
-		Quorums:         quorumsJSON,
-		Memo:            info.Memo,
+	// Calculate total pledge amount from Quorums (RBT values only)
+	var totalPledge float64
+	for _, q := range info.Quorums {
+		for _, t := range q.Tokens {
+			val, _ := util.GetTokenValueFromTokenID(t.TokenID)
+			totalPledge += val
+		}
 	}
 
-	return database.WriteDB.Clauses(clause.OnConflict{DoNothing: true}).Create(details).Error
+	if status {
+		details := &models.TransactionInfo{
+			TransactionID:   txnID,
+			Initiator:       info.Initiator,
+			Owner:           info.Owner,
+			Epoch:           info.Epoch,
+			Network:         info.Network,
+			Tokens:          tokensJSON,
+			CommittedTokens: committedJSON,
+			Quorums:         quorumsJSON,
+			Memo:            info.Memo,
+			Status:          true,
+			Amount:          totalPledge,
+		}
+		return database.WriteDB.Clauses(clause.OnConflict{DoNothing: true}).Create(details).Error
+	} else {
+		details := &models.FailedTransactionInfo{
+			TransactionID:   txnID,
+			Initiator:       info.Initiator,
+			Owner:           info.Owner,
+			Epoch:           info.Epoch,
+			Network:         info.Network,
+			Tokens:          tokensJSON,
+			CommittedTokens: committedJSON,
+			Quorums:         quorumsJSON,
+			Memo:            info.Memo,
+			Status:          false,
+			Amount:          totalPledge,
+		}
+		return database.WriteDB.Clauses(clause.OnConflict{DoNothing: true}).Create(details).Error
+	}
 }

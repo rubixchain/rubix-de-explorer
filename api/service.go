@@ -191,7 +191,6 @@ func GetDAGTransactions() ([]models.TransactionInfo, error) {
 }
 
 func GetTransactionInfoList(limit, page int) ([]models.TransactionInfo, error) {
-	var transactions []models.TransactionInfo
 	if page < 1 {
 		page = 1
 	}
@@ -200,10 +199,47 @@ func GetTransactionInfoList(limit, page int) ([]models.TransactionInfo, error) {
 	}
 	offset := (page - 1) * limit
 
-	if err := database.ReadDB.Table("TransactionInfo").Order("epoch DESC").Limit(limit).Offset(offset).Find(&transactions).Error; err != nil {
+	// 1. Fetch from EventTransactions to get ordered list of TxnIDs and their status
+	var events []models.EventTransaction
+	if err := database.ReadDB.Table("EventTransactions").Order("created_at DESC").Limit(limit).Offset(offset).Find(&events).Error; err != nil {
 		return nil, err
 	}
-	return transactions, nil
+
+	result := make([]models.TransactionInfo, 0)
+	for _, event := range events {
+		var info models.TransactionInfo
+		if event.Status {
+			// Fetch from Success table
+			if err := database.ReadDB.Table("TransactionInfo").Where("transaction_id = ?", event.TransactionID).First(&info).Error; err == nil {
+				info.Status = true
+				result = append(result, info)
+			}
+		} else {
+			// Fetch from Failure table
+			var failed models.FailedTransactionInfo
+			if err := database.ReadDB.Table("FailedTransactionInfo").Where("transaction_id = ?", event.TransactionID).First(&failed).Error; err == nil {
+				// Convert FailedTransactionInfo to TransactionInfo for consistent API response
+				info = models.TransactionInfo{
+					TransactionID:   failed.TransactionID,
+					Initiator:       failed.Initiator,
+					Owner:           failed.Owner,
+					Epoch:           failed.Epoch,
+					Network:         failed.Network,
+					Tokens:          failed.Tokens,
+					CommittedTokens: failed.CommittedTokens,
+					Quorums:         failed.Quorums,
+					Memo:            failed.Memo,
+					Status:          false,
+					Amount:          failed.Amount,
+					CreatedAt:       failed.CreatedAt,
+					UpdatedAt:       failed.UpdatedAt,
+				}
+				result = append(result, info)
+			}
+		}
+	}
+
+	return result, nil
 }
 
 func GetDIDHoldersList(limit, page int) ([]models.DIDBalance, error) {

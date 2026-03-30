@@ -42,11 +42,32 @@ type TransactionInfo struct {
 	CommittedTokens json.RawMessage `json:"committedTokens" gorm:"column:committed_tokens;type:jsonb"`
 	Quorums         json.RawMessage `json:"quorums" gorm:"column:quorums;type:jsonb"`
 	Memo            string          `json:"memo" gorm:"column:memo"`
+	Status          bool            `json:"status" gorm:"column:status;index"` // Persistent status field
+	Amount          float64         `json:"amount" gorm:"column:amount"`       // Sum of values in Quorum tokens
 	CreatedAt       time.Time       `json:"created_at" gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt       time.Time       `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
 }
 
 func (TransactionInfo) TableName() string { return "TransactionInfo" }
+
+// FailedTransactionInfo mirrors TransactionInfo but for transactions that failed consensus
+type FailedTransactionInfo struct {
+	TransactionID   string          `json:"transaction_id" gorm:"primaryKey;column:transaction_id"`
+	Initiator       string          `json:"initiator" gorm:"column:initiator;index"`
+	Owner           string          `json:"owner" gorm:"column:owner;index"`
+	Epoch           int             `json:"epoch" gorm:"column:epoch;index"`
+	Network         string          `json:"network" gorm:"column:network"`
+	Tokens          json.RawMessage `json:"tokens" gorm:"column:tokens;type:jsonb"`
+	CommittedTokens json.RawMessage `json:"committedTokens" gorm:"column:committed_tokens;type:jsonb"`
+	Quorums         json.RawMessage `json:"quorums" gorm:"column:quorums;type:jsonb"`
+	Memo            string          `json:"memo" gorm:"column:memo"`
+	Status          bool            `json:"status" gorm:"column:status;index"`
+	Amount          float64         `json:"amount" gorm:"column:amount"`
+	CreatedAt       time.Time       `json:"created_at" gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt       time.Time       `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
+}
+
+func (FailedTransactionInfo) TableName() string { return "FailedTransactionInfo" }
 
 // Token (Unified model for RBT, FT, NFT, SC — aligned with Rubix node's Token table)
 type Token struct {

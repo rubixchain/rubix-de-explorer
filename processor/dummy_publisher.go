@@ -11,6 +11,12 @@ import (
 	"time"
 )
 
+// Internal helper for structured SC data in simulation
+type SmartContractCall struct {
+	Function string                 `json:"function"`
+	Params   map[string]interface{} `json:"params"`
+}
+
 // Constants for TokenRoles (matching rubixgoplatform core lookup.go)
 const (
 	RoleMint     int16 = 1
@@ -31,7 +37,8 @@ type TokenStore struct {
 	Value   float64
 	LastTxn string
 	Owner   string
-	Burned  bool // Track if token has been burned
+	Burned  bool   // Track if token has been burned
+	Data    string // Custom data per token (e.g. SC calls, FT value)
 }
 
 // TransactionTracker stores the full payload of a published transaction
@@ -88,11 +95,11 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 
 	// --- TOKEN GENERATION ---
 
-	// A. Whole RBTs (these get minted first; some will later be burned to create part tokens or FTs)
+	// A. Whole RBTs (Level 1, TokenNumber i)
 	wholeRBTs := make([]*TokenStore, 0)
 	for i := 0; i < 100; i++ {
 		t := &TokenStore{
-			ID:    fmt.Sprintf("1_%d_%d", i, time.Now().UnixNano()%1000000),
+			ID:    fmt.Sprintf("1_%d", i),
 			Type:  "RBT",
 			Value: 1.0,
 		}
@@ -103,8 +110,8 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 	// B. Part RBTs (created later by burning parent whole RBTs)
 	partRBTs := make([]*TokenStore, 0)
 	for i := 0; i < 20; i++ {
-		partIdx := rand.Intn(2) + 1 // 1 or 2 -> value 0.5
-		parentID := wholeRBTs[80+i].ID // These parents will be burned
+		partIdx := rand.Intn(2) + 1 // 1 or 2 -> value 0.5 (Level 1 in tree)
+		parentID := wholeRBTs[80+i].ID
 		t := &TokenStore{
 			ID:    fmt.Sprintf("%s_%d", parentID, partIdx),
 			Type:  "RBT",
@@ -140,11 +147,11 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 
 	// --- HELPERS ---
 
-	publishEvent := func(txn *model.Transactions) {
+	publishEvent := func(txn *model.Transactions, status bool, message string) {
 		event := &model.EventTransaction{
 			Transaction: txn,
-			Status:      true,
-			Message:     "Success",
+			Status:      status,
+			Message:     message,
 		}
 		data, err := json.Marshal(event)
 		if err == nil {
@@ -173,11 +180,8 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 		return nil
 	}
 
-	// publishTxn builds and publishes a transaction
-	// mainTokens -> go into Tokens field (with the main role like Mint/Transfer/Deploy/Execute)
-	// burnTokens -> go into CommittedTokens field (with RoleBurn)
-	// Quorum pledge tokens are auto-selected and go into CommittedTokens too (with RolePledge)
-	publishTxn := func(initiator string, receiver string, mainTokens []*TokenStore, burnTokens []*TokenStore, memo string) {
+	// status: true for success, false for failed consensus
+	publishTxn := func(initiator string, receiver string, mainTokens []*TokenStore, burnTokens []*TokenStore, memo string, status bool, message string) {
 		txnID := randomHex(64)
 		tokenMap := &model.TransactionTokens{
 			RBT:           make([]*model.TokenInfo, 0),
@@ -210,12 +214,15 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 			case "NFT":
 				tokenMap.NFT = append(tokenMap.NFT, ti)
 			case "SC":
+				ti.Data = t.Data // Pass custom data for Smart Contracts
 				tokenMap.SmartContract = append(tokenMap.SmartContract, ti)
 			}
 
-			// Update main token state
-			t.Owner = receiver
-			t.LastTxn = txnID
+			// ONLY update state if transaction succeeded
+			if status {
+				t.Owner = receiver
+				t.LastTxn = txnID
+			}
 		}
 
 		// Build CommittedTokens field
@@ -227,8 +234,10 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 				TokenID:               bt.ID,
 				PreviousTransactionID: bt.LastTxn,
 			})
-			bt.Burned = true
-			bt.LastTxn = txnID
+			if status {
+				bt.Burned = true
+				bt.LastTxn = txnID
+			}
 		}
 
 		// Add quorum pledge tokens (auto-select from quorum DIDs)
@@ -247,9 +256,14 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 					TokenID:               pt.ID,
 					PreviousTransactionID: pt.LastTxn,
 				})
-				pt.LastTxn = txnID
+				if status {
+					pt.LastTxn = txnID
+				}
 			}
-			quorums = append(quorums, &model.QuorumInfo{Did: qDid, Tokens: qTokens})
+			quorums = append(quorums, &model.QuorumInfo{
+				Did:    qDid,
+				Tokens: qTokens,
+			})
 		}
 
 		txnInfo := &model.TransactionInfo{
@@ -279,7 +293,7 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 		}
 
 		transactions = append(transactions, TransactionTracker{TxnID: txnID, Txn: txn})
-		publishEvent(txn)
+		publishEvent(txn, status, message)
 	}
 
 	// ======================================================================
@@ -288,18 +302,18 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 	log.Println("Phase 1: Genesis Minting Whole RBTs...")
 
 	// Mint whole RBTs (no burn tokens for genesis)
-	publishTxn(dids[0], dids[0], wholeRBTs[:40], nil, "Genesis Minting RBTs")
-	publishTxn(dids[1], dids[1], wholeRBTs[40:60], nil, "Genesis Minting RBTs")
+	publishTxn(dids[0], dids[0], wholeRBTs[:40], nil, "Genesis Minting RBTs", true, "Success")
+	publishTxn(dids[1], dids[1], wholeRBTs[40:60], nil, "Genesis Minting RBTs", true, "Success")
 
 	// Quorum DIDs need RBTs to pledge later
-	publishTxn(dids[5], dids[5], wholeRBTs[60:65], nil, "Minting Quorum Pledge Tokens")
-	publishTxn(dids[6], dids[6], wholeRBTs[65:70], nil, "Minting Quorum Pledge Tokens")
-	publishTxn(dids[7], dids[7], wholeRBTs[70:75], nil, "Minting Quorum Pledge Tokens")
+	publishTxn(dids[5], dids[5], wholeRBTs[60:65], nil, "Minting Quorum Pledge Tokens", true, "Success")
+	publishTxn(dids[6], dids[6], wholeRBTs[65:70], nil, "Minting Quorum Pledge Tokens", true, "Success")
+	publishTxn(dids[7], dids[7], wholeRBTs[70:75], nil, "Minting Quorum Pledge Tokens", true, "Success")
 
 	// DID 0 and DID 1 mint the parent RBTs that will later be burned for parts
-	publishTxn(dids[0], dids[0], wholeRBTs[75:80], nil, "Minting RBTs")
-	publishTxn(dids[0], dids[0], wholeRBTs[80:90], nil, "Minting RBTs (Future Part Parents)")
-	publishTxn(dids[1], dids[1], wholeRBTs[90:], nil, "Minting RBTs (Future Part Parents)")
+	publishTxn(dids[0], dids[0], wholeRBTs[75:80], nil, "Minting RBTs", true, "Success")
+	publishTxn(dids[0], dids[0], wholeRBTs[80:90], nil, "Minting RBTs (Future Part Parents)", true, "Success")
+	publishTxn(dids[1], dids[1], wholeRBTs[90:], nil, "Minting RBTs (Future Part Parents)", true, "Success")
 
 	// ======================================================================
 	// PHASE 1.5: PART TOKEN CREATION (Burn parent whole RBT -> Mint part RBT)
@@ -310,14 +324,14 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 	for i := 0; i < 10; i++ {
 		parentRBT := wholeRBTs[80+i]
 		publishTxn(dids[0], dids[0], []*TokenStore{partRBTs[i]},
-			[]*TokenStore{parentRBT}, "Creating Part Token (burning parent RBT)")
+			[]*TokenStore{parentRBT}, "Creating Part Token (burning parent RBT)", true, "Success")
 	}
 
 	// DID 1 creates part tokens from wholeRBTs[90:100] (10 parents -> 10 parts)
 	for i := 0; i < 10; i++ {
 		parentRBT := wholeRBTs[90+i]
 		publishTxn(dids[1], dids[1], []*TokenStore{partRBTs[10+i]},
-			[]*TokenStore{parentRBT}, "Creating Part Token (burning parent RBT)")
+			[]*TokenStore{parentRBT}, "Creating Part Token (burning parent RBT)", true, "Success")
 	}
 
 	// ======================================================================
@@ -327,22 +341,26 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 	allFTs := getTokensByType(allTokens, "FT")
 
 	// DID 0 creates ORANGE FTs by burning one of their RBTs
+	// DID 0 creates 10 ORANGE FTs by burning ONE of their RBTs (1.0 RBT -> 10 FTs = 0.1 value each)
 	burnRBT0 := findOwnedRBT(dids[0], nil)
 	publishTxn(dids[0], dids[0], allFTs[:10],
-		[]*TokenStore{burnRBT0}, "Creating ORANGE FTs (burning parent RBT)")
+		[]*TokenStore{burnRBT0}, "Creating ORANGE FTs (burning 1.0 RBT for 10 tokens)", true, "Success")
 
-	// DID 1 creates ORANGE FTs by burning one of their RBTs
-	burnRBT1 := findOwnedRBT(dids[1], nil)
+	// DID 1 creates 15 ORANGE FTs by burning TWO of their RBTs (2.0 RBT -> 15 FTs = 0.133 value each - diverse!)
+	burnRBT1a := findOwnedRBT(dids[1], nil)
+	burnRBT1b := findOwnedRBT(dids[1], []*TokenStore{burnRBT1a})
 	publishTxn(dids[1], dids[1], allFTs[10:25],
-		[]*TokenStore{burnRBT1}, "Creating ORANGE FTs (burning parent RBT)")
+		[]*TokenStore{burnRBT1a, burnRBT1b}, "Creating ORANGE FTs (burning 2.0 RBT for 15 tokens)", true, "Success")
 
 	// DID 2 needs RBTs first - DID 0 transfers some to DID 2
 	transferToDID2 := wholeRBTs[30:35]
-	publishTxn(dids[0], dids[2], transferToDID2, nil, "Funding DID 2 for FT creation")
+	publishTxn(dids[0], dids[2], transferToDID2, nil, "Funding DID 2 for FT creation", true, "Success")
 
-	burnRBT2 := findOwnedRBT(dids[2], nil)
+	// DID 2 creates 5 APPLE FTs by burning TWO of their RBTs (2.0 RBT -> 5 FTs = 0.4 value each)
+	burnRBT2a := findOwnedRBT(dids[2], nil)
+	burnRBT2b := findOwnedRBT(dids[2], []*TokenStore{burnRBT2a})
 	publishTxn(dids[2], dids[2], allFTs[25:],
-		[]*TokenStore{burnRBT2}, "Creating APPLE FTs (burning parent RBT)")
+		[]*TokenStore{burnRBT2a, burnRBT2b}, "Creating APPLE FTs (burning 2.0 RBT for 5 tokens)", true, "Success")
 
 	// ======================================================================
 	// PHASE 3: NFT & SC MINTING
@@ -351,8 +369,8 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 	allNFTs := getTokensByType(allTokens, "NFT")
 	allSCs := getTokensByType(allTokens, "SC")
 
-	publishTxn(dids[2], dids[2], allNFTs, nil, "Minting NFT Collection")
-	publishTxn(dids[2], dids[2], allSCs, nil, "Deploying Smart Contracts")
+	publishTxn(dids[2], dids[2], allNFTs, nil, "Minting NFT Collection", true, "Success")
+	publishTxn(dids[2], dids[2], allSCs, nil, "Deploying Smart Contracts", true, "Success")
 
 	// ======================================================================
 	// PHASE 4: BUNDLED TRANSFERS (main tokens in Tokens, pledges in CommittedTokens)
@@ -372,7 +390,7 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 		}
 	}
 	if len(bundle1) > 0 {
-		publishTxn(dids[0], dids[3], bundle1, nil, "Settlement for services")
+		publishTxn(dids[0], dids[3], bundle1, nil, "Settlement for services", true, "Success")
 	}
 
 	// DID 1 sends 5 fractional RBTs + 5 ORANGE FTs + 1 NFT to DID 4
@@ -391,7 +409,7 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 	}
 	bundle2 = append(bundle2, allNFTs[0])
 	if len(bundle2) > 0 {
-		publishTxn(dids[1], dids[4], bundle2, nil, "NFT purchase with mixed assets")
+		publishTxn(dids[1], dids[4], bundle2, nil, "NFT purchase with mixed assets", true, "Success")
 	}
 
 	// ======================================================================
@@ -407,11 +425,11 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 		}
 	}
 	if specialRBT != nil {
-		publishTxn(dids[1], dids[5], []*TokenStore{specialRBT}, nil, "Hop 1")
-		publishTxn(dids[5], dids[6], []*TokenStore{specialRBT}, nil, "Hop 2")
-		publishTxn(dids[6], dids[7], []*TokenStore{specialRBT}, nil, "Hop 3")
-		publishTxn(dids[7], dids[8], []*TokenStore{specialRBT}, nil, "Hop 4")
-		publishTxn(dids[8], dids[9], []*TokenStore{specialRBT}, nil, "Hop 5 (Final)")
+		publishTxn(dids[1], dids[5], []*TokenStore{specialRBT}, nil, "Hop 1", true, "Success")
+		publishTxn(dids[5], dids[6], []*TokenStore{specialRBT}, nil, "Hop 2", true, "Success")
+		publishTxn(dids[6], dids[7], []*TokenStore{specialRBT}, nil, "Hop 3", true, "Success")
+		publishTxn(dids[7], dids[8], []*TokenStore{specialRBT}, nil, "Hop 4", true, "Success")
+		publishTxn(dids[8], dids[9], []*TokenStore{specialRBT}, nil, "Hop 5 (Final)", true, "Success")
 	}
 
 	// ======================================================================
@@ -419,10 +437,40 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 	// ======================================================================
 	log.Println("Phase 6: Smart Contract Execution...")
 	vaultSC := allSCs[0]
+	// Structured Calls for Smart Contract (Flat Array)
+	callDeposit := []SmartContractCall{
+		{Function: "deposit", Params: map[string]interface{}{"amount": 10.5, "currency": "RBT"}},
+		{Function: "logEvent", Params: map[string]interface{}{"message": "Deposit successful"}},
+	}
+	dataDeposit, _ := json.Marshal(callDeposit)
 
-	publishTxn(dids[3], dids[2], []*TokenStore{vaultSC}, nil, "Executing Vault deposit()")
-	publishTxn(dids[4], dids[2], []*TokenStore{vaultSC}, nil, "Executing Vault withdraw()")
-	publishTxn(dids[3], dids[2], []*TokenStore{vaultSC}, nil, "Executing Vault stake()")
+	callWithdraw := []SmartContractCall{
+		{Function: "withdraw", Params: map[string]interface{}{"amount": 5.0}},
+		{Function: "verifyIdentity", Params: map[string]interface{}{"status": "verified"}},
+	}
+	dataWithdraw, _ := json.Marshal(callWithdraw)
+
+	callStake := []SmartContractCall{
+		{Function: "stake", Params: map[string]interface{}{"lock_period": "30d", "amount": 100}},
+	}
+	dataStake, _ := json.Marshal(callStake)
+
+	vaultSC.Data = string(dataDeposit)
+	publishTxn(dids[3], dids[2], []*TokenStore{vaultSC}, nil, "Executing Vault deposit()", true, "Success")
+
+	vaultSC.Data = string(dataWithdraw)
+	publishTxn(dids[4], dids[2], []*TokenStore{vaultSC}, nil, "Executing Vault withdraw()", true, "Success")
+
+	vaultSC.Data = string(dataStake)
+	publishTxn(dids[3], dids[2], []*TokenStore{vaultSC}, nil, "Executing Vault stake()", true, "Success")
+
+	// --- FAILED TRANSACTIONS ---
+	log.Println("Simulating Failed Transactions...")
+	publishTxn(dids[0], dids[1], wholeRBTs[0:1], nil, "Failing to transfer (Low balance)", false, "Insufficient balance")
+	publishTxn(dids[1], dids[0], allFTs[10:12], nil, "Failing to send FT (Invalid Quorum)", false, "Quorum consensus failed")
+
+	vaultSC.Data = string(dataDeposit) // Re-use deposit for failed case
+	publishTxn(dids[3], dids[2], []*TokenStore{vaultSC}, nil, "Executing Vault (Gas limit exceeded)", false, "Gas calculation error")
 
 	log.Printf("Dummy Generation Complete. Published %d Transactions.", len(transactions))
 }
