@@ -190,7 +190,7 @@ func GetDAGTransactions() ([]models.TransactionInfo, error) {
 	return transactions, nil
 }
 
-func GetTransactionInfoList(limit, page int) ([]models.TransactionInfo, error) {
+func GetTransactionInfoList(limit, page int) (model.PaginatedTxnResponse, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -199,26 +199,29 @@ func GetTransactionInfoList(limit, page int) ([]models.TransactionInfo, error) {
 	}
 	offset := (page - 1) * limit
 
-	// 1. Fetch from EventTransactions to get ordered list of TxnIDs and their status
+	// 1. Get total count from EventTransactions
+	var total int64
+	if err := database.ReadDB.Table("EventTransactions").Count(&total).Error; err != nil {
+		return model.PaginatedTxnResponse{}, err
+	}
+
+	// 2. Fetch page of events ordered by created_at DESC
 	var events []models.EventTransaction
 	if err := database.ReadDB.Table("EventTransactions").Order("created_at DESC").Limit(limit).Offset(offset).Find(&events).Error; err != nil {
-		return nil, err
+		return model.PaginatedTxnResponse{}, err
 	}
 
 	result := make([]models.TransactionInfo, 0)
 	for _, event := range events {
 		var info models.TransactionInfo
 		if event.Status {
-			// Fetch from Success table
 			if err := database.ReadDB.Table("TransactionInfo").Where("transaction_id = ?", event.TransactionID).First(&info).Error; err == nil {
 				info.Status = true
 				result = append(result, info)
 			}
 		} else {
-			// Fetch from Failure table
 			var failed models.FailedTransactionInfo
 			if err := database.ReadDB.Table("FailedTransactionInfo").Where("transaction_id = ?", event.TransactionID).First(&failed).Error; err == nil {
-				// Convert FailedTransactionInfo to TransactionInfo for consistent API response
 				info = models.TransactionInfo{
 					TransactionID:   failed.TransactionID,
 					Initiator:       failed.Initiator,
@@ -239,7 +242,18 @@ func GetTransactionInfoList(limit, page int) ([]models.TransactionInfo, error) {
 		}
 	}
 
-	return result, nil
+	totalPages := int(total) / limit
+	if int(total)%limit != 0 {
+		totalPages++
+	}
+
+	return model.PaginatedTxnResponse{
+		Data:       result,
+		Total:      total,
+		Page:       page,
+		Limit:      limit,
+		TotalPages: totalPages,
+	}, nil
 }
 
 func GetDIDHoldersList(limit, page int) ([]models.DIDBalance, error) {

@@ -4,6 +4,16 @@ import (
 	"explorer-server/database/models"
 )
 
+// --- Paginated Response Wrappers ---
+
+type PaginatedTxnResponse struct {
+	Data       []models.TransactionInfo `json:"data"`
+	Total      int64                    `json:"total"`
+	Page       int                      `json:"page"`
+	Limit      int                      `json:"limit"`
+	TotalPages int                      `json:"total_pages"`
+}
+
 // --- Transaction DTOs (Received from PubSub/Network, matches Rubix node format) ---
 
 type TransactionInfo struct {

@@ -118,13 +118,13 @@ func GetDIDCountHandler(w http.ResponseWriter, r *http.Request) {
 // GetLatestTransactionsListHandler returns a paginated list of latest transactions
 func GetLatestTransactionsListHandler(w http.ResponseWriter, r *http.Request) {
 	limit, page := getPagination(r)
-	transactions, err := api.GetTransactionInfoList(limit, page)
+	response, err := api.GetTransactionInfoList(limit, page)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(transactions)
+	json.NewEncoder(w).Encode(response)
 }
 
 // GetDIDHoldersListHandler returns DIDs with the most RBT balances
