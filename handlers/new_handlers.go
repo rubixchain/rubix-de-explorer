@@ -118,55 +118,61 @@ func GetDIDCountHandler(w http.ResponseWriter, r *http.Request) {
 // GetLatestTransactionsListHandler returns a paginated list of latest transactions
 func GetLatestTransactionsListHandler(w http.ResponseWriter, r *http.Request) {
 	limit, page := getPagination(r)
-	transactions, err := api.GetTransactionInfoList(limit, page)
+	data, total, err := api.GetTransactionInfoList(limit, page)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if data == nil {
+		data = []models.TransactionInfo{}
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(transactions)
+	json.NewEncoder(w).Encode(model.NewPaginated(data, total, page, limit))
 }
 
 // GetDIDHoldersListHandler returns DIDs with the most RBT balances
 func GetDIDHoldersListHandler(w http.ResponseWriter, r *http.Request) {
 	limit, page := getPagination(r)
-	balances, err := api.GetDIDHoldersList(limit, page)
+	data, total, err := api.GetDIDHoldersList(limit, page)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if data == nil {
+		data = []models.DIDBalance{}
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(balances)
+	json.NewEncoder(w).Encode(model.NewPaginated(data, total, page, limit))
 }
 
 // GetRBTListHandler returns a paginated list of RBT tokens
 func GetRBTListHandler(w http.ResponseWriter, r *http.Request) {
 	limit, page := getPagination(r)
-	data, err := api.GetRBTList(limit, page)
+	data, total, err := api.GetRBTList(limit, page)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
 	if data == nil {
 		data = []models.Token{}
 	}
-	json.NewEncoder(w).Encode(data)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(model.NewPaginated(data, total, page, limit))
 }
 
 // GetFTGroupListHandler returns FT tokens grouped by name and creator
 func GetFTGroupListHandler(w http.ResponseWriter, r *http.Request) {
 	limit, page := getPagination(r)
-	data, err := api.GetFTGroupList(limit, page)
+	data, total, err := api.GetFTGroupList(limit, page)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
 	if data == nil {
 		data = []model.FTGroup{}
 	}
-	json.NewEncoder(w).Encode(data)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(model.NewPaginated(data, total, page, limit))
 }
 
 // GetFTListByFTNameHandler returns all FT tokens for a specific group
@@ -175,31 +181,31 @@ func GetFTListByFTNameHandler(w http.ResponseWriter, r *http.Request) {
 	creatorDID := r.URL.Query().Get("creatorDID")
 	limit, page := getPagination(r)
 
-	data, err := api.GetFTListByFTName(ftName, creatorDID, limit, page)
+	data, total, err := api.GetFTListByFTName(ftName, creatorDID, limit, page)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
 	if data == nil {
 		data = []models.Token{}
 	}
-	json.NewEncoder(w).Encode(data)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(model.NewPaginated(data, total, page, limit))
 }
 
 // GetSCListHandler returns a paginated list of Smart Contract tokens
 func GetSCListHandler(w http.ResponseWriter, r *http.Request) {
 	limit, page := getPagination(r)
-	data, err := api.GetSCList(limit, page)
+	data, total, err := api.GetSCList(limit, page)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
 	if data == nil {
 		data = []models.Token{}
 	}
-	json.NewEncoder(w).Encode(data)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(model.NewPaginated(data, total, page, limit))
 }
 
 // ==========================================
@@ -270,16 +276,16 @@ func GetTxnsByDIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit, page := getPagination(r)
-	data, err := api.GetTxnsByDID(did, page, limit)
+	data, total, err := api.GetTxnsByDID(did, page, limit)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
 	if data == nil {
 		data = []models.TransactionInfo{}
 	}
-	json.NewEncoder(w).Encode(data)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(model.NewPaginated(data, total, page, limit))
 }
 
 func GetTransactionInfoHandler(w http.ResponseWriter, r *http.Request) {
@@ -297,32 +303,32 @@ func GetTransactionInfoHandler(w http.ResponseWriter, r *http.Request) {
 func GetTransactionInfoListHandler(w http.ResponseWriter, r *http.Request) {
 	tokenID := r.URL.Query().Get("tokenID")
 	limit, page := getPagination(r)
-	data, err := api.GetTransactionInfoListByToken(tokenID, page, limit)
+	data, total, err := api.GetTransactionInfoListByToken(tokenID, page, limit)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
 	if data == nil {
 		data = []models.TransactionInfo{}
 	}
-	json.NewEncoder(w).Encode(data)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(model.NewPaginated(data, total, page, limit))
 }
 
 // GetTransactionIDListHandler returns TokenChain records for a specific token
 func GetTransactionIDListHandler(w http.ResponseWriter, r *http.Request) {
 	tokenID := r.URL.Query().Get("tokenID")
 	limit, page := getPagination(r)
-	data, err := api.GetTransactionIDList(tokenID, page, limit)
+	data, total, err := api.GetTransactionIDList(tokenID, page, limit)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
 	if data == nil {
 		data = []models.TokenChain{}
 	}
-	json.NewEncoder(w).Encode(data)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(model.NewPaginated(data, total, page, limit))
 }
 
 // GetTokenInfoHandler returns generic token details

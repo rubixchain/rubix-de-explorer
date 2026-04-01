@@ -190,7 +190,7 @@ func GetDAGTransactions() ([]models.TransactionInfo, error) {
 	return transactions, nil
 }
 
-func GetTransactionInfoList(limit, page int) ([]models.TransactionInfo, error) {
+func GetTransactionInfoList(limit, page int) ([]models.TransactionInfo, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -199,26 +199,27 @@ func GetTransactionInfoList(limit, page int) ([]models.TransactionInfo, error) {
 	}
 	offset := (page - 1) * limit
 
-	// 1. Fetch from EventTransactions to get ordered list of TxnIDs and their status
+	var total int64
+	if err := database.ReadDB.Table("EventTransactions").Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
 	var events []models.EventTransaction
 	if err := database.ReadDB.Table("EventTransactions").Order("created_at DESC").Limit(limit).Offset(offset).Find(&events).Error; err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	result := make([]models.TransactionInfo, 0)
 	for _, event := range events {
 		var info models.TransactionInfo
 		if event.Status {
-			// Fetch from Success table
 			if err := database.ReadDB.Table("TransactionInfo").Where("transaction_id = ?", event.TransactionID).First(&info).Error; err == nil {
 				info.Status = true
 				result = append(result, info)
 			}
 		} else {
-			// Fetch from Failure table
 			var failed models.FailedTransactionInfo
 			if err := database.ReadDB.Table("FailedTransactionInfo").Where("transaction_id = ?", event.TransactionID).First(&failed).Error; err == nil {
-				// Convert FailedTransactionInfo to TransactionInfo for consistent API response
 				info = models.TransactionInfo{
 					TransactionID:   failed.TransactionID,
 					Initiator:       failed.Initiator,
@@ -238,12 +239,10 @@ func GetTransactionInfoList(limit, page int) ([]models.TransactionInfo, error) {
 			}
 		}
 	}
-
-	return result, nil
+	return result, total, nil
 }
 
-func GetDIDHoldersList(limit, page int) ([]models.DIDBalance, error) {
-	var balances []models.DIDBalance
+func GetDIDHoldersList(limit, page int) ([]models.DIDBalance, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -252,10 +251,16 @@ func GetDIDHoldersList(limit, page int) ([]models.DIDBalance, error) {
 	}
 	offset := (page - 1) * limit
 
-	if err := database.ReadDB.Table("DIDBalances").Where("asset_type = ? AND balance > 0", "RBT").Order("balance DESC").Limit(limit).Offset(offset).Find(&balances).Error; err != nil {
-		return nil, err
+	var total int64
+	if err := database.ReadDB.Table("DIDBalances").Where("asset_type = ? AND balance > 0", "RBT").Count(&total).Error; err != nil {
+		return nil, 0, err
 	}
-	return balances, nil
+
+	var balances []models.DIDBalance
+	if err := database.ReadDB.Table("DIDBalances").Where("asset_type = ? AND balance > 0", "RBT").Order("balance DESC").Limit(limit).Offset(offset).Find(&balances).Error; err != nil {
+		return nil, 0, err
+	}
+	return balances, total, nil
 }
 
 func GetDIDBalance(did string) ([]models.DIDBalance, error) {
@@ -266,20 +271,25 @@ func GetDIDBalance(did string) ([]models.DIDBalance, error) {
 	return balances, nil
 }
 
-func GetRBTList(limit, page int) ([]models.Token, error) {
-	var tokens []models.Token
+func GetRBTList(limit, page int) ([]models.Token, int64, error) {
 	offset := (page - 1) * limit
 
-	if err := database.ReadDB.Model(&models.Token{}).Where("token_type = ?", 1).Order("updated_at DESC").Limit(limit).Offset(offset).Find(&tokens).Error; err != nil {
-		return nil, err
+	var total int64
+	if err := database.ReadDB.Model(&models.Token{}).Where("token_type = ?", 1).Count(&total).Error; err != nil {
+		return nil, 0, err
 	}
-	return tokens, nil
+
+	var tokens []models.Token
+	if err := database.ReadDB.Model(&models.Token{}).Where("token_type = ?", 1).Order("updated_at DESC").Limit(limit).Offset(offset).Find(&tokens).Error; err != nil {
+		return nil, 0, err
+	}
+	return tokens, total, nil
 }
 
-func GetFTGroupList(limit, page int) ([]model.FTGroup, error) {
+func GetFTGroupList(limit, page int) ([]model.FTGroup, int64, error) {
 	var tokens []models.Token
 	if err := database.ReadDB.Model(&models.Token{}).Where("token_type = ?", 2).Find(&tokens).Error; err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	groupsMap := make(map[string]*model.FTGroup)
@@ -302,6 +312,7 @@ func GetFTGroupList(limit, page int) ([]model.FTGroup, error) {
 		allGroups = append(allGroups, *g)
 	}
 
+	total := int64(len(allGroups))
 	start := (page - 1) * limit
 	if start > len(allGroups) {
 		start = len(allGroups)
@@ -310,31 +321,41 @@ func GetFTGroupList(limit, page int) ([]model.FTGroup, error) {
 	if end > len(allGroups) {
 		end = len(allGroups)
 	}
-	return allGroups[start:end], nil
+	return allGroups[start:end], total, nil
 }
 
-func GetFTListByFTName(ftName string, creatorDID string, limit, page int) ([]models.Token, error) {
-	var tokens []models.Token
+func GetFTListByFTName(ftName string, creatorDID string, limit, page int) ([]models.Token, int64, error) {
 	offset := (page - 1) * limit
-	query := database.ReadDB.Model(&models.Token{}).Where("token_type = ?", 2).Where("token_id LIKE ?", ftName+"_%")
+	base := database.ReadDB.Model(&models.Token{}).Where("token_type = ?", 2).Where("token_id LIKE ?", ftName+"_%")
 	if creatorDID != "" {
-		query = query.Where("token_id LIKE ?", "%_"+creatorDID)
+		base = base.Where("token_id LIKE ?", "%_"+creatorDID)
 	}
 
-	if err := query.Order("updated_at DESC").Limit(limit).Offset(offset).Find(&tokens).Error; err != nil {
-		return nil, err
+	var total int64
+	if err := base.Count(&total).Error; err != nil {
+		return nil, 0, err
 	}
-	return tokens, nil
+
+	var tokens []models.Token
+	if err := base.Order("updated_at DESC").Limit(limit).Offset(offset).Find(&tokens).Error; err != nil {
+		return nil, 0, err
+	}
+	return tokens, total, nil
 }
 
-func GetSCList(limit, page int) ([]models.Token, error) {
-	var tokens []models.Token
+func GetSCList(limit, page int) ([]models.Token, int64, error) {
 	offset := (page - 1) * limit
 
-	if err := database.ReadDB.Model(&models.Token{}).Where("token_type = ?", 4).Order("updated_at DESC").Limit(limit).Offset(offset).Find(&tokens).Error; err != nil {
-		return nil, err
+	var total int64
+	if err := database.ReadDB.Model(&models.Token{}).Where("token_type = ?", 4).Count(&total).Error; err != nil {
+		return nil, 0, err
 	}
-	return tokens, nil
+
+	var tokens []models.Token
+	if err := database.ReadDB.Model(&models.Token{}).Where("token_type = ?", 4).Order("updated_at DESC").Limit(limit).Offset(offset).Find(&tokens).Error; err != nil {
+		return nil, 0, err
+	}
+	return tokens, total, nil
 }
 
 // -------------------------------------------------------------------
@@ -349,7 +370,7 @@ func GetTransactionInfo(txnID string) (models.TransactionInfo, error) {
 	return transaction, nil
 }
 
-func GetTxnsByDID(did string, page, limit int) ([]models.TransactionInfo, error) {
+func GetTxnsByDID(did string, page, limit int) ([]models.TransactionInfo, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -358,24 +379,31 @@ func GetTxnsByDID(did string, page, limit int) ([]models.TransactionInfo, error)
 	}
 	offset := (page - 1) * limit
 
+	var total int64
+	if err := database.ReadDB.Table("TransactionInfo").
+		Where("initiator = ? OR owner = ?", did, did).
+		Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
 	var transactions []models.TransactionInfo
 	if err := database.ReadDB.Table("TransactionInfo").
 		Where("initiator = ? OR owner = ?", did, did).
 		Order("epoch DESC").
 		Limit(limit).Offset(offset).
 		Find(&transactions).Error; err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return transactions, nil
+	return transactions, total, nil
 }
 
-func GetTransactionInfoListByToken(tokenID string, page, limit int) ([]models.TransactionInfo, error) {
-	ids, err := GetTransactionIDList(tokenID, page, limit)
+func GetTransactionInfoListByToken(tokenID string, page, limit int) ([]models.TransactionInfo, int64, error) {
+	ids, total, err := GetTransactionIDList(tokenID, page, limit)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if len(ids) == 0 {
-		return []models.TransactionInfo{}, nil
+		return []models.TransactionInfo{}, total, nil
 	}
 
 	txnIDs := make([]string, len(ids))
@@ -385,31 +413,31 @@ func GetTransactionInfoListByToken(tokenID string, page, limit int) ([]models.Tr
 
 	var transactions []models.TransactionInfo
 	if err := database.ReadDB.Table("TransactionInfo").Where("transaction_id IN ?", txnIDs).Order("epoch DESC").Find(&transactions).Error; err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return transactions, nil
+	return transactions, total, nil
 }
 
-func GetTransactionIDList(tokenID string, page, limit int) ([]models.TokenChain, error) {
+func GetTransactionIDList(tokenID string, page, limit int) ([]models.TokenChain, int64, error) {
 	var tca models.TokenChainArray
 	if err := database.ReadDB.Table("TokenChainArray").Where("token_id = ?", tokenID).First(&tca).Error; err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	var chain []uint64
 	if err := json.Unmarshal(tca.Index, &chain); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	total := len(chain)
+	total := int64(len(chain))
 	if total == 0 {
-		return []models.TokenChain{}, nil
+		return []models.TokenChain{}, 0, nil
 	}
 
-	end := total - ((page - 1) * limit)
-	start := total - (page * limit)
+	end := int(total) - ((page - 1) * limit)
+	start := int(total) - (page * limit)
 	if end <= 0 {
-		return []models.TokenChain{}, nil
+		return []models.TokenChain{}, total, nil
 	}
 	if start < 0 {
 		start = 0
@@ -418,9 +446,9 @@ func GetTransactionIDList(tokenID string, page, limit int) ([]models.TokenChain,
 
 	var history []models.TokenChain
 	if err := database.ReadDB.Table("TokenChain").Where("id IN ?", pagedIndices).Order("id DESC").Find(&history).Error; err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return history, nil
+	return history, total, nil
 }
 
 func GetTokenInfo(tokenID string) (models.Token, error) {
