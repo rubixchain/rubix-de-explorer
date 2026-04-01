@@ -7,7 +7,9 @@ import (
 	"explorer-server/pubsub"
 	"fmt"
 	"log"
+	"math"
 	"math/rand"
+	"strings"
 	"time"
 )
 
@@ -101,7 +103,7 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 		t := &TokenStore{
 			ID:    fmt.Sprintf("1_%d", i),
 			Type:  "RBT",
-			Value: 1.0,
+			Value: math.Round(val*1000) / 1000,
 		}
 		allTokens[t.ID] = t
 		wholeRBTs = append(wholeRBTs, t)

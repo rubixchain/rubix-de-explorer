@@ -89,8 +89,9 @@ CREATE TABLE IF NOT EXISTS "TokenChainArray" (
 CREATE TABLE IF NOT EXISTS "DIDBalances" (
     "did" TEXT,
     "asset_type" TEXT,
-    "token_name" TEXT,
+    "token_name" TEXT, -- FT Name (empty for RBT/NFT/SC)
     "creator_did" TEXT DEFAULT '', -- FT creator DID (empty for RBT/NFT/SC)
+    "token_value" DOUBLE PRECISION DEFAULT 0, -- FT Value (empty for RBT/NFT/SC)
     "balance" DOUBLE PRECISION DEFAULT 0,
     "last_update" BIGINT,
     PRIMARY KEY ("did", "asset_type", "token_name", "creator_did")
