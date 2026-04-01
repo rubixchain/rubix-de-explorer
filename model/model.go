@@ -6,12 +6,20 @@ import (
 
 // --- Paginated Response Wrappers ---
 
-type PaginatedTxnResponse struct {
-	Data       []models.TransactionInfo `json:"data"`
-	Total      int64                    `json:"total"`
-	Page       int                      `json:"page"`
-	Limit      int                      `json:"limit"`
-	TotalPages int                      `json:"total_pages"`
+type PaginatedResponse struct {
+	Data       interface{} `json:"data"`
+	Total      int64       `json:"total"`
+	Page       int         `json:"page"`
+	Limit      int         `json:"limit"`
+	TotalPages int         `json:"total_pages"`
+}
+
+func NewPaginated(data interface{}, total int64, page, limit int) PaginatedResponse {
+	tp := int(total) / limit
+	if int(total)%limit != 0 {
+		tp++
+	}
+	return PaginatedResponse{Data: data, Total: total, Page: page, Limit: limit, TotalPages: tp}
 }
 
 // --- Transaction DTOs (Received from PubSub/Network, matches Rubix node format) ---
