@@ -6,7 +6,6 @@ import (
 	"explorer-server/database/models"
 	"explorer-server/model"
 	"explorer-server/util"
-	"gorm.io/gorm"
 	"strings"
 	"time"
 
@@ -66,10 +65,10 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 		processTokens := func(tokenInfos []*model.TokenInfo, tokenType string) error {
 			typeID := tokenTypeMap[tokenType]
 			for _, info := range tokenInfos {
-				
+
 				var existing models.Token
 				err := tx.Where("token_id = ?", info.TokenID).First(&existing).Error
-				
+
 				isNew := (err == gorm.ErrRecordNotFound)
 				if err != nil && !isNew {
 					return err
@@ -95,7 +94,7 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 					} else {
 						tokenToSave.DID = txn.Owner
 					}
-					
+
 					// Always assign Data if present (NFTs, Smart Contracts, etc.)
 					if info.Data != "" {
 						tokenToSave.Data = info.Data
@@ -106,11 +105,11 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 						val, _ := util.GetTokenValueFromTokenID(info.TokenID)
 						tokenToSave.TokenValue = val
 					}
-					
+
 					// For FT, value is calculated if it's a mint (handled below)
 					if typeID == TokenTypeFT {
 						// This will be overwritten by a calculated value if it's a mint
-						tokenToSave.TokenValue = 1.0 
+						tokenToSave.TokenValue = 1.0
 					}
 				} else {
 					// Update existing token
@@ -122,7 +121,7 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 						tokenToSave.NeedsSync = true
 					}
 
-					// Use Initiator as DID (Owner) for SCs (execution/deployment), 
+					// Use Initiator as DID (Owner) for SCs (execution/deployment),
 					// but preserve the original DeployerDID from deployment.
 					if typeID == TokenTypeSC {
 						tokenToSave.DID = txn.Initiator
@@ -132,7 +131,7 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 
 					tokenToSave.TransactionID = txnID
 					tokenToSave.TokenStatus = 1
-					
+
 					// Update Data if new data is provided
 					if info.Data != "" {
 						tokenToSave.Data = info.Data
@@ -149,7 +148,7 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 					} else {
 						if info.PreviousTransactionID == "" {
 							inferredRole = 1 // RoleMint
-							
+
 							// FT dynamic value calculation
 							if typeID == TokenTypeFT {
 								// Calculate total burned value for this transaction
@@ -164,7 +163,7 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 										burnedSum += v
 									}
 								}
-								
+
 								ftCount := len(txn.Tokens.FT)
 								if ftCount > 0 {
 									tokenToSave.TokenValue = burnedSum / float64(ftCount)
@@ -290,9 +289,9 @@ func updateBalances(tx *gorm.DB, did string, token *models.Token, direction floa
 	// - FT, NFT, SC: Simply count the number of tokens (1.0 each)
 	var balanceIncrement float64
 	if token.TokenType == TokenTypeRBT {
-		balanceIncrement = token.TokenValue 
+		balanceIncrement = token.TokenValue
 	} else {
-		balanceIncrement = 1.0 
+		balanceIncrement = 1.0
 	}
 
 	valueToAdd := balanceIncrement * direction
@@ -301,7 +300,7 @@ func updateBalances(tx *gorm.DB, did string, token *models.Token, direction floa
 	assetName := ""
 	creatorDID := ""
 	var storeTokenValue float64 // Only > 0 for FTs
-	
+
 	if token.TokenType == TokenTypeFT {
 		storeTokenValue = token.TokenValue // Store face value for FTs
 		parts := strings.Split(token.TokenID, "_")
@@ -335,7 +334,7 @@ func updateBalances(tx *gorm.DB, did string, token *models.Token, direction floa
 		"balance":     balance.Balance + valueToAdd,
 		"last_update": now,
 	}
-	
+
 	// Only update token_value for FTs
 	if token.TokenType == TokenTypeFT {
 		updates["token_value"] = storeTokenValue
@@ -362,7 +361,7 @@ func appendTokenHistory(tx *gorm.DB, tokenID, txnID, prevTxnID string, role int1
 	// 2. Load existing TokenChainArray
 	var tca models.TokenChainArray
 	err := tx.Where("token_id = ?", tokenID).First(&tca).Error
-	
+
 	var chain []uint64
 	if err == nil {
 		json.Unmarshal(tca.Index, &chain)
