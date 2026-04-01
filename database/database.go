@@ -69,6 +69,7 @@ func ConnectAndMigrate(drop bool) {
 		&models.Transactions{},
 		&models.EventTransaction{},
 		&models.TransactionInfo{},
+		&models.FailedTransactionInfo{},
 		&models.Token{},
 		&models.TokenChain{},
 		&models.TokenChainArray{},

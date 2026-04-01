@@ -5,7 +5,8 @@ import (
 	"explorer-server/database"
 	"explorer-server/database/models"
 	"explorer-server/model"
-	"strconv"
+	"explorer-server/util"
+	"gorm.io/gorm"
 	"strings"
 	"time"
 
@@ -100,21 +101,16 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 						tokenToSave.Data = info.Data
 					}
 
-					// Check if Data contains a dummy Float value (used as an API bridge for dummy testing)
-					if typeID == TokenTypeRBT || typeID == TokenTypeFT {
-						if tokenToSave.Data != "" {
-							if val, err := strconv.ParseFloat(tokenToSave.Data, 64); err == nil {
-								tokenToSave.TokenValue = val
-								tokenToSave.Data = "" // Clear the hacky data so it doesn't pollute the DB
-							}
-						}
-						
-						// Fallback exactly as you had it
-						if tokenToSave.TokenValue == 0 {
-							// Simple check: part RBTs contain more than one underscore (e.g. 1_1000_5)
-							// We'll set a placeholder, but real value comes from node sync
-							tokenToSave.TokenValue = 1.0 
-						}
+					// For RBT, handle whole vs part tokens
+					if typeID == TokenTypeRBT {
+						val, _ := util.GetTokenValueFromTokenID(info.TokenID)
+						tokenToSave.TokenValue = val
+					}
+					
+					// For FT, value is calculated if it's a mint (handled below)
+					if typeID == TokenTypeFT {
+						// This will be overwritten by a calculated value if it's a mint
+						tokenToSave.TokenValue = 1.0 
 					}
 				} else {
 					// Update existing token
@@ -141,6 +137,44 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 					if info.Data != "" {
 						tokenToSave.Data = info.Data
 					}
+
+					// Contextual Role Inference
+					var inferredRole int16 = 2 // Default to Transfer
+					if typeID == TokenTypeSC {
+						if info.PreviousTransactionID == "" {
+							inferredRole = 3 // RoleDeploy
+						} else {
+							inferredRole = 4 // RoleExecute
+						}
+					} else {
+						if info.PreviousTransactionID == "" {
+							inferredRole = 1 // RoleMint
+							
+							// FT dynamic value calculation
+							if typeID == TokenTypeFT {
+								// Calculate total burned value for this transaction
+								var burnedSum float64
+								for _, ct := range txn.CommittedTokens {
+									// Only burned (Role 5) or supporting tokens in CommittedTokens
+									// Note: In some explorer flows, CommittedTokens aren't yet in DB
+									// so we derive their value from their ID format.
+									// We only care about RBT parents being burned here.
+									if !strings.Contains(ct.TokenID, "Qm") && !strings.Contains(ct.TokenID, "_DID") {
+										v, _ := util.GetTokenValueFromTokenID(ct.TokenID)
+										burnedSum += v
+									}
+								}
+								
+								ftCount := len(txn.Tokens.FT)
+								if ftCount > 0 {
+									tokenToSave.TokenValue = burnedSum / float64(ftCount)
+								}
+							}
+						} else {
+							inferredRole = 2 // RoleTransfer
+						}
+					}
+					tokenToSave.LatestRole = inferredRole
 				}
 
 				// 1. Write the Token updates to the Token Table First
@@ -149,7 +183,7 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 				}
 
 				// 2. Append to Token History (with sequencing via PreviousTransactionID)
-				if err := appendTokenHistory(tx, info.TokenID, txnID, info.PreviousTransactionID, 0); err != nil {
+				if err := appendTokenHistory(tx, info.TokenID, txnID, info.PreviousTransactionID, tokenToSave.LatestRole); err != nil {
 					return err
 				}
 
@@ -187,6 +221,41 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 		if txn.Tokens.SmartContract != nil {
 			if err := processTokens(txn.Tokens.SmartContract, "SC"); err != nil {
 				return err
+			}
+		}
+
+		// Build a set of quorum pledge token IDs so we can distinguish burn vs pledge in CommittedTokens
+		quorumPledgeIDs := make(map[string]bool)
+		if txn.Quorums != nil {
+			for _, q := range txn.Quorums {
+				for _, info := range q.Tokens {
+					quorumPledgeIDs[info.TokenID] = true
+				}
+			}
+		}
+
+		// Process Committed Tokens
+		// CommittedTokens contains supporting tokens:
+		//   - Quorum pledge tokens (RolePledge = 8)
+		//   - Burned parent RBTs during FT creation (RoleBurn = 5)
+		if txn.CommittedTokens != nil {
+			for _, info := range txn.CommittedTokens {
+				var tokenToSave models.Token
+				if err := tx.Where("token_id = ?", info.TokenID).First(&tokenToSave).Error; err == nil {
+					// Determine role: if this token is also in Quorums, it's a pledge; otherwise it's a burn
+					var role int16 = 5 // Default to RoleBurn
+					if quorumPledgeIDs[info.TokenID] {
+						role = 8 // RolePledge
+					}
+					tokenToSave.LatestRole = role
+					tokenToSave.TransactionID = txnID
+					if err := tx.Save(&tokenToSave).Error; err != nil {
+						return err
+					}
+					if err := appendTokenHistory(tx, info.TokenID, txnID, info.PreviousTransactionID, role); err != nil {
+						return err
+					}
+				}
 			}
 		}
 
