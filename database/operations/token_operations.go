@@ -5,6 +5,7 @@ import (
 	"explorer-server/database"
 	"explorer-server/database/models"
 	"explorer-server/model"
+	"explorer-server/util"
 	"gorm.io/gorm"
 	"strings"
 	"time"
@@ -80,11 +81,19 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 					tokenToSave = models.Token{
 						TokenID:       info.TokenID,
 						TokenType:     typeID,
-						DID:           txn.Owner,
 						TransactionID: txnID,
-						TokenStatus:   1, // Active
+						DeployerDID:   txn.Initiator,
+						TokenStatus:   1,    // Active
 						NeedsSync:     true, // Flag for the background job to fetch true history from node
 					}
+
+					// Use Initiator as DID (Owner) for SCs, else use txn.Owner
+					if typeID == TokenTypeSC {
+						tokenToSave.DID = txn.Initiator
+					} else {
+						tokenToSave.DID = txn.Owner
+					}
+					
 					// Always assign Data if present (NFTs, Smart Contracts, etc.)
 					if info.Data != "" {
 						tokenToSave.Data = info.Data
@@ -92,8 +101,13 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 
 					// For RBT, handle whole vs part tokens
 					if typeID == TokenTypeRBT {
-						// Simple check: part RBTs contain more than one underscore (e.g. 1_1000_5)
-						// We'll set a placeholder, but real value comes from node sync
+						val, _ := util.GetTokenValueFromTokenID(info.TokenID)
+						tokenToSave.TokenValue = val
+					}
+					
+					// For FT, value is calculated if it's a mint (handled below)
+					if typeID == TokenTypeFT {
+						// This will be overwritten by a calculated value if it's a mint
 						tokenToSave.TokenValue = 1.0 
 					}
 				} else {
@@ -106,7 +120,13 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 						tokenToSave.NeedsSync = true
 					}
 
-					tokenToSave.DID = txn.Owner
+					// Use Initiator as DID (Owner) for SCs, else use txn.Owner
+					if typeID == TokenTypeSC {
+						tokenToSave.DID = txn.Initiator
+					} else {
+						tokenToSave.DID = txn.Owner
+					}
+
 					tokenToSave.TransactionID = txnID
 					tokenToSave.TokenStatus = 1
 					
@@ -114,6 +134,44 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 					if info.Data != "" {
 						tokenToSave.Data = info.Data
 					}
+
+					// Contextual Role Inference
+					var inferredRole int16 = 2 // Default to Transfer
+					if typeID == TokenTypeSC {
+						if info.PreviousTransactionID == "" {
+							inferredRole = 3 // RoleDeploy
+						} else {
+							inferredRole = 4 // RoleExecute
+						}
+					} else {
+						if info.PreviousTransactionID == "" {
+							inferredRole = 1 // RoleMint
+							
+							// FT dynamic value calculation
+							if typeID == TokenTypeFT {
+								// Calculate total burned value for this transaction
+								var burnedSum float64
+								for _, ct := range txn.CommittedTokens {
+									// Only burned (Role 5) or supporting tokens in CommittedTokens
+									// Note: In some explorer flows, CommittedTokens aren't yet in DB
+									// so we derive their value from their ID format.
+									// We only care about RBT parents being burned here.
+									if !strings.Contains(ct.TokenID, "Qm") && !strings.Contains(ct.TokenID, "_DID") {
+										v, _ := util.GetTokenValueFromTokenID(ct.TokenID)
+										burnedSum += v
+									}
+								}
+								
+								ftCount := len(txn.Tokens.FT)
+								if ftCount > 0 {
+									tokenToSave.TokenValue = burnedSum / float64(ftCount)
+								}
+							}
+						} else {
+							inferredRole = 2 // RoleTransfer
+						}
+					}
+					tokenToSave.LatestRole = inferredRole
 				}
 
 				// 1. Write the Token updates to the Token Table First
@@ -122,7 +180,7 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 				}
 
 				// 2. Append to Token History (with sequencing via PreviousTransactionID)
-				if err := appendTokenHistory(tx, info.TokenID, txnID, info.PreviousTransactionID, 0); err != nil {
+				if err := appendTokenHistory(tx, info.TokenID, txnID, info.PreviousTransactionID, tokenToSave.LatestRole); err != nil {
 					return err
 				}
 
@@ -163,6 +221,41 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 			}
 		}
 
+		// Build a set of quorum pledge token IDs so we can distinguish burn vs pledge in CommittedTokens
+		quorumPledgeIDs := make(map[string]bool)
+		if txn.Quorums != nil {
+			for _, q := range txn.Quorums {
+				for _, info := range q.Tokens {
+					quorumPledgeIDs[info.TokenID] = true
+				}
+			}
+		}
+
+		// Process Committed Tokens
+		// CommittedTokens contains supporting tokens:
+		//   - Quorum pledge tokens (RolePledge = 8)
+		//   - Burned parent RBTs during FT creation (RoleBurn = 5)
+		if txn.CommittedTokens != nil {
+			for _, info := range txn.CommittedTokens {
+				var tokenToSave models.Token
+				if err := tx.Where("token_id = ?", info.TokenID).First(&tokenToSave).Error; err == nil {
+					// Determine role: if this token is also in Quorums, it's a pledge; otherwise it's a burn
+					var role int16 = 5 // Default to RoleBurn
+					if quorumPledgeIDs[info.TokenID] {
+						role = 8 // RolePledge
+					}
+					tokenToSave.LatestRole = role
+					tokenToSave.TransactionID = txnID
+					if err := tx.Save(&tokenToSave).Error; err != nil {
+						return err
+					}
+					if err := appendTokenHistory(tx, info.TokenID, txnID, info.PreviousTransactionID, role); err != nil {
+						return err
+					}
+				}
+			}
+		}
+
 		return nil
 	})
 }
@@ -197,22 +290,27 @@ func updateBalances(tx *gorm.DB, did string, token *models.Token, direction floa
 		valueToAdd = 1.0 * direction
 	}
 
-	// Token Name: extract from TokenID for FTs
-	assetName := typeName
+	// Token Name and CreatorDID: only populated for FTs
+	assetName := ""
+	creatorDID := ""
 	if token.TokenType == TokenTypeFT {
 		parts := strings.Split(token.TokenID, "_")
-		if len(parts) > 0 && parts[0] != "" {
+		if len(parts) >= 3 {
+			assetName = parts[0]
+			creatorDID = parts[len(parts)-1]
+		} else if len(parts) > 0 && parts[0] != "" {
 			assetName = parts[0]
 		}
 	}
 
 	var balance models.DIDBalance
-	err := tx.Where("did = ? AND asset_type = ? AND token_name = ?", did, typeName, assetName).First(&balance).Error
+	err := tx.Where("did = ? AND asset_type = ? AND token_name = ? AND creator_did = ?", did, typeName, assetName, creatorDID).First(&balance).Error
 	if err == gorm.ErrRecordNotFound {
 		balance = models.DIDBalance{
 			DID:        did,
 			AssetType:  typeName,
 			TokenName:  assetName,
+			CreatorDID: creatorDID,
 			Balance:    valueToAdd,
 			LastUpdate: now,
 		}
@@ -221,10 +319,13 @@ func updateBalances(tx *gorm.DB, did string, token *models.Token, direction floa
 		return err
 	}
 
-	balance.Balance += valueToAdd
-	balance.LastUpdate = now
-
-	return tx.Save(&balance).Error
+	// Use explicit WHERE-based update (GORM's Save treats empty-string PKs as zero-values)
+	return tx.Model(&models.DIDBalance{}).
+		Where("did = ? AND asset_type = ? AND token_name = ? AND creator_did = ?", did, typeName, assetName, creatorDID).
+		Updates(map[string]interface{}{
+			"balance":     balance.Balance + valueToAdd,
+			"last_update": now,
+		}).Error
 }
 
 // appendTokenHistory records the token's movement and ensures the TokenChainArray is logically sequenced

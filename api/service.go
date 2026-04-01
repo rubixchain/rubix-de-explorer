@@ -33,18 +33,18 @@ func GetSearchInfo(query string) (*SearchResult, error) {
 		}
 	}
 
-	// 2. Token Search (starts with Qm or contains _)
+	// 2. Transaction Search (prioritize DB check to avoid ID collisions)
+	var txn models.TransactionInfo
+	if err := database.ReadDB.Table("TransactionInfo").Where("transaction_id = ?", query).First(&txn).Error; err == nil {
+		return &SearchResult{Type: "Transaction", Data: txn}, nil
+	}
+
+	// 3. Token Search (starts with Qm or contains _)
 	if strings.HasPrefix(query, "Qm") || strings.Contains(query, "_") {
 		var token models.Token
 		if err := database.ReadDB.Table("Tokens").Where("token_id = ?", query).First(&token).Error; err == nil {
 			return &SearchResult{Type: "Token", Data: token}, nil
 		}
-	}
-
-	// 3. Transaction Search (fallback)
-	var txn models.TransactionInfo
-	if err := database.ReadDB.Table("TransactionInfo").Where("transaction_id = ?", query).First(&txn).Error; err == nil {
-		return &SearchResult{Type: "Transaction", Data: txn}, nil
 	}
 
 	return nil, fmt.Errorf("no data found for ID: %s", query)
@@ -178,9 +178,6 @@ func GetDAGFromTxn(txnID string, depth int) (model.DAGResponse, error) {
 	if txns == nil {
 		txns = []models.TransactionInfo{}
 	}
-	if dagEdges == nil {
-		dagEdges = []model.DAGEdge{}
-	}
 	return model.DAGResponse{Transactions: txns, Edges: dagEdges}, nil
 }
 
@@ -194,7 +191,6 @@ func GetDAGTransactions() ([]models.TransactionInfo, error) {
 }
 
 func GetTransactionInfoList(limit, page int) ([]models.TransactionInfo, error) {
-	var transactions []models.TransactionInfo
 	if page < 1 {
 		page = 1
 	}
@@ -203,10 +199,47 @@ func GetTransactionInfoList(limit, page int) ([]models.TransactionInfo, error) {
 	}
 	offset := (page - 1) * limit
 
-	if err := database.ReadDB.Table("TransactionInfo").Order("epoch DESC").Limit(limit).Offset(offset).Find(&transactions).Error; err != nil {
+	// 1. Fetch from EventTransactions to get ordered list of TxnIDs and their status
+	var events []models.EventTransaction
+	if err := database.ReadDB.Table("EventTransactions").Order("created_at DESC").Limit(limit).Offset(offset).Find(&events).Error; err != nil {
 		return nil, err
 	}
-	return transactions, nil
+
+	result := make([]models.TransactionInfo, 0)
+	for _, event := range events {
+		var info models.TransactionInfo
+		if event.Status {
+			// Fetch from Success table
+			if err := database.ReadDB.Table("TransactionInfo").Where("transaction_id = ?", event.TransactionID).First(&info).Error; err == nil {
+				info.Status = true
+				result = append(result, info)
+			}
+		} else {
+			// Fetch from Failure table
+			var failed models.FailedTransactionInfo
+			if err := database.ReadDB.Table("FailedTransactionInfo").Where("transaction_id = ?", event.TransactionID).First(&failed).Error; err == nil {
+				// Convert FailedTransactionInfo to TransactionInfo for consistent API response
+				info = models.TransactionInfo{
+					TransactionID:   failed.TransactionID,
+					Initiator:       failed.Initiator,
+					Owner:           failed.Owner,
+					Epoch:           failed.Epoch,
+					Network:         failed.Network,
+					Tokens:          failed.Tokens,
+					CommittedTokens: failed.CommittedTokens,
+					Quorums:         failed.Quorums,
+					Memo:            failed.Memo,
+					Status:          false,
+					Amount:          failed.Amount,
+					CreatedAt:       failed.CreatedAt,
+					UpdatedAt:       failed.UpdatedAt,
+				}
+				result = append(result, info)
+			}
+		}
+	}
+
+	return result, nil
 }
 
 func GetDIDHoldersList(limit, page int) ([]models.DIDBalance, error) {
@@ -220,6 +253,14 @@ func GetDIDHoldersList(limit, page int) ([]models.DIDBalance, error) {
 	offset := (page - 1) * limit
 
 	if err := database.ReadDB.Table("DIDBalances").Where("asset_type = ? AND balance > 0", "RBT").Order("balance DESC").Limit(limit).Offset(offset).Find(&balances).Error; err != nil {
+		return nil, err
+	}
+	return balances, nil
+}
+
+func GetDIDBalance(did string) ([]models.DIDBalance, error) {
+	var balances []models.DIDBalance
+	if err := database.ReadDB.Table("DIDBalances").Where("did = ?", did).Find(&balances).Error; err != nil {
 		return nil, err
 	}
 	return balances, nil
@@ -306,6 +347,26 @@ func GetTransactionInfo(txnID string) (models.TransactionInfo, error) {
 		return transaction, err
 	}
 	return transaction, nil
+}
+
+func GetTxnsByDID(did string, page, limit int) ([]models.TransactionInfo, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 10
+	}
+	offset := (page - 1) * limit
+
+	var transactions []models.TransactionInfo
+	if err := database.ReadDB.Table("TransactionInfo").
+		Where("initiator = ? OR owner = ?", did, did).
+		Order("epoch DESC").
+		Limit(limit).Offset(offset).
+		Find(&transactions).Error; err != nil {
+		return nil, err
+	}
+	return transactions, nil
 }
 
 func GetTransactionInfoListByToken(tokenID string, page, limit int) ([]models.TransactionInfo, error) {

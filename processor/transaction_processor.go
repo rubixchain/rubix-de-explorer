@@ -125,19 +125,13 @@ func ProcessDBTransaction(newEvent *model.EventTransaction, workerID int) {
 		log.Printf("[Worker %d] Step 1: EventTransaction saved", workerID)
 	}
 
-	// If consensus failed, log it and skip token/balance processing
-	if !newEvent.Status {
-		log.Printf("[Worker %d] Transaction %s failed consensus: %s", workerID, newEvent.Transaction.TransactionID, newEvent.Message)
-		return
-	}
-
 	txnInfo := newEvent.Transaction.TransactionInfo
 	if txnInfo == nil {
-		log.Printf("[Worker %d] Transaction %s has no TransactionInfo, skipping assets", workerID, newEvent.Transaction.TransactionID)
+		log.Printf("[Worker %d] Transaction %s has no TransactionInfo, skipping details", workerID, newEvent.Transaction.TransactionID)
 		return
 	}
 
-	// 2. Save Transaction as JSON (aligned with Rubix node's Transactions table)
+	// 2. Save Transaction as JSON (always)
 	dbTxn := convertToDBTransaction(newEvent)
 	if dbTxn != nil {
 		if err := operations.SaveTransaction(dbTxn); err != nil {
@@ -147,14 +141,20 @@ func ProcessDBTransaction(newEvent *model.EventTransaction, workerID int) {
 		}
 	}
 
-	// 3. Save flattened TransactionInfo for frontend filtering
-	if err := operations.SaveTransactionDetails(newEvent.Transaction.TransactionID, txnInfo); err != nil {
+	// 3. Save flattened TransactionInfo (to success or failure table)
+	if err := operations.SaveTransactionDetails(newEvent.Transaction.TransactionID, txnInfo, newEvent.Status); err != nil {
 		log.Printf("[Worker %d] Error saving transaction details: %v", workerID, err)
 	} else {
-		log.Printf("[Worker %d] Step 3: flattened TransactionInfo saved", workerID)
+		log.Printf("[Worker %d] Step 3: TransactionInfo saved (Status: %v)", workerID, newEvent.Status)
 	}
 
-	// 4. Process Assets (Tokens, Balances, Provenance)
+	// If consensus failed, stop here (don't update assets/balances)
+	if !newEvent.Status {
+		log.Printf("[Worker %d] Transaction %s failed consensus, skipping asset processing", workerID, newEvent.Transaction.TransactionID)
+		return
+	}
+
+	// 4. Process Assets (Tokens, Balances, Provenance) — ONLY for successful transactions
 	log.Printf("[Worker %d] Step 4: Starting Asset Processing...", workerID)
 	if err := operations.ProcessTransactionAssets(txnInfo, newEvent.Transaction.TransactionID); err != nil {
 		log.Printf("[Worker %d] Error processing transaction assets: %v", workerID, err)

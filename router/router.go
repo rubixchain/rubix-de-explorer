@@ -53,6 +53,7 @@ func NewRouter() *mux.Router {
 
 	// Top Holders
 	r.HandleFunc("/api/get-did-with-most-rbts", handlers.GetDIDHoldersListHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-did-balance", handlers.GetDIDBalanceHandler).Methods(http.MethodGet)
 
 	// Tokens
 	// RBT
@@ -70,6 +71,7 @@ func NewRouter() *mux.Router {
 	r.HandleFunc("/api/get-sc-list", handlers.GetSCListHandler).Methods(http.MethodGet)
 
 	// Transaction Info
+	r.HandleFunc("/api/get-txns-by-did", handlers.GetTxnsByDIDHandler).Methods(http.MethodGet)
 	r.HandleFunc("/api/get-transaction-info", handlers.GetTransactionInfoHandler).Methods(http.MethodGet)
 	r.HandleFunc("/api/get-transaction-info-list", handlers.GetTransactionInfoListHandler).Methods(http.MethodGet)
 	r.HandleFunc("/api/get-transaction-id-list", handlers.GetTransactionIDListHandler).Methods(http.MethodGet)
