@@ -40,6 +40,15 @@ func randomHex(length int) string {
 	return string(b)
 }
 
+func randomBase58(length int) string {
+	alphabet := "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+	b := make([]byte, length)
+	for i := range b {
+		b[i] = alphabet[rand.Intn(len(alphabet))]
+	}
+	return string(b)
+}
+
 // PublishDummyTransaction generates a cohesive narrative of transactions
 func PublishDummyTransaction(ps *pubsub.PubSub) {
 	log.Printf("Starting Detailed SC/NFT Execution Narrative...")
@@ -166,13 +175,24 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 			r.Burned = true
 		}
 		// NFT
-		nftID := "Qm" + randomHex(64); nft := &TokenStore{ID: nftID, Type: "NFT", Owner: creator, Value: burnVal}
+		nftID := "Qm" + randomBase58(44)
+		nft := &TokenStore{ID: nftID, Type: "NFT", Owner: creator, Value: burnVal}
 		txnID_NFT := publishProtocolTxn(creator, creator, nil, nil, []*model.TokenInfo{{TokenID: nftID, Data: "deployment-of-NFT"}}, nil, committed, nil, "NFT Deployment")
-		nft.LastTxn = txnID_NFT; allTokens[nftID] = nft; inventory[creator] = append(inventory[creator], nft); nftList = append(nftList, nft)
+		nft.LastTxn = txnID_NFT
+		allTokens[nftID] = nft
+		inventory[creator] = append(inventory[creator], nft)
+		nftList = append(nftList, nft)
+
 		// SC
-		scID := "Qm" + randomHex(64); sc := &TokenStore{ID: scID, Type: "SC", Owner: creator, Value: burnVal}
-		txnID_SC := publishProtocolTxn(creator, "", nil, nil, nil, []*model.TokenInfo{{TokenID: scID, Data: "deployment-of-SC"}}, committed, nil, "SC Deployment")
-		sc.LastTxn = txnID_SC; allTokens[scID] = sc; inventory[creator] = append(inventory[creator], sc); scList = append(scList, sc)
+		scID := "Qm" + randomBase58(44)
+		sc := &TokenStore{ID: scID, Type: "SC", Owner: creator, Value: burnVal}
+		scData := fmt.Sprintf(`{"binaryCodeHash":"Qm%s","rawCodeHash":"Qm%s","did":"%s","peerID":"Qm%s"}`,
+			randomBase58(44), randomBase58(44), creator, randomBase58(44))
+		txnID_SC := publishProtocolTxn(creator, "", nil, nil, nil, []*model.TokenInfo{{TokenID: scID, Data: scData}}, committed, nil, "SC Deployment")
+		sc.LastTxn = txnID_SC
+		allTokens[scID] = sc
+		inventory[creator] = append(inventory[creator], sc)
+		scList = append(scList, sc)
 	}
 
 	// PHASE 4: EXECUTION (SC calls and NFT transfers)
