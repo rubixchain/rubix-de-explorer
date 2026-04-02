@@ -106,10 +106,27 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 						tokenToSave.TokenValue = val
 					}
 
-					// For FT, value is calculated if it's a mint (handled below)
-					if typeID == TokenTypeFT {
-						// This will be overwritten by a calculated value if it's a mint
-						tokenToSave.TokenValue = 1.0
+					// For FT/NFT/SC, calculate value from Committed RBTs if it's a first-time appearance (Likely Mint/Deploy)
+					if typeID == TokenTypeFT || typeID == TokenTypeNFT || typeID == TokenTypeSC {
+						var burnedSum float64
+						for _, ct := range txn.CommittedTokens {
+							if !strings.Contains(ct.TokenID, "Qm") && !strings.Contains(ct.TokenID, "_DID") && strings.Contains(ct.TokenID, "_") {
+								v, _ := util.GetTokenValueFromTokenID(ct.TokenID)
+								burnedSum += v
+							}
+						}
+
+						if typeID == TokenTypeFT {
+							ftCount := len(txn.Tokens.FT)
+							if ftCount > 0 {
+								tokenToSave.TokenValue = burnedSum / float64(ftCount)
+							} else {
+								tokenToSave.TokenValue = 1.0 // Default
+							}
+						} else if typeID == TokenTypeNFT || typeID == TokenTypeSC {
+							// For SC/NFT, the value is the total RBT burned for this deployment
+							tokenToSave.TokenValue = burnedSum
+						}
 					}
 				} else {
 					// Update existing token
@@ -149,24 +166,26 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 						if info.PreviousTransactionID == "" {
 							inferredRole = models.TokenRole_Mint
 
-							// FT dynamic value calculation
-							if typeID == TokenTypeFT {
+							// FT/NFT/SC dynamic value calculation from burned RBTs
+							if typeID == TokenTypeFT || typeID == TokenTypeNFT || typeID == TokenTypeSC {
 								// Calculate total burned value for this transaction
 								var burnedSum float64
 								for _, ct := range txn.CommittedTokens {
-									// Only burned (Role 5) or supporting tokens in CommittedTokens
-									// Note: In some explorer flows, CommittedTokens aren't yet in DB
-									// so we derive their value from their ID format.
-									// We only care about RBT parents being burned here.
-									if !strings.Contains(ct.TokenID, "Qm") && !strings.Contains(ct.TokenID, "_DID") {
+									// Only count RBTs (contains _ and no Qm/DID)
+									if !strings.Contains(ct.TokenID, "Qm") && !strings.Contains(ct.TokenID, "_DID") && strings.Contains(ct.TokenID, "_") {
 										v, _ := util.GetTokenValueFromTokenID(ct.TokenID)
 										burnedSum += v
 									}
 								}
 
-								ftCount := len(txn.Tokens.FT)
-								if ftCount > 0 {
-									tokenToSave.TokenValue = burnedSum / float64(ftCount)
+								if typeID == TokenTypeFT {
+									ftCount := len(txn.Tokens.FT)
+									if ftCount > 0 {
+										tokenToSave.TokenValue = burnedSum / float64(ftCount)
+									}
+								} else {
+									// For SC/NFT, the value is the total RBT burned for this deployment
+									tokenToSave.TokenValue = burnedSum
 								}
 							}
 						} else {
