@@ -200,13 +200,16 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 	// 1. SC Execution
 	for i, sc := range scList {
 		executor := dids[(i+1)%30]
-		isMixed := i < 10
 		var rbtTX, ftTX []*model.TokenInfo
 		var committed []*model.TokenInfo
 		ownerField := ""
 		totalVal := sc.Value
-		if isMixed {
-			receiver := dids[(i+2)%30]; ownerField = receiver
+
+		// Most SC executions are now mixed with RBT or FT
+		if i < 18 { // 90% are multi-asset
+			receiver := dids[(i+2)%30]
+			ownerField = receiver
+			// Add RBT
 			extraR := pickTokens(sc.Owner, "RBT", 1)
 			for _, r := range extraR {
 				rbtTX = append(rbtTX, &model.TokenInfo{TokenID: r.ID, PreviousTransactionID: r.LastTxn})
@@ -214,11 +217,23 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 				inventory[receiver] = append(inventory[receiver], r)
 				totalVal += r.Value
 			}
+			// Add FT (every even execution)
+			if i%2 == 0 {
+				extraFT := pickTokens(sc.Owner, "FT", 2)
+				for _, f := range extraFT {
+					ftTX = append(ftTX, &model.TokenInfo{TokenID: f.ID, PreviousTransactionID: f.LastTxn})
+					f.Owner = receiver
+					inventory[receiver] = append(inventory[receiver], f)
+					totalVal += 1.0
+				}
+			}
 		}
+
 		// Data JSON
 		data := fmt.Sprintf(`{"function":"execute","param":["arg%d", %d]}`, i, rand.Intn(100))
 		scTI := &model.TokenInfo{TokenID: sc.ID, PreviousTransactionID: sc.LastTxn, Data: data}
-		// Quorum based on total value (SC Value + Assets)
+
+		// Quorum based on total value
 		var quorums []*model.QuorumInfo
 		for len(quorums) < 3 {
 			qDID := dids[rand.Intn(30)]
@@ -239,10 +254,36 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 	for i, nft := range nftList {
 		sender := nft.Owner
 		receiver := dids[(i+5)%30]
-		if i % 3 == 0 { receiver = sender } // Self execution case
-		
+		if i%3 == 0 {
+			receiver = sender
+		} // Self execution case
+
 		nftTI := &model.TokenInfo{TokenID: nft.ID, PreviousTransactionID: nft.LastTxn}
 		totalVal := nft.Value
+
+		var ftTX []*model.TokenInfo
+		var rbtTX []*model.TokenInfo
+
+		// Multi-asset NFT moves
+		if i < 15 {
+			// Add RBT
+			extraR := pickTokens(sender, "RBT", 1)
+			for _, r := range extraR {
+				rbtTX = append(rbtTX, &model.TokenInfo{TokenID: r.ID, PreviousTransactionID: r.LastTxn})
+				r.Owner = receiver
+				inventory[receiver] = append(inventory[receiver], r)
+				totalVal += r.Value
+			}
+			// Add FT
+			extraFT := pickTokens(sender, "FT", 1)
+			for _, f := range extraFT {
+				ftTX = append(ftTX, &model.TokenInfo{TokenID: f.ID, PreviousTransactionID: f.LastTxn})
+				f.Owner = receiver
+				inventory[receiver] = append(inventory[receiver], f)
+				totalVal += 1.0
+			}
+		}
+
 		var quorums []*model.QuorumInfo
 		for len(quorums) < 3 {
 			qDID := dids[rand.Intn(30)]
@@ -256,8 +297,9 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 				quorums = append(quorums, &model.QuorumInfo{Did: qDID, Tokens: qTIs})
 			}
 		}
-		nft.LastTxn = publishProtocolTxn(sender, receiver, nil, nil, []*model.TokenInfo{nftTI}, nil, nil, quorums, "NFT Move")
-		nft.Owner = receiver; inventory[receiver] = append(inventory[receiver], nft)
+		nft.LastTxn = publishProtocolTxn(sender, receiver, rbtTX, ftTX, []*model.TokenInfo{nftTI}, nil, nil, quorums, "NFT Move")
+		nft.Owner = receiver
+		inventory[receiver] = append(inventory[receiver], nft)
 	}
 
 	log.Printf("Dummy Generation Complete. Narrative fully implemented.")
