@@ -11,32 +11,15 @@ import (
 	"time"
 )
 
-// Constants for TokenRoles (matching rubixgoplatform core lookup.go)
-const (
-	RoleMint     int16 = 1
-	RoleTransfer int16 = 2
-	RoleBurn     int16 = 5
-	RolePledge   int16 = 8
-)
-
-// TreeLevelRanges holds [min, max] part-index range for each tree level (L0-L6)
-var TreeLevelRanges = [][2]int{
-	{0, 0},      // L0: 1.0
-	{1, 2},      // L1: 0.5
-	{3, 12},     // L2: 0.1
-	{13, 32},    // L3: 0.05
-	{33, 132},   // L4: 0.01
-	{133, 332},  // L5: 0.005
-	{333, 1332}, // L6: 0.001
-}
-
 // TokenStore tracks a token's state during the simulation
 type TokenStore struct {
 	ID      string
+	Type    string // RBT, FT, NFT, SC
 	Value   float64
 	LastTxn string
 	Owner   string
 	Burned  bool
+	Data    string
 }
 
 func randomBase32(length int) string {
@@ -57,43 +40,19 @@ func randomHex(length int) string {
 	return string(b)
 }
 
-func getDenom(level int) float64 {
-	denoms := []float64{1.0, 0.5, 0.1, 0.05, 0.01, 0.005, 0.001}
-	if level >= 0 && level < len(denoms) {
-		return denoms[level]
-	}
-	return 0
-}
-
-func getLevelOfIndex(idx int) int {
-	for l, r := range TreeLevelRanges {
-		if idx >= r[0] && idx <= r[1] {
-			return l
-		}
-	}
-	return -1
-}
-
-func getChildrenCount(level int) int {
-	if level%2 == 0 {
-		return 2
-	}
-	return 5
-}
-
-// PublishDummyTransaction generates a sequence of mints, transfers, and splits
+// PublishDummyTransaction generates a cohesive narrative of transactions
 func PublishDummyTransaction(ps *pubsub.PubSub) {
-	log.Printf("Starting Redesigned Dummy Generation (500 Mints, 100 Mixed Transfers)...")
+	log.Printf("Starting Detailed SC/NFT Execution Narrative...")
 	rand.Seed(time.Now().UnixNano())
 
-	// 1. Generate 50 stable DIDs
-	dids := make([]string, 50)
-	for i := 0; i < 50; i++ {
+	// 1. Generate 30 Stable DIDs
+	dids := make([]string, 30)
+	for i := 0; i < 30; i++ {
 		dids[i] = fmt.Sprintf("bafy%s", randomBase32(55))
 	}
 
+	allTokens := make(map[string]*TokenStore)
 	inventory := make(map[string][]*TokenStore) // DID -> Tokens
-	allTokens := make(map[string]*TokenStore)   // ID -> Token
 
 	publishEvent := func(txn *model.Transactions, status bool, message string) {
 		event := &model.EventTransaction{
@@ -103,10 +62,10 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 		}
 		data, _ := json.Marshal(event)
 		ps.Publish("rubix_txns", data)
-		time.Sleep(100 * time.Millisecond) // Throttling for ingestion
+		time.Sleep(100 * time.Millisecond)
 	}
 
-	publishProtocolTxn := func(initiator, owner string, tokens, committed []*model.TokenInfo, quorums []*model.QuorumInfo, memo string) string {
+	publishProtocolTxn := func(initiator, owner string, rbt, ft, nft, sc []*model.TokenInfo, committed []*model.TokenInfo, quorums []*model.QuorumInfo, memo string) string {
 		txnID := randomHex(64)
 		txn := &model.Transactions{
 			TransactionID: txnID,
@@ -115,7 +74,12 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 				Owner:           owner,
 				Epoch:           int(time.Now().Unix()),
 				Network:         "custom",
-				Tokens:          &model.TransactionTokens{RBT: tokens},
+				Tokens: &model.TransactionTokens{
+					RBT:           rbt,
+					FT:            ft,
+					NFT:           nft,
+					SmartContract: sc,
+				},
 				CommittedTokens: committed,
 				Quorums:         quorums,
 				Memo:            memo,
@@ -125,7 +89,6 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 				Quorums:            make([]model.QuorumSignature, 0),
 			},
 		}
-		// Fill signatures for quorums
 		for i := 0; i < len(quorums); i++ {
 			txn.Signatures.Quorums = append(txn.Signatures.Quorums, model.QuorumSignature{
 				Did:       quorums[i].Did,
@@ -136,262 +99,146 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 		return txnID
 	}
 
-	// ----------------------------------------------------------------------
-	// PHASE 1: MINT 500 RBTs (Level 1, Token Number 1-500)
-	// ----------------------------------------------------------------------
-	log.Println("Phase 1: Minting 500 RBTs across 50 DIDs...")
-	for i := 1; i <= 500; i++ {
-		did := dids[(i-1)%50]
-		tokenID := fmt.Sprintf("1_%d", i)
-		t := &TokenStore{ID: tokenID, Value: 1.0, Owner: did}
+	// Helper to find tokens
+	pickTokens := func(did string, tType string, count int) []*TokenStore {
+		var selected []*TokenStore
+		remaining := inventory[did][:0]
+		for _, t := range inventory[did] {
+			if len(selected) < count && t.Type == tType && !t.Burned {
+				selected = append(selected, t)
+			} else {
+				remaining = append(remaining, t)
+			}
+		}
+		inventory[did] = remaining
+		return selected
+	}
 
-		ti := &model.TokenInfo{TokenID: t.ID, PreviousTransactionID: "", Data: ""}
-		txnID := publishProtocolTxn(did, did, []*model.TokenInfo{ti}, nil, nil, "Genesis Minting")
-
-		t.LastTxn = txnID
+	// PHASE 1: GENESIS RBT MINTING (400 RBT)
+	log.Println("Phase 1: Minting 400 Genesis RBTs...")
+	for i := 1; i <= 400; i++ {
+		did := dids[i%30]
+		tID := fmt.Sprintf("1_%d", i)
+		t := &TokenStore{ID: tID, Type: "RBT", Value: 1.0, Owner: did}
+		ti := &model.TokenInfo{TokenID: t.ID}
+		t.LastTxn = publishProtocolTxn(did, did, []*model.TokenInfo{ti}, nil, nil, nil, nil, nil, "Genesis RBT Mint")
 		allTokens[t.ID] = t
 		inventory[did] = append(inventory[did], t)
 	}
 
-	time.Sleep(1 * time.Second) // Let Genesis settle
-
-	// Helper: find and remove a token by value
-	pickTokenByValue := func(did string, val float64) *TokenStore {
-		for i, t := range inventory[did] {
-			if t.Value == val && !t.Burned {
-				// Remove from inventory
-				inventory[did] = append(inventory[did][:i], inventory[did][i+1:]...)
-				return t
-			}
+	// PHASE 2: FT CREATION (10 combinations, 500 tokens)
+	log.Println("Phase 2: Creating FT sets...")
+	ftConfigs := []struct { Name string; DID string; Count int; Burn int }{
+		{"NIKE", dids[0], 50, 10}, {"ADIDAS", dids[1], 10, 1}, {"PUMA", dids[2], 10, 2},
+		{"REEBOK", dids[3], 50, 10}, {"GUCCI", dids[4], 60, 20}, {"VANS", dids[5], 90, 10},
+	}
+	for _, cfg := range ftConfigs {
+		rbtToBurn := pickTokens(cfg.DID, "RBT", cfg.Burn)
+		var committed []*model.TokenInfo
+		for _, r := range rbtToBurn {
+			committed = append(committed, &model.TokenInfo{TokenID: r.ID, PreviousTransactionID: r.LastTxn})
+			r.Burned = true
 		}
-		return nil
+		var tokens []*model.TokenInfo
+		var storeFTs []*TokenStore
+		for i := 0; i < cfg.Count; i++ {
+			tID := fmt.Sprintf("%s_%d_%s", cfg.Name, i, cfg.DID)
+			t := &TokenStore{ID: tID, Type: "FT", Value: float64(cfg.Burn) / float64(cfg.Count), Owner: cfg.DID}
+			tokens = append(tokens, &model.TokenInfo{TokenID: tID})
+			storeFTs = append(storeFTs, t)
+			allTokens[tID] = t
+		}
+		txnID := publishProtocolTxn(cfg.DID, cfg.DID, nil, tokens, nil, nil, committed, nil, "FT Minting")
+		for _, t := range storeFTs { t.LastTxn = txnID; inventory[cfg.DID] = append(inventory[cfg.DID], t) }
 	}
 
-	// Helper: find any available whole token to split
-	pickAnyWhole := func(did string) *TokenStore {
-		for i, t := range inventory[did] {
-			if t.Value == 1.0 && !t.Burned {
-				inventory[did] = append(inventory[did][:i], inventory[did][i+1:]...)
-				return t
-			}
+	// PHASE 3: NFT & SC DEPLOYMENT (20 each)
+	log.Println("Phase 3: Deploying NFTs and SCs...")
+	var nftList []*TokenStore
+	var scList []*TokenStore
+	for i := 0; i < 20; i++ {
+		creator := dids[i%20]
+		burnVal := float64(rand.Intn(10) + 1)
+		rbtToBurn := pickTokens(creator, "RBT", int(burnVal))
+		var committed []*model.TokenInfo
+		for _, r := range rbtToBurn {
+			committed = append(committed, &model.TokenInfo{TokenID: r.ID, PreviousTransactionID: r.LastTxn})
+			r.Burned = true
 		}
-		return nil
+		// NFT
+		nftID := "Qm" + randomHex(64); nft := &TokenStore{ID: nftID, Type: "NFT", Owner: creator, Value: burnVal}
+		txnID_NFT := publishProtocolTxn(creator, creator, nil, nil, []*model.TokenInfo{{TokenID: nftID, Data: "deployment-of-NFT"}}, nil, committed, nil, "NFT Deployment")
+		nft.LastTxn = txnID_NFT; allTokens[nftID] = nft; inventory[creator] = append(inventory[creator], nft); nftList = append(nftList, nft)
+		// SC
+		scID := "Qm" + randomHex(64); sc := &TokenStore{ID: scID, Type: "SC", Owner: creator, Value: burnVal}
+		txnID_SC := publishProtocolTxn(creator, "", nil, nil, nil, []*model.TokenInfo{{TokenID: scID, Data: "deployment-of-SC"}}, committed, nil, "SC Deployment")
+		sc.LastTxn = txnID_SC; allTokens[scID] = sc; inventory[creator] = append(inventory[creator], sc); scList = append(scList, sc)
 	}
 
-	// Subdivision logic: splits a whole token until a specific denom is reached
-	// Recursive split but published in ONE transaction info as per user request
-	splitToken := func(did string, parent *TokenStore, targetValue float64) []*TokenStore {
-		var allFreeParts []*TokenStore
-		var allCommittedParts []*model.TokenInfo
-
-		// Initial carry
-		allCommittedParts = append(allCommittedParts, &model.TokenInfo{
-			TokenID: parent.ID, PreviousTransactionID: parent.LastTxn,
-		})
-		parent.Burned = true
-		if !json.Valid([]byte("[]")) { /* just a dummy check */ }
-
-		// Manual Split: Level 1 is whole (value 1.0)
-		// Children of L1 are L1 children (0.5 each).
-		// Wait, the user said 1_1 is whole. So Level 1 is the "root".
-		// Root Index 0.
-		
-		// Root for these tokens is Level 1, start with part index 0
-		var pP int
-		fmt.Sscanf(parent.ID, "1_%d", &pP)
-
-		var recurseSplit func(currID string, currVal float64, currLevel int, currP int)
-		recurseSplit = func(currID string, currVal float64, currLevel int, currP int) {
-			// Bounds check and Epsilon (avoid float precision issues)
-			if currVal <= targetValue+1e-9 || currLevel > 6 {
-				t := &TokenStore{ID: currID, Value: currVal, Owner: did}
-				allFreeParts = append(allFreeParts, t)
-				return
+	// PHASE 4: EXECUTION (SC calls and NFT transfers)
+	log.Println("Phase 4: Executing SCs and NFT transfers...")
+	// 1. SC Execution
+	for i, sc := range scList {
+		executor := dids[(i+1)%30]
+		isMixed := i < 10
+		var rbtTX, ftTX []*model.TokenInfo
+		var committed []*model.TokenInfo
+		ownerField := ""
+		totalVal := sc.Value
+		if isMixed {
+			receiver := dids[(i+2)%30]; ownerField = receiver
+			extraR := pickTokens(sc.Owner, "RBT", 1)
+			for _, r := range extraR {
+				rbtTX = append(rbtTX, &model.TokenInfo{TokenID: r.ID, PreviousTransactionID: r.LastTxn})
+				r.Owner = receiver
+				inventory[receiver] = append(inventory[receiver], r)
+				totalVal += r.Value
 			}
-			
-			// Needs more splitting
-			d := getChildrenCount(currLevel - 1) 
-			relP := currP - TreeLevelRanges[currLevel-1][0]
-			childMin := TreeLevelRanges[currLevel][0] + relP * d
-			
-			childVal := getDenom(currLevel)
-			
-			if currID != parent.ID {
-				allCommittedParts = append(allCommittedParts, &model.TokenInfo{
-					TokenID: currID, PreviousTransactionID: "TEMP_TXN",
-				})
-			}
-
-			runningSum := 0.0
-			splitDone := false
-			for i := 0; i < d; i++ {
-				childID := fmt.Sprintf("1_%d_%d", pP, childMin+i)
-				if !splitDone && runningSum+childVal < targetValue+1e-9 {
-					// Use whole child
-					t := &TokenStore{ID: childID, Value: childVal, Owner: did}
-					allFreeParts = append(allFreeParts, t)
-					runningSum += childVal
-				} else if !splitDone {
-					// This child needs to be split further
-					recurseSplit(childID, childVal, currLevel+1, childMin+i)
-					splitDone = true // Only one child is split further per level
-				} else {
-					// Remaining children are free
-					t := &TokenStore{ID: childID, Value: childVal, Owner: did}
-					allFreeParts = append(allFreeParts, t)
+		}
+		// Data JSON
+		data := fmt.Sprintf(`{"function":"execute","param":["arg%d", %d]}`, i, rand.Intn(100))
+		scTI := &model.TokenInfo{TokenID: sc.ID, PreviousTransactionID: sc.LastTxn, Data: data}
+		// Quorum based on total value (SC Value + Assets)
+		var quorums []*model.QuorumInfo
+		for len(quorums) < 3 {
+			qDID := dids[rand.Intn(30)]
+			if qDID != executor && qDID != ownerField {
+				qT := pickTokens(qDID, "RBT", int(totalVal)+1)
+				var qTIs []*model.TokenInfo
+				for _, r := range qT {
+					qTIs = append(qTIs, &model.TokenInfo{TokenID: r.ID, PreviousTransactionID: r.LastTxn})
+					inventory[qDID] = append(inventory[qDID], r)
 				}
+				quorums = append(quorums, &model.QuorumInfo{Did: qDID, Tokens: qTIs})
 			}
 		}
-
-		recurseSplit(parent.ID, 1.0, 1, 0)
-
-		// Publish unified split Txn
-		tokensInfos := make([]*model.TokenInfo, len(allFreeParts))
-		for i, t := range allFreeParts {
-			tokensInfos[i] = &model.TokenInfo{TokenID: t.ID, PreviousTransactionID: ""}
-		}
-		
-		txnID := publishProtocolTxn(did, did, tokensInfos, allCommittedParts, nil, "Token Subdivision")
-		
-		for _, t := range allFreeParts {
-			t.LastTxn = txnID
-			allTokens[t.ID] = t
-			inventory[did] = append(inventory[did], t)
-		}
-		return allFreeParts
+		sc.LastTxn = publishProtocolTxn(executor, ownerField, rbtTX, ftTX, nil, []*model.TokenInfo{scTI}, committed, quorums, "SC Execution")
 	}
 
-	// ----------------------------------------------------------------------
-	// PHASE 2: 100 MIXED TRANSACTIONS
-	// ----------------------------------------------------------------------
-	log.Println("Phase 2: Executing 100 Mixed Transactions...")
-	for i := 1; i <= 100; i++ {
-		senderDID := dids[rand.Intn(50)]
-		receiverDID := dids[rand.Intn(50)]
-		for senderDID == receiverDID {
-			receiverDID = dids[rand.Intn(50)]
-		}
-
-		// Pick random value: whole (1-5) or part (0.001-0.9)
-		var val float64
-		if rand.Float64() > 0.3 {
-			val = float64(rand.Intn(5) + 1) // 1 to 5 whole
-		} else {
-			denoms := []float64{0.5, 0.1, 0.05, 0.01, 0.005, 0.001}
-			val = denoms[rand.Intn(len(denoms))]
-		}
-
-		// Ensure sender has the value
-		var txTokens []*TokenStore
-		currentSum := 0.0
+	// 2. NFT Execution (Transfer / Self)
+	for i, nft := range nftList {
+		sender := nft.Owner
+		receiver := dids[(i+5)%30]
+		if i % 3 == 0 { receiver = sender } // Self execution case
 		
-		// Attempt to collect from inventory
-		for j := 0; j < len(inventory[senderDID]); j++ {
-			t := inventory[senderDID][j]
-			if currentSum + t.Value <= val {
-				txTokens = append(txTokens, t)
-				currentSum += t.Value
-				inventory[senderDID] = append(inventory[senderDID][:j], inventory[senderDID][j+1:]...)
-				j--
-			}
-			if currentSum == val { break }
-		}
-
-		// If still short, split a whole token
-		if currentSum < val {
-			wt := pickAnyWhole(senderDID)
-			if wt != nil {
-				splitToken(senderDID, wt, val - currentSum)
-				// parts are now added back to inventory, so we try again to pick
-				for j := 0; j < len(inventory[senderDID]); j++ {
-					t := inventory[senderDID][j]
-					if currentSum + t.Value <= val {
-						txTokens = append(txTokens, t)
-						currentSum += t.Value
-						inventory[senderDID] = append(inventory[senderDID][:j], inventory[senderDID][j+1:]...)
-						j--
-					}
-					if currentSum == val { break }
+		nftTI := &model.TokenInfo{TokenID: nft.ID, PreviousTransactionID: nft.LastTxn}
+		totalVal := nft.Value
+		var quorums []*model.QuorumInfo
+		for len(quorums) < 3 {
+			qDID := dids[rand.Intn(30)]
+			if qDID != sender && qDID != receiver {
+				qT := pickTokens(qDID, "RBT", int(totalVal)+1)
+				var qTIs []*model.TokenInfo
+				for _, r := range qT {
+					qTIs = append(qTIs, &model.TokenInfo{TokenID: r.ID, PreviousTransactionID: r.LastTxn})
+					inventory[qDID] = append(inventory[qDID], r)
 				}
+				quorums = append(quorums, &model.QuorumInfo{Did: qDID, Tokens: qTIs})
 			}
 		}
-
-		if len(txTokens) == 0 { continue } // Skip if failed to collect
-
-		// Quorums
-		qDIDs := make([]string, 0)
-		for len(qDIDs) < 3 {
-			qd := dids[rand.Intn(50)]
-			if qd != senderDID && qd != receiverDID {
-				already := false
-				for _, exist := range qDIDs { if exist == qd { already = true } }
-				if !already { qDIDs = append(qDIDs, qd) }
-			}
-		}
-
-		quorums := make([]*model.QuorumInfo, 3)
-		for qi, qdid := range qDIDs {
-			// Each quorum pledges tokens totaling 'val'
-			qSum := 0.0
-			var qPledge []*model.TokenInfo
-			
-			// Pick/split tokens for quorum pledge
-			for qSum < val {
-				pt := pickTokenByValue(qdid, 1.0) // Try whole first
-				if pt == nil { pt = pickAnyWhole(qdid) } // split if needed
-				if pt == nil { break } // Should not happen in this simulation
-
-				if qSum + pt.Value > val {
-					// Need to split the pledge token to get the exact amount
-					parts := splitToken(qdid, pt, val - qSum)
-					// pick what we need
-					for _, p := range parts {
-						if qSum + p.Value <= val {
-							qPledge = append(qPledge, &model.TokenInfo{TokenID: p.ID, PreviousTransactionID: p.LastTxn})
-							qSum += p.Value
-							// Note: we don't remove p from inventory because splitToken already added them.
-							// So we need to remove what we used.
-							for idx, inv := range inventory[qdid] {
-								if inv.ID == p.ID {
-									inventory[qdid] = append(inventory[qdid][:idx], inventory[qdid][idx+1:]...)
-									break
-								}
-							}
-						}
-						if qSum == val { break }
-					}
-				} else {
-					qPledge = append(qPledge, &model.TokenInfo{TokenID: pt.ID, PreviousTransactionID: pt.LastTxn})
-					qSum += pt.Value
-				}
-			}
-			quorums[qi] = &model.QuorumInfo{Did: qdid, Tokens: qPledge}
-		}
-
-		// Final Transfer
-		tokensInfos := make([]*model.TokenInfo, len(txTokens))
-		for ti, t := range txTokens {
-			tokensInfos[ti] = &model.TokenInfo{TokenID: t.ID, PreviousTransactionID: t.LastTxn}
-		}
-
-		txnID := publishProtocolTxn(senderDID, receiverDID, tokensInfos, nil, quorums, fmt.Sprintf("Transfer Value %.3f", val))
-		
-		// Update owner
-		for _, t := range txTokens {
-			t.Owner = receiverDID
-			t.LastTxn = txnID
-			inventory[receiverDID] = append(inventory[receiverDID], t)
-		}
+		nft.LastTxn = publishProtocolTxn(sender, receiver, nil, nil, []*model.TokenInfo{nftTI}, nil, nil, quorums, "NFT Move")
+		nft.Owner = receiver; inventory[receiver] = append(inventory[receiver], nft)
 	}
 
-	log.Printf("Dummy Generation Complete. Published transactions to rubix_txns.")
-}
-
-func getTokensByType(store map[string]*TokenStore, tType string) []*TokenStore {
-	var results []*TokenStore
-	for _, t := range store {
-		// In new logic, everything is RBT for now as per first request
-		results = append(results, t)
-	}
-	return results
+	log.Printf("Dummy Generation Complete. Narrative fully implemented.")
 }

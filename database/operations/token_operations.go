@@ -141,13 +141,13 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 					var inferredRole int16 = 2 // Default to Transfer
 					if typeID == TokenTypeSC {
 						if info.PreviousTransactionID == "" {
-							inferredRole = 3 // RoleDeploy
+							inferredRole = models.TokenRole_Deploy
 						} else {
-							inferredRole = 4 // RoleExecute
+							inferredRole = models.TokenRole_Execute
 						}
 					} else {
 						if info.PreviousTransactionID == "" {
-							inferredRole = 1 // RoleMint
+							inferredRole = models.TokenRole_Mint
 
 							// FT dynamic value calculation
 							if typeID == TokenTypeFT {
@@ -170,7 +170,7 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 								}
 							}
 						} else {
-							inferredRole = 2 // RoleTransfer
+							inferredRole = models.TokenRole_Transfer
 						}
 					}
 					tokenToSave.LatestRole = inferredRole
@@ -223,36 +223,45 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 			}
 		}
 
-		// Build a set of quorum pledge token IDs so we can distinguish burn vs pledge in CommittedTokens
-		quorumPledgeIDs := make(map[string]bool)
+		// 5. Process Quorum Pledges (RolePledge = 8)
 		if txn.Quorums != nil {
 			for _, q := range txn.Quorums {
 				for _, info := range q.Tokens {
-					quorumPledgeIDs[info.TokenID] = true
+					var tokenToSave models.Token
+					if err := tx.Where("token_id = ?", info.TokenID).First(&tokenToSave).Error; err == nil {
+						tokenToSave.LatestRole = models.TokenRole_Pledge
+						tokenToSave.TransactionID = txnID
+						if err := tx.Save(&tokenToSave).Error; err != nil {
+							return err
+						}
+						if err := appendTokenHistory(tx, info.TokenID, txnID, info.PreviousTransactionID, models.TokenRole_Pledge); err != nil {
+							return err
+						}
+					}
 				}
 			}
 		}
 
-		// Process Committed Tokens
-		// CommittedTokens contains supporting tokens:
-		//   - Quorum pledge tokens (RolePledge = 8)
-		//   - Burned parent RBTs during FT creation (RoleBurn = 5)
+		// 6. Process Committed Tokens (RoleBurn = 5)
 		if txn.CommittedTokens != nil {
 			for _, info := range txn.CommittedTokens {
 				var tokenToSave models.Token
 				if err := tx.Where("token_id = ?", info.TokenID).First(&tokenToSave).Error; err == nil {
-					// Determine role: if this token is also in Quorums, it's a pledge; otherwise it's a burn
-					var role int16 = 5 // Default to RoleBurn
-					if quorumPledgeIDs[info.TokenID] {
-						role = 8 // RolePledge
-					}
-					tokenToSave.LatestRole = role
+					prevDID := tokenToSave.DID
+					tokenToSave.LatestRole = models.TokenRole_Burn
 					tokenToSave.TransactionID = txnID
+					tokenToSave.TokenStatus = models.TokenStatus_Burned
 					if err := tx.Save(&tokenToSave).Error; err != nil {
 						return err
 					}
-					if err := appendTokenHistory(tx, info.TokenID, txnID, info.PreviousTransactionID, role); err != nil {
+					if err := appendTokenHistory(tx, info.TokenID, txnID, info.PreviousTransactionID, models.TokenRole_Burn); err != nil {
 						return err
+					}
+					// Decrement balance for burned tokens
+					if prevDID != "" {
+						if err := updateBalances(tx, prevDID, &tokenToSave, -1); err != nil {
+							return err
+						}
 					}
 				}
 			}
