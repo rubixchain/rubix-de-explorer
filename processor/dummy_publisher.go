@@ -3,6 +3,7 @@ package processor
 
 import (
 	"encoding/json"
+	"explorer-server/database/models"
 	"explorer-server/model"
 	"explorer-server/pubsub"
 	"fmt"
@@ -22,37 +23,9 @@ type TokenStore struct {
 	Data    string
 }
 
-func randomBase32(length int) string {
-	chars := "abcdefghijklmnopqrstuvwxyz234567"
-	b := make([]byte, length)
-	for i := range b {
-		b[i] = chars[rand.Intn(len(chars))]
-	}
-	return string(b)
-}
-
-func randomHex(length int) string {
-	chars := "0123456789abcdef"
-	b := make([]byte, length)
-	for i := range b {
-		b[i] = chars[rand.Intn(len(chars))]
-	}
-	return string(b)
-}
-
-func randomBase58(length int) string {
-	alphabet := "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-	b := make([]byte, length)
-	for i := range b {
-		b[i] = alphabet[rand.Intn(len(alphabet))]
-	}
-	return string(b)
-}
-
 // PublishDummyTransaction generates a cohesive narrative of transactions
 func PublishDummyTransaction(ps *pubsub.PubSub) {
 	log.Printf("Starting Detailed SC/NFT Execution Narrative...")
-	rand.Seed(time.Now().UnixNano())
 
 	// 1. Generate 30 Stable DIDs
 	dids := make([]string, 30)
@@ -63,6 +36,21 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 	allTokens := make(map[string]*TokenStore)
 	inventory := make(map[string][]*TokenStore) // DID -> Tokens
 
+	// 2. Publish DIDInfo for these DIDs
+	log.Println("Publishing DIDInfo for stable DIDs...")
+	for _, did := range dids {
+		didInfo := &model.DIDInfo{
+			DID:       did,
+			PeerID:    "Qm" + randomBase58(44),
+			DIDAlgo:   1,
+			Signature: "sig_" + randomHex(32),
+			Time:      time.Now().Format(time.RFC3339),
+		}
+		data, _ := json.Marshal(didInfo)
+		ps.Publish(models.Event_RubixDID, data)
+		time.Sleep(50 * time.Millisecond)
+	}
+
 	publishEvent := func(txn *model.Transactions, status bool, message string) {
 		event := &model.EventTransaction{
 			Transaction: txn,
@@ -70,7 +58,7 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 			Message:     message,
 		}
 		data, _ := json.Marshal(event)
-		ps.Publish("rubix_txns", data)
+		ps.Publish(models.Event_RubixTxns, data)
 		time.Sleep(100 * time.Millisecond)
 	}
 
@@ -79,10 +67,10 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 		txn := &model.Transactions{
 			TransactionID: txnID,
 			TransactionInfo: &model.TransactionInfo{
-				Initiator:       initiator,
-				Owner:           owner,
-				Epoch:           int(time.Now().Unix()),
-				Network:         "custom",
+				Initiator: initiator,
+				Owner:     owner,
+				Epoch:     int(time.Now().Unix()),
+				Network:   "custom",
 				Tokens: &model.TransactionTokens{
 					RBT:           rbt,
 					FT:            ft,
@@ -137,7 +125,12 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 
 	// PHASE 2: FT CREATION (10 combinations, 500 tokens)
 	log.Println("Phase 2: Creating FT sets...")
-	ftConfigs := []struct { Name string; DID string; Count int; Burn int }{
+	ftConfigs := []struct {
+		Name  string
+		DID   string
+		Count int
+		Burn  int
+	}{
 		{"NIKE", dids[0], 50, 10}, {"ADIDAS", dids[1], 10, 1}, {"PUMA", dids[2], 10, 2},
 		{"REEBOK", dids[3], 50, 10}, {"GUCCI", dids[4], 60, 20}, {"VANS", dids[5], 90, 10},
 	}
@@ -158,7 +151,10 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 			allTokens[tID] = t
 		}
 		txnID := publishProtocolTxn(cfg.DID, cfg.DID, nil, tokens, nil, nil, committed, nil, "FT Minting")
-		for _, t := range storeFTs { t.LastTxn = txnID; inventory[cfg.DID] = append(inventory[cfg.DID], t) }
+		for _, t := range storeFTs {
+			t.LastTxn = txnID
+			inventory[cfg.DID] = append(inventory[cfg.DID], t)
+		}
 	}
 
 	// PHASE 3: NFT & SC DEPLOYMENT (20 each)
@@ -303,4 +299,31 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 	}
 
 	log.Printf("Dummy Generation Complete. Narrative fully implemented.")
+}
+
+func randomBase32(length int) string {
+	chars := "abcdefghijklmnopqrstuvwxyz234567"
+	b := make([]byte, length)
+	for i := range b {
+		b[i] = chars[rand.Intn(len(chars))]
+	}
+	return string(b)
+}
+
+func randomHex(length int) string {
+	chars := "0123456789abcdef"
+	b := make([]byte, length)
+	for i := range b {
+		b[i] = chars[rand.Intn(len(chars))]
+	}
+	return string(b)
+}
+
+func randomBase58(length int) string {
+	alphabet := "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+	b := make([]byte, length)
+	for i := range b {
+		b[i] = alphabet[rand.Intn(len(alphabet))]
+	}
+	return string(b)
 }

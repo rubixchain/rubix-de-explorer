@@ -119,13 +119,16 @@ func (TokenChainArray) TableName() string { return "TokenChainArray" }
 
 // Enables fast "Top Holders" and "DID balance" queries.
 type DIDBalance struct {
-	DID        string  `json:"did" gorm:"primaryKey;column:did"`
-	AssetType  string  `json:"asset_type" gorm:"primaryKey;column:asset_type"`
-	TokenName  string  `json:"token_name" gorm:"primaryKey;column:token_name"`   // FT Name (empty for RBT/NFT/SC)
-	CreatorDID string  `json:"creator_did" gorm:"primaryKey;column:creator_did"` // FT creator (empty for RBT/NFT/SC)
-	TokenValue float64 `json:"token_value" gorm:"column:token_value"`            // FT Value (empty for RBT/NFT/SC)
-	Balance    float64 `json:"balance" gorm:"column:balance"`
-	LastUpdate int64   `json:"last_update" gorm:"column:last_update"`
+	DID        string    `json:"did" gorm:"primaryKey;column:did"`
+	AssetType  string    `json:"asset_type" gorm:"primaryKey;column:asset_type"`
+	TokenName  string    `json:"token_name" gorm:"primaryKey;column:token_name"`   // FT Name (empty for RBT/NFT/SC)
+	CreatorDID string    `json:"creator_did" gorm:"primaryKey;column:creator_did"` // FT creator (empty for RBT/NFT/SC)
+	TokenValue float64   `json:"token_value" gorm:"column:token_value"`            // FT Value (empty for RBT/NFT/SC)
+	Balance    float64   `json:"balance" gorm:"column:balance"`
+	PeerID     string    `json:"peer_id" gorm:"column:peer_id"`   // From rubix_did topic
+	DIDAlgo    int64     `json:"did_algo" gorm:"column:did_algo"` // From rubix_did topic
+	CreatedAt  time.Time `json:"created_at" gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt  time.Time `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
 }
 
 func (DIDBalance) TableName() string { return "DIDBalances" }

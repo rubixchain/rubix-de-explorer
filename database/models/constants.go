@@ -1,5 +1,11 @@
 package models
 
+// PubSub Topics
+const (
+	Event_RubixTxns = "rubix_txn"
+	Event_RubixDID  = "rubix_did"
+)
+
 // Token Roles (Aligned with Rubix Core: index + 1)
 const (
 	TokenRole_Mint     int16 = 1

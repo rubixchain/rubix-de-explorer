@@ -7,7 +7,6 @@ import (
 	"explorer-server/model"
 	"explorer-server/util"
 	"strings"
-	"time"
 
 	"gorm.io/gorm"
 )
@@ -36,17 +35,29 @@ func UpdateTokenAndBalances(token *models.Token, prevOwner string) error {
 			return err
 		}
 
-		// 2. Decrement balance for previous owner (if exists)
-		if prevOwner != "" && prevOwner != "0" {
-			if err := updateBalances(tx, prevOwner, token, -1); err != nil {
-				return err
+		// 2. Update Balances
+		// Special Case: Smart Contracts (SC). Balance counts deployments/mints only.
+		if token.TokenType == TokenTypeSC {
+			if (prevOwner == "" || prevOwner == "0") && token.TokenStatus != models.TokenStatus_Burned {
+				// If it's new (Mint/Deploy), increment for the owner
+				if token.DID != "" && token.DID != "0" {
+					if err := updateBalances(tx, token.DID, token, 1); err != nil {
+						return err
+					}
+				}
 			}
-		}
-
-		// 3. Increment balance for new owner
-		if token.DID != "" && token.DID != "0" {
-			if err := updateBalances(tx, token.DID, token, 1); err != nil {
-				return err
+			// SC Interaction (Execute) or Burn does not transfer balance for SCs.
+		} else if prevOwner != token.DID {
+			// Standard Logic: RBT, FT, NFT transfer ownership/balances
+			if prevOwner != "" && prevOwner != "0" {
+				if err := updateBalances(tx, prevOwner, token, -1); err != nil {
+					return err
+				}
+			}
+			if token.DID != "" && token.DID != "0" {
+				if err := updateBalances(tx, token.DID, token, 1); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -138,13 +149,19 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 						tokenToSave.NeedsSync = true
 					}
 
-					// Use Initiator as DID (Owner) for SCs (execution/deployment),
-					// but preserve the original DeployerDID from deployment.
-					if typeID == TokenTypeSC {
-						tokenToSave.DID = txn.Initiator
-					} else {
-						tokenToSave.DID = txn.Owner
+					// Maintain ownership logic:
+					// - For SC: DeployerDID stays, but DID (current owner) only changes on explicit transfer.
+					// - For all: Use txn.Owner as the target owner.
+					targetOwner := txn.Owner
+					if typeID == TokenTypeSC && info.PreviousTransactionID != "" {
+						// For SC interactions like "Execute", don't change owner automatically to initiator
+						// unless txn.Owner is explicitly set. Use Initiator ONLY if owner is empty and it's a deployment.
+						if targetOwner == "" {
+							targetOwner = existing.DID // Default to current owner
+						}
 					}
+
+					tokenToSave.DID = targetOwner
 
 					tokenToSave.TransactionID = txnID
 					tokenToSave.TokenStatus = 1
@@ -205,15 +222,27 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 					return err
 				}
 
-				// 3. Update Balances LAST, relying on the token table exactly.
-				if prevOwner != "" && prevOwner != "0" {
-					if err := updateBalances(tx, prevOwner, &tokenToSave, -1); err != nil {
-						return err
+				// 3. Update Balances LAST
+				// Special Case: Smart Contracts (SC). Balance counts deployments only.
+				if typeID == TokenTypeSC {
+					if isNew && tokenToSave.DID != "" && tokenToSave.DID != "0" {
+						if err := updateBalances(tx, tokenToSave.DID, &tokenToSave, 1); err != nil {
+							return err
+						}
 					}
-				}
-				if tokenToSave.DID != "" && tokenToSave.DID != "0" {
-					if err := updateBalances(tx, tokenToSave.DID, &tokenToSave, 1); err != nil {
-						return err
+					// Note: SC execution (isNew=false) updates the 'did' field in Tokens table (latest executor)
+					// but does not trigger a balance transfer in DIDBalances.
+				} else if prevOwner != tokenToSave.DID {
+					// Standard Logic: RBT, FT, NFT transfer ownership/balances
+					if prevOwner != "" && prevOwner != "0" {
+						if err := updateBalances(tx, prevOwner, &tokenToSave, -1); err != nil {
+							return err
+						}
+					}
+					if tokenToSave.DID != "" && tokenToSave.DID != "0" {
+						if err := updateBalances(tx, tokenToSave.DID, &tokenToSave, 1); err != nil {
+							return err
+						}
 					}
 				}
 			}
@@ -277,7 +306,7 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 						return err
 					}
 					// Decrement balance for burned tokens
-					if prevDID != "" {
+					if prevDID != "" && tokenToSave.TokenType != TokenTypeSC {
 						if err := updateBalances(tx, prevDID, &tokenToSave, -1); err != nil {
 							return err
 						}
@@ -308,8 +337,6 @@ func tokenTypeName(t int16) string {
 
 // updateBalances handles DIDBalances (granular) table
 func updateBalances(tx *gorm.DB, did string, token *models.Token, direction float64) error {
-	now := time.Now().Unix()
-
 	typeName := tokenTypeName(token.TokenType)
 
 	// Determine the amount to increment/decrement the balance by:
@@ -343,24 +370,28 @@ func updateBalances(tx *gorm.DB, did string, token *models.Token, direction floa
 	var balance models.DIDBalance
 	err := tx.Where("did = ? AND asset_type = ? AND token_name = ? AND creator_did = ?", did, typeName, assetName, creatorDID).First(&balance).Error
 	if err == gorm.ErrRecordNotFound {
-		balance = models.DIDBalance{
-			DID:        did,
-			AssetType:  typeName,
-			TokenName:  assetName,
-			CreatorDID: creatorDID,
-			TokenValue: storeTokenValue, // 0 for RBT/NFT/SC, actual value for FT
-			Balance:    valueToAdd,
-			LastUpdate: now,
+		// New balance record: Try to fetch PeerID/DIDAlgo from any existing row for this DID
+		var meta models.DIDBalance
+		if tx.Where("did = ? AND (peer_id IS NOT NULL AND peer_id != '')", did).
+			Select("peer_id, did_algo").First(&meta).Error == nil {
+			balance.PeerID = meta.PeerID
+			balance.DIDAlgo = meta.DIDAlgo
 		}
+
+		balance.DID = did
+		balance.AssetType = typeName
+		balance.TokenName = assetName
+		balance.CreatorDID = creatorDID
+		balance.TokenValue = storeTokenValue // 0 for RBT/NFT/SC, actual value for FT
+		balance.Balance = valueToAdd
 		return tx.Create(&balance).Error
 	} else if err != nil {
 		return err
 	}
 
-	// Use explicit WHERE-based update (GORM's Save treats empty-string PKs as zero-values)
+	// Use explicit WHERE-based update with a safety clamp to prevent negative balances
 	updates := map[string]interface{}{
-		"balance":     balance.Balance + valueToAdd,
-		"last_update": now,
+		"balance": gorm.Expr("GREATEST(0, balance + ?)", valueToAdd),
 	}
 
 	// Only update token_value for FTs
