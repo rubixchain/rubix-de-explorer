@@ -97,7 +97,7 @@ func (p *DynamicWorkerPool) EnqueueTransaction(txnEvent *model.EventTransaction)
 
 	case <-time.After(5 * time.Second):
 		log.Printf("Warning: Failed to queue transaction %s - queue full (length=%d)\n",
-			txnEvent.Transaction.TransactionID, len(p.txnQueue))
+			txnEvent.Transaction.ID, len(p.txnQueue))
 		return
 
 	case <-p.ctx.Done():

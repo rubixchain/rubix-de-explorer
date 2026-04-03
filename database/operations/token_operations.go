@@ -104,6 +104,7 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 						tokenToSave.DeployerDID = txn.Initiator
 					} else {
 						tokenToSave.DID = txn.Owner
+						tokenToSave.DeployerDID = "" // Explicitly clear for non-SC
 					}
 
 					// Always assign Data if present (NFTs, Smart Contracts, etc.)

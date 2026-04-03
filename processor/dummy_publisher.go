@@ -64,33 +64,43 @@ func PublishDummyTransaction(ps *pubsub.PubSub) {
 
 	publishProtocolTxn := func(initiator, owner string, rbt, ft, nft, sc []*model.TokenInfo, committed []*model.TokenInfo, quorums []*model.QuorumInfo, memo string) string {
 		txnID := randomHex(64)
-		txn := &model.Transactions{
-			TransactionID: txnID,
-			TransactionInfo: &model.TransactionInfo{
-				Initiator: initiator,
-				Owner:     owner,
-				Epoch:     int(time.Now().Unix()),
-				Network:   "custom",
-				Tokens: &model.TransactionTokens{
-					RBT:           rbt,
-					FT:            ft,
-					NFT:           nft,
-					SmartContract: sc,
-				},
-				CommittedTokens: committed,
-				Quorums:         quorums,
-				Memo:            memo,
+
+		// Build the structured info and signature first
+		txnInfo := &model.TransactionInfo{
+			Initiator: initiator,
+			Owner:     owner,
+			Epoch:     int(time.Now().Unix()),
+			Network:   "custom",
+			Tokens: &model.TransactionTokens{
+				RBT:           rbt,
+				FT:            ft,
+				NFT:           nft,
+				SmartContract: sc,
 			},
-			Signatures: &model.Signature{
-				InitiatorSignature: "sig_" + randomHex(32),
-				Quorums:            make([]model.QuorumSignature, 0),
-			},
+			CommittedTokens: committed,
+			Quorums:         quorums,
+			Memo:            memo,
+		}
+
+		sig := &model.Signature{
+			InitiatorSignature: "sig_" + randomHex(32),
+			Quorums:            make([]model.QuorumSignature, 0),
 		}
 		for i := 0; i < len(quorums); i++ {
-			txn.Signatures.Quorums = append(txn.Signatures.Quorums, model.QuorumSignature{
+			sig.Quorums = append(sig.Quorums, model.QuorumSignature{
 				Did:       quorums[i].Did,
 				Signature: "qsig_" + randomHex(32),
 			})
+		}
+
+		// Serialize to raw JSON (matching how the Core builds Transactions)
+		infoBytes, _ := json.Marshal(txnInfo)
+		sigBytes, _ := json.Marshal(sig)
+
+		txn := &model.Transactions{
+			ID:        txnID,
+			Info:      infoBytes,
+			Signature: sigBytes,
 		}
 		publishEvent(txn, true, "Success")
 		return txnID

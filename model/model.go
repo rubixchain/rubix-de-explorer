@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"explorer-server/database/models"
 )
 
@@ -43,9 +44,11 @@ type TransactionTokens struct {
 }
 
 type TokenInfo struct {
-	TokenID               string `json:"tokenId"`
-	PreviousTransactionID string `json:"previousTransactionID"`
-	Data                  string `json:"data"`
+	TokenID               string  `json:"tokenId"`
+	PreviousTransactionID string  `json:"previousTransactionID"`
+	Data                  string  `json:"data"`
+	TokenValue            float64 `json:"tokenValue"`
+	DID                   string  `json:"did"`
 }
 
 type QuorumInfo struct {
@@ -63,16 +66,45 @@ type Signature struct {
 	Quorums            []QuorumSignature `json:"quorums"`
 }
 
+// Transactions DTO — matches Rubix Core's Transactions struct.
+// Core uses `db:` tags (no `json:` tags), so Go defaults to uppercase field names.
+// Info and Signature are json.RawMessage in the Core, parsed separately.
 type Transactions struct {
-	TransactionID   string           `json:"transaction_id"`
-	TransactionInfo *TransactionInfo `json:"transaction_info"`
-	Signatures      *Signature       `json:"signatures"`
+	ID        string          `json:"ID"`
+	Info      json.RawMessage `json:"Info"`
+	Signature json.RawMessage `json:"Signature"`
+}
+
+// ParseInfo deserializes the raw Info bytes into a structured TransactionInfo.
+func (t *Transactions) ParseInfo() (*TransactionInfo, error) {
+	if t.Info == nil {
+		return nil, nil
+	}
+	var info TransactionInfo
+	if err := json.Unmarshal(t.Info, &info); err != nil {
+		return nil, err
+	}
+	return &info, nil
+}
+
+// ParseSignature deserializes the raw Signature bytes into a structured Signature.
+func (t *Transactions) ParseSignature() (*Signature, error) {
+	if t.Signature == nil {
+		return nil, nil
+	}
+	var sig Signature
+	if err := json.Unmarshal(t.Signature, &sig); err != nil {
+		return nil, err
+	}
+	return &sig, nil
 }
 
 type EventTransaction struct {
-	Transaction *Transactions `json:"transaction"`
-	Status      bool          `json:"status"`
-	Message     string        `json:"message"`
+	Transaction   *Transactions `json:"transaction"`
+	Status        bool          `json:"status"`
+	Message       string        `json:"message"`
+	TransactionID string        `json:"transaction_id"`
+	AssetType     int           `json:"asset_type"`
 }
 
 type FTGroup struct {
