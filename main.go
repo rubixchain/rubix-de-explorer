@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"explorer-server/database"
+	"explorer-server/database/models"
 	"explorer-server/ipfs"
 	"explorer-server/processor"
 	"explorer-server/pubsub"
@@ -78,10 +79,16 @@ func main() {
 	if err != nil {
 		log.Printf("Warning: Failed to initialize PubSub client: %v\n", err)
 	} else {
-		topic := "rubix_txns" // Same topic as regular nodes publish to
-		err = psClient.SubscribeTopic(topic, processor.TxnCallBack)
+		topicTxn := models.Event_RubixTxns
+		err = psClient.SubscribeTopic(topicTxn, processor.TxnCallBack)
 		if err != nil {
-			log.Printf("Warning: Failed to subscribe to PubSub topic %s: %v\n", topic, err)
+			log.Printf("Warning: Failed to subscribe to PubSub topic %s: %v\n", topicTxn, err)
+		}
+
+		topicDID := models.Event_RubixDID
+		err = psClient.SubscribeTopic(topicDID, processor.TxnCallBack)
+		if err != nil {
+			log.Printf("Warning: Failed to subscribe to PubSub topic %s: %v\n", topicDID, err)
 		} else if *publishDummy {
 			// TODO: DELETE LATER - Dummy Publisher for testing the new EventTransaction struct
 			go func() {

@@ -131,3 +131,11 @@ type FTTopHoldersResponse struct {
 	Page       int        `json:"page"`
 	Limit      int        `json:"limit"`
 }
+
+type DIDInfo struct {
+	PeerID    string `json:"peer_id"`
+	DID       string `json:"did"`
+	DIDAlgo   int64  `json:"did_algo"`
+	Signature string `json:"signature"`
+	Time      string `json:"time"`
+}

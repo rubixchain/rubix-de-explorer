@@ -133,13 +133,22 @@ func (m *IPFSManager) EnsureInitialized(testNet bool, customSwarmKeyPath string)
 		log.Println("IPFS initialized successfully")
 	}
 
-	// 3. Disable mDNS discovery immediately (restores fix while keeping local conn possible)
-	// This ensures mDNS is off for both new and existing repositories
-	mdnsCmd := exec.Command(m.ipfsPath, "config", "--json", "Discovery.MDNS.Enabled", "false")
+	// 3. Configure mDNS discovery
+	// Enable only for custom local networks (where bootstrap nodes are absent)
+	// Disable for MainNet/TestNet to maintain production stability
+	mDNSStatus := "false"
+	if customSwarmKeyPath != "" {
+		mDNSStatus = "true"
+	}
+	mdnsCmd := exec.Command(m.ipfsPath, "config", "--json", "Discovery.MDNS.Enabled", mDNSStatus)
 	if output, err := mdnsCmd.CombinedOutput(); err != nil {
-		log.Printf("Warning: Failed to disable mDNS: %v\n%s", err, string(output))
+		log.Printf("Warning: Failed to configure mDNS: %v\n%s", err, string(output))
 	} else {
-		log.Println("IPFS mDNS discovery disabled (prevents multicast errors on Windows)")
+		if customSwarmKeyPath != "" {
+			log.Println("IPFS mDNS discovery enabled (automatic local peer finding)")
+		} else {
+			log.Println("IPFS mDNS discovery disabled (using bootstrap nodes for discovery)")
+		}
 	}
 
 	// 4. Clear Swarm.AddrFilters to allow local peering (undoing server profile impact)

@@ -199,46 +199,38 @@ func GetTransactionInfoList(limit, page int) ([]models.TransactionInfo, int64, e
 	}
 	offset := (page - 1) * limit
 
+	// 1. Calculate total count (where amount > 0 across both success and failure tables)
 	var total int64
-	if err := database.ReadDB.Table("EventTransactions").Count(&total).Error; err != nil {
+	countQuery := `
+		SELECT COUNT(*) FROM (
+			SELECT transaction_id FROM "TransactionInfo" WHERE amount > 0
+			UNION ALL
+			SELECT transaction_id FROM "FailedTransactionInfo" WHERE amount > 0
+		) AS combined
+	`
+	if err := database.ReadDB.Raw(countQuery).Scan(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	var events []models.EventTransaction
-	if err := database.ReadDB.Table("EventTransactions").Order("created_at DESC").Limit(limit).Offset(offset).Find(&events).Error; err != nil {
+	// 2. Fetch paginated results
+	var result []models.TransactionInfo
+	dataQuery := `
+		SELECT * FROM (
+			SELECT transaction_id, initiator, owner, epoch, network, tokens, committed_tokens, quorums, memo, status, amount, created_at, updated_at FROM "TransactionInfo" WHERE amount > 0
+			UNION ALL
+			SELECT transaction_id, initiator, owner, epoch, network, tokens, committed_tokens, quorums, memo, status, amount, created_at, updated_at FROM "FailedTransactionInfo" WHERE amount > 0
+		) AS combined
+		ORDER BY created_at DESC
+		LIMIT ? OFFSET ?
+	`
+	if err := database.ReadDB.Raw(dataQuery, limit, offset).Scan(&result).Error; err != nil {
 		return nil, 0, err
 	}
 
-	result := make([]models.TransactionInfo, 0)
-	for _, event := range events {
-		var info models.TransactionInfo
-		if event.Status {
-			if err := database.ReadDB.Table("TransactionInfo").Where("transaction_id = ?", event.TransactionID).First(&info).Error; err == nil {
-				info.Status = true
-				result = append(result, info)
-			}
-		} else {
-			var failed models.FailedTransactionInfo
-			if err := database.ReadDB.Table("FailedTransactionInfo").Where("transaction_id = ?", event.TransactionID).First(&failed).Error; err == nil {
-				info = models.TransactionInfo{
-					TransactionID:   failed.TransactionID,
-					Initiator:       failed.Initiator,
-					Owner:           failed.Owner,
-					Epoch:           failed.Epoch,
-					Network:         failed.Network,
-					Tokens:          failed.Tokens,
-					CommittedTokens: failed.CommittedTokens,
-					Quorums:         failed.Quorums,
-					Memo:            failed.Memo,
-					Status:          false,
-					Amount:          failed.Amount,
-					CreatedAt:       failed.CreatedAt,
-					UpdatedAt:       failed.UpdatedAt,
-				}
-				result = append(result, info)
-			}
-		}
+	if result == nil {
+		result = make([]models.TransactionInfo, 0)
 	}
+
 	return result, total, nil
 }
 

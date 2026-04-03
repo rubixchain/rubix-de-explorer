@@ -14,7 +14,7 @@ var (
 	// FT: {Name}_{Index}_{CreatorDID}
 	ftRegex = regexp.MustCompile(`^[a-zA-Z0-9]+_\d+_bafy[abcdefghijklmnopqrstuvwxyz234567]{55}$`)
 
-	// NFT & Private SC: Must start with Qm, length 46, CIDv0 Base58
+	// NFT & Private SC: Must start with Qm, exactly 46 characters, Base58
 	ipfsRegex = regexp.MustCompile(`^Qm[1-9A-HJ-NP-Za-km-z]{44}$`)
 )
 
