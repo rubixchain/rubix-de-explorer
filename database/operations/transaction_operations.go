@@ -32,7 +32,16 @@ func SaveTransactionDetails(txnID string, info *model.TransactionInfo, status bo
 	committedJSON, _ := json.Marshal(info.CommittedTokens)
 	quorumsJSON, _ := json.Marshal(info.Quorums)
 
-	// Calculate total pledge amount from Quorums (RBT values only)
+	// Calculate total amount from transferred RBTs
+	var txnAmount float64
+	if info.Tokens != nil {
+		for _, t := range info.Tokens.RBT {
+			val, _ := util.GetTokenValueFromTokenID(t.TokenID)
+			txnAmount += val
+		}
+	}
+
+	// Calculate total pledge amount from Quorums
 	var totalPledge float64
 	for _, q := range info.Quorums {
 		for _, t := range q.Tokens {
@@ -40,6 +49,11 @@ func SaveTransactionDetails(txnID string, info *model.TransactionInfo, status bo
 			totalPledge += val
 		}
 	}
+
+	// For the Explorer display, the transaction Amount should reflect the
+	// primary payload (Tokens) if it exists, otherwise fallback to pledge.
+	// We'll combine them to represent the total RBT volume of this Txn.
+	finalAmount := txnAmount + totalPledge
 
 	if status {
 		details := &models.TransactionInfo{
@@ -53,7 +67,7 @@ func SaveTransactionDetails(txnID string, info *model.TransactionInfo, status bo
 			Quorums:         quorumsJSON,
 			Memo:            info.Memo,
 			Status:          true,
-			Amount:          totalPledge,
+			Amount:          finalAmount,
 		}
 		return database.WriteDB.Clauses(clause.OnConflict{DoNothing: true}).Create(details).Error
 	} else {
@@ -68,7 +82,7 @@ func SaveTransactionDetails(txnID string, info *model.TransactionInfo, status bo
 			Quorums:         quorumsJSON,
 			Memo:            info.Memo,
 			Status:          false,
-			Amount:          totalPledge,
+			Amount:          finalAmount,
 		}
 		return database.WriteDB.Clauses(clause.OnConflict{DoNothing: true}).Create(details).Error
 	}
