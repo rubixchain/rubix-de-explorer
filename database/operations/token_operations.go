@@ -38,7 +38,7 @@ func UpdateTokenAndBalances(token *models.Token, prevOwner string) error {
 		// 2. Update Balances
 		// Special Case: Smart Contracts (SC). Balance counts deployments/mints only.
 		if token.TokenType == TokenTypeSC {
-			if (prevOwner == "" || prevOwner == "0") && token.TokenStatus != models.TokenStatus_Burned {
+			if (prevOwner == "" || prevOwner == "0") && token.TokenStatus != models.TokenStatus_Burnt {
 				// If it's new (Mint/Deploy), increment for the owner
 				if token.DID != "" && token.DID != "0" {
 					if err := updateBalances(tx, token.DID, token, 1); err != nil {
@@ -94,7 +94,7 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 						TokenID:       info.TokenID,
 						TokenType:     typeID,
 						TransactionID: txnID,
-						TokenStatus:   1,    // Active
+						TokenStatus:   models.TokenStatus_Free, // Active/Free
 						NeedsSync:     true, // Flag for the background job to fetch true history from node
 					}
 
@@ -165,7 +165,7 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 					tokenToSave.DID = targetOwner
 
 					tokenToSave.TransactionID = txnID
-					tokenToSave.TokenStatus = 1
+					tokenToSave.TokenStatus = models.TokenStatus_Free
 
 					// Update Data if new data is provided
 					if info.Data != "" {
@@ -280,11 +280,18 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 					if err := tx.Where("token_id = ?", info.TokenID).First(&tokenToSave).Error; err == nil {
 						tokenToSave.LatestRole = models.TokenRole_Pledge
 						tokenToSave.TransactionID = txnID
+						tokenToSave.TokenStatus = models.TokenStatus_Pledged
 						if err := tx.Save(&tokenToSave).Error; err != nil {
 							return err
 						}
 						if err := appendTokenHistory(tx, info.TokenID, txnID, info.PreviousTransactionID, models.TokenRole_Pledge); err != nil {
 							return err
+						}
+						// Decrement balance for pledged quorum tokens
+						if q.Did != "" && q.Did != "0" && tokenToSave.TokenType != TokenTypeSC {
+							if err := updateBalances(tx, q.Did, &tokenToSave, -1); err != nil {
+								return err
+							}
 						}
 					}
 				}
@@ -299,7 +306,7 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 					prevDID := tokenToSave.DID
 					tokenToSave.LatestRole = models.TokenRole_Burn
 					tokenToSave.TransactionID = txnID
-					tokenToSave.TokenStatus = models.TokenStatus_Burned
+					tokenToSave.TokenStatus = models.TokenStatus_Burnt
 					if err := tx.Save(&tokenToSave).Error; err != nil {
 						return err
 					}
@@ -310,6 +317,72 @@ func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
 					if prevDID != "" && tokenToSave.TokenType != TokenTypeSC {
 						if err := updateBalances(tx, prevDID, &tokenToSave, -1); err != nil {
 							return err
+						}
+					}
+				}
+			}
+		}
+
+		// 7. Unpledge Detection
+		// When a token from a previous transaction (T1) is used in this transaction,
+		// any Quorums pledged during T1 should be released (unpledged) and their balance restored.
+		var prevTxIDs []string
+		prevTxSet := make(map[string]struct{})
+
+		collectPrevIDs := func(tokenInfos []*model.TokenInfo) {
+			if tokenInfos == nil {
+				return
+			}
+			for _, info := range tokenInfos {
+				// Don't track Genesis/Mint tokens
+				if info.PreviousTransactionID != "" && info.PreviousTransactionID != "0" {
+					if _, exists := prevTxSet[info.PreviousTransactionID]; !exists {
+						prevTxSet[info.PreviousTransactionID] = struct{}{}
+						prevTxIDs = append(prevTxIDs, info.PreviousTransactionID)
+					}
+				}
+			}
+		}
+
+		if txn.Tokens != nil {
+			collectPrevIDs(txn.Tokens.RBT)
+			collectPrevIDs(txn.Tokens.FT)
+			collectPrevIDs(txn.Tokens.NFT)
+			collectPrevIDs(txn.Tokens.SmartContract)
+		}
+
+		if len(prevTxIDs) > 0 {
+			var prevTxns []models.TransactionInfo
+			if err := tx.Where("transaction_id IN ?", prevTxIDs).Find(&prevTxns).Error; err == nil {
+				for _, pTx := range prevTxns {
+					if pTx.Quorums != nil {
+						var quorums []*model.QuorumInfo
+						if err := json.Unmarshal(pTx.Quorums, &quorums); err == nil {
+							for _, q := range quorums {
+								for _, qToken := range q.Tokens {
+									var tokenToUnpledge models.Token
+									if err := tx.Where("token_id = ?", qToken.TokenID).First(&tokenToUnpledge).Error; err == nil {
+										if tokenToUnpledge.TokenStatus == models.TokenStatus_Pledged || tokenToUnpledge.TokenStatus == models.TokenStatus_QuorumPledged {
+											
+											// Release the pledge
+											tokenToUnpledge.LatestRole = models.TokenRole_Unpledge
+											tokenToUnpledge.TransactionID = txnID
+											tokenToUnpledge.TokenStatus = models.TokenStatus_Free
+
+											if err := tx.Save(&tokenToUnpledge).Error; err != nil {
+												return err
+											}
+											
+											// Restore balance to the quorum DID
+											if q.Did != "" && q.Did != "0" && tokenToUnpledge.TokenType != TokenTypeSC {
+												if err := updateBalances(tx, q.Did, &tokenToUnpledge, 1); err != nil {
+													return err
+												}
+											}
+										}
+									}
+								}
+							}
 						}
 					}
 				}

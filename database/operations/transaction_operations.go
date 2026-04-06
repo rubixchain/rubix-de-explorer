@@ -32,28 +32,30 @@ func SaveTransactionDetails(txnID string, info *model.TransactionInfo, status bo
 	committedJSON, _ := json.Marshal(info.CommittedTokens)
 	quorumsJSON, _ := json.Marshal(info.Quorums)
 
-	// Calculate total amount from transferred RBTs
-	var txnAmount float64
-	if info.Tokens != nil {
-		for _, t := range info.Tokens.RBT {
-			val, _ := util.GetTokenValueFromTokenID(t.TokenID)
-			txnAmount += val
+	var finalAmount float64
+
+	// Amount Waterfall (derived from Rubix Core protocol):
+	// 1. Quorums present       → Transfer / SC Deploy / Execute → sum of pledged tokens
+	// 2. Tokens.RBT (no quorum) → RBT Mint or Split            → always 1 RBT
+	// 3. CommittedTokens only   → FT Mint                      → sum of burned RBT values
+	if len(info.Quorums) > 0 {
+		// Transfer, SC Deploy, or Multi-Asset Transfer: Amount = Sum of Pledged Tokens
+		for _, q := range info.Quorums {
+			for _, t := range q.Tokens {
+				val, _ := util.GetTokenValueFromTokenID(t.TokenID)
+				finalAmount += val
+			}
+		}
+	} else if info.Tokens != nil && len(info.Tokens.RBT) > 0 {
+		// RBT Mint or Split: always exactly 1 RBT involved per transaction
+		finalAmount = 1.0
+	} else if len(info.CommittedTokens) > 0 {
+		// FT Mint: Amount = sum of burned committed RBT values
+		for _, ct := range info.CommittedTokens {
+			val, _ := util.GetTokenValueFromTokenID(ct.TokenID)
+			finalAmount += val
 		}
 	}
-
-	// Calculate total pledge amount from Quorums
-	var totalPledge float64
-	for _, q := range info.Quorums {
-		for _, t := range q.Tokens {
-			val, _ := util.GetTokenValueFromTokenID(t.TokenID)
-			totalPledge += val
-		}
-	}
-
-	// For the Explorer display, the transaction Amount should reflect the
-	// primary payload (Tokens) if it exists, otherwise fallback to pledge.
-	// We'll combine them to represent the total RBT volume of this Txn.
-	finalAmount := txnAmount + totalPledge
 
 	if status {
 		details := &models.TransactionInfo{
