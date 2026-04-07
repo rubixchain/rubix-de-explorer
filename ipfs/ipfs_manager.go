@@ -92,11 +92,17 @@ func getIPFSRepoPath() (string, error) {
 	if ipfsPath := os.Getenv("IPFS_PATH"); ipfsPath != "" {
 		return ipfsPath, nil
 	}
-	home, err := os.UserHomeDir()
+	// Fallback to local isolated path to prevent conflict with Rubix Core node's global ~/.ipfs
+	cwd, err := os.Getwd()
 	if err != nil {
-		return "", fmt.Errorf("failed to get user home dir: %w", err)
+		return "", fmt.Errorf("failed to get current working dir: %w", err)
 	}
-	return filepath.Join(home, ".ipfs"), nil
+	localPath := filepath.Join(cwd, "ipfs", ".ipfs")
+	
+	// Export it so that the bundled ipfs-linux binary actually reads it
+	os.Setenv("IPFS_PATH", localPath)
+	
+	return localPath, nil
 }
 
 // EnsureInitialized checks if IPFS is available, initialized, and configured for Rubix network

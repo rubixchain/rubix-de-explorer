@@ -19,10 +19,24 @@ const (
 	TokenRole_Unpledge int16 = 9
 )
 
-// Token Status
+// Token Status (Aligned with Rubix Core)
 const (
-	TokenStatus_Burned int16 = 0
-	TokenStatus_Active int16 = 1
+	TokenStatus_Free             int16 = 0
+	TokenStatus_Locked           int16 = 1
+	TokenStatus_Generated        int16 = 2
+	TokenStatus_Fetched          int16 = 3
+	TokenStatus_Transferred      int16 = 4
+	TokenStatus_Committed        int16 = 5
+	TokenStatus_Pledged          int16 = 6
+	TokenStatus_QuorumPledged    int16 = 7
+	TokenStatus_Burnt            int16 = 8
+	TokenStatus_BurntForFT       int16 = 9
+	TokenStatus_Deployed         int16 = 10
+	TokenStatus_Executed         int16 = 11
+	TokenStatus_PinnedAsService  int16 = 12
+	TokenStatus_Orphaned         int16 = 13
+	TokenStatus_ChainSyncIssue   int16 = 14
+	TokenStatus_BeingDoubleSpent int16 = 15
 )
 
 // TokenRole represents a role definition

@@ -1,7 +1,6 @@
 package processor
 
 import (
-	"encoding/json"
 	"explorer-server/database/models"
 	"explorer-server/database/operations"
 	"explorer-server/model"
@@ -25,13 +24,17 @@ func HandleIncomingTxn(newEvent *model.EventTransaction) {
 	if GlobalWorkerPool != nil {
 		GlobalWorkerPool.EnqueueTransaction(newEvent)
 	} else {
-		log.Printf("Warning: GlobalWorkerPool not initialized, dropping transaction %s", newEvent.Transaction.TransactionID)
+		log.Printf("Warning: GlobalWorkerPool not initialized, dropping transaction %s", newEvent.Transaction.ID)
 	}
 }
 
 // ValidateTransactionFormat checks the DIDs and TokenIDs against Rubix format rules
 func ValidateTransactionFormat(newEvent *model.EventTransaction) bool {
-	info := newEvent.Transaction.TransactionInfo
+	info, err := newEvent.Transaction.ParseInfo()
+	if err != nil {
+		log.Printf("Warning: Failed to parse transaction info for validation: %v", err)
+		return false
+	}
 	if info == nil {
 		return true // No info to validate
 	}
@@ -97,8 +100,9 @@ func ValidateTransactionFormat(newEvent *model.EventTransaction) bool {
 	}
 
 	// Quorum Signatures DID Validation
-	if newEvent.Transaction.Signatures != nil {
-		for _, qs := range newEvent.Transaction.Signatures.Quorums {
+	sig, _ := newEvent.Transaction.ParseSignature()
+	if sig != nil {
+		for _, qs := range sig.Quorums {
 			if !util.IsValidDID(qs.Did) {
 				log.Printf("ID-FORMAT-ERR: Invalid Quorum Signature DID format: %s", qs.Did)
 				return false
@@ -112,11 +116,12 @@ func ValidateTransactionFormat(newEvent *model.EventTransaction) bool {
 // ProcessDBTransaction handles the actual logic of logging/inserting to DB
 // Called by workers in the DynamicWorkerPool
 func ProcessDBTransaction(newEvent *model.EventTransaction, workerID int) {
-	log.Printf("[Worker %d] Processing transaction: %s (Status: %v)", workerID, newEvent.Transaction.TransactionID, newEvent.Status)
+	txnID := newEvent.Transaction.ID
+	log.Printf("[Worker %d] Processing transaction: %s (Status: %v)", workerID, txnID, newEvent.Status)
 
 	// 1. Save EventTransaction (always — captures both success and failed consensus)
 	if err := operations.SaveEventTransaction(
-		newEvent.Transaction.TransactionID,
+		txnID,
 		newEvent.Status,
 		newEvent.Message,
 	); err != nil {
@@ -125,24 +130,31 @@ func ProcessDBTransaction(newEvent *model.EventTransaction, workerID int) {
 		log.Printf("[Worker %d] Step 1: EventTransaction saved", workerID)
 	}
 
-	txnInfo := newEvent.Transaction.TransactionInfo
+	// Parse the raw Info JSON into structured TransactionInfo
+	txnInfo, err := newEvent.Transaction.ParseInfo()
+	if err != nil {
+		log.Printf("[Worker %d] Error parsing transaction info: %v", workerID, err)
+		return
+	}
 	if txnInfo == nil {
-		log.Printf("[Worker %d] Transaction %s has no TransactionInfo, skipping details", workerID, newEvent.Transaction.TransactionID)
+		log.Printf("[Worker %d] Transaction %s has no TransactionInfo, skipping details", workerID, txnID)
 		return
 	}
 
-	// 2. Save Transaction as JSON (always)
-	dbTxn := convertToDBTransaction(newEvent)
-	if dbTxn != nil {
-		if err := operations.SaveTransaction(dbTxn); err != nil {
-			log.Printf("[Worker %d] Error saving raw transaction: %v", workerID, err)
-		} else {
-			log.Printf("[Worker %d] Step 2: raw Transaction saved", workerID)
-		}
+	// 2. Save Transaction as JSON (always) — pass raw bytes directly
+	dbTxn := &models.Transactions{
+		ID:        txnID,
+		Info:      newEvent.Transaction.Info,
+		Signature: newEvent.Transaction.Signature,
+	}
+	if err := operations.SaveTransaction(dbTxn); err != nil {
+		log.Printf("[Worker %d] Error saving raw transaction: %v", workerID, err)
+	} else {
+		log.Printf("[Worker %d] Step 2: raw Transaction saved", workerID)
 	}
 
 	// 3. Save flattened TransactionInfo (to success or failure table)
-	if err := operations.SaveTransactionDetails(newEvent.Transaction.TransactionID, txnInfo, newEvent.Status); err != nil {
+	if err := operations.SaveTransactionDetails(txnID, txnInfo, newEvent.Status); err != nil {
 		log.Printf("[Worker %d] Error saving transaction details: %v", workerID, err)
 	} else {
 		log.Printf("[Worker %d] Step 3: TransactionInfo saved (Status: %v)", workerID, newEvent.Status)
@@ -150,38 +162,17 @@ func ProcessDBTransaction(newEvent *model.EventTransaction, workerID int) {
 
 	// If consensus failed, stop here (don't update assets/balances)
 	if !newEvent.Status {
-		log.Printf("[Worker %d] Transaction %s failed consensus, skipping asset processing", workerID, newEvent.Transaction.TransactionID)
+		log.Printf("[Worker %d] Transaction %s failed consensus, skipping asset processing", workerID, txnID)
 		return
 	}
 
 	// 4. Process Assets (Tokens, Balances, Provenance) — ONLY for successful transactions
 	log.Printf("[Worker %d] Step 4: Starting Asset Processing...", workerID)
-	if err := operations.ProcessTransactionAssets(txnInfo, newEvent.Transaction.TransactionID); err != nil {
+	if err := operations.ProcessTransactionAssets(txnInfo, txnID); err != nil {
 		log.Printf("[Worker %d] Error processing transaction assets: %v", workerID, err)
 	} else {
 		log.Printf("[Worker %d] Step 4: Asset Processing completed successfully", workerID)
 	}
 
-	log.Printf("[Worker %d] Transaction %s finished successfully", workerID, newEvent.Transaction.TransactionID)
-}
-
-// convertToDBTransaction serializes the DTO into the JSON-based Transactions table model
-func convertToDBTransaction(event *model.EventTransaction) *models.Transactions {
-	infoJSON, err := json.Marshal(event.Transaction.TransactionInfo)
-	if err != nil {
-		log.Printf("   Error marshaling transaction info: %v", err)
-		return nil
-	}
-
-	sigJSON, err := json.Marshal(event.Transaction.Signatures)
-	if err != nil {
-		log.Printf("   Error marshaling signatures: %v", err)
-		return nil
-	}
-
-	return &models.Transactions{
-		ID:        event.Transaction.TransactionID,
-		Info:      infoJSON,
-		Signature: sigJSON,
-	}
+	log.Printf("[Worker %d] Transaction %s finished successfully", workerID, txnID)
 }
