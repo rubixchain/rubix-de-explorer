@@ -254,15 +254,14 @@ func GetDAGTxnHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(data)
 }
 
-// GetDAGTransactionsHandler returns the latest 1000 transactions ordered by epoch descending.
+// GetDAGTransactionsHandler builds a DAG of up to 500 nodes.
+// Fetches latest transactions in batches of 50, walks ancestors up to depth 7,
+// and keeps adding batches until 500 total nodes are collected.
 func GetDAGTransactionsHandler(w http.ResponseWriter, r *http.Request) {
 	data, err := api.GetDAGTransactions()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
-	}
-	if data == nil {
-		data = []models.TransactionInfo{}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)
