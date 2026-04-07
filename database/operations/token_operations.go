@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // Token type constants (aligned with Rubix node's token_type IDs)
@@ -41,7 +42,7 @@ func UpdateTokenAndBalances(token *models.Token, prevOwner string) error {
 			if (prevOwner == "" || prevOwner == "0") && token.TokenStatus != models.TokenStatus_Burnt {
 				// If it's new (Mint/Deploy), increment for the owner
 				if token.DID != "" && token.DID != "0" {
-					if err := updateBalances(tx, token.DID, token, 1); err != nil {
+					if err := updateBalances(tx, token.DID, tokenTypeName(token.TokenType), "", "", 1); err != nil {
 						return err
 					}
 				}
@@ -50,12 +51,12 @@ func UpdateTokenAndBalances(token *models.Token, prevOwner string) error {
 		} else if prevOwner != token.DID {
 			// Standard Logic: RBT, FT, NFT transfer ownership/balances
 			if prevOwner != "" && prevOwner != "0" {
-				if err := updateBalances(tx, prevOwner, token, -1); err != nil {
+				if err := updateBalances(tx, prevOwner, tokenTypeName(token.TokenType), "", "", -1); err != nil {
 					return err
 				}
 			}
 			if token.DID != "" && token.DID != "0" {
-				if err := updateBalances(tx, token.DID, token, 1); err != nil {
+				if err := updateBalances(tx, token.DID, tokenTypeName(token.TokenType), "", "", 1); err != nil {
 					return err
 				}
 			}
@@ -65,332 +66,325 @@ func UpdateTokenAndBalances(token *models.Token, prevOwner string) error {
 	})
 }
 
-// ProcessTransactionAssets orchestrates the DB updates for all assets in a transaction
-func ProcessTransactionAssets(txn *model.TransactionInfo, txnID string) error {
-	return database.WriteDB.Transaction(func(tx *gorm.DB) error {
-		if txn.Tokens == nil {
-			return nil
-		}
+// ProcessTransactionAssets orchestrates the DB updates for all assets in a transaction in a highly scalable bulk-oriented way.
+func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID string) error {
+	// If no transaction provided, start one (failsafe, though processor should provide one)
+	if db == nil {
+		return database.WriteDB.Transaction(func(tx *gorm.DB) error {
+			return ProcessTransactionAssets(tx, txn, txnID)
+		})
+	}
 
-		// Helper to process a slice of tokens
-		processTokens := func(tokenInfos []*model.TokenInfo, tokenType string) error {
-			typeID := tokenTypeMap[tokenType]
-			for _, info := range tokenInfos {
+	tx := db
 
-				var existing models.Token
-				err := tx.Where("token_id = ?", info.TokenID).First(&existing).Error
-
-				isNew := (err == gorm.ErrRecordNotFound)
-				if err != nil && !isNew {
-					return err
-				}
-
-				var prevOwner string
-				var tokenToSave models.Token
-
-				if isNew {
-					// Token appears in Explorer without prior history
-					tokenToSave = models.Token{
-						TokenID:       info.TokenID,
-						TokenType:     typeID,
-						TransactionID: txnID,
-						TokenStatus:   models.TokenStatus_Free, // Active/Free
-						NeedsSync:     true, // Flag for the background job to fetch true history from node
-					}
-
-					// Use Initiator as DID (Owner) and DeployerDID for SCs
-					if typeID == TokenTypeSC {
-						tokenToSave.DID = txn.Initiator
-						tokenToSave.DeployerDID = txn.Initiator
-					} else {
-						tokenToSave.DID = txn.Owner
-						tokenToSave.DeployerDID = "" // Explicitly clear for non-SC
-					}
-
-					// Always assign Data if present (NFTs, Smart Contracts, etc.)
-					if info.Data != "" {
-						tokenToSave.Data = info.Data
-					}
-
-					// For RBT, handle whole vs part tokens
-					if typeID == TokenTypeRBT {
-						val, _ := util.GetTokenValueFromTokenID(info.TokenID)
-						tokenToSave.TokenValue = val
-					}
-
-					// For FT/NFT/SC, calculate value from Committed RBTs if it's a first-time appearance (Likely Mint/Deploy)
-					if typeID == TokenTypeFT || typeID == TokenTypeNFT || typeID == TokenTypeSC {
-						var burnedSum float64
-						for _, ct := range txn.CommittedTokens {
-							if !strings.Contains(ct.TokenID, "Qm") && !strings.Contains(ct.TokenID, "_DID") && strings.Contains(ct.TokenID, "_") {
-								v, _ := util.GetTokenValueFromTokenID(ct.TokenID)
-								burnedSum += v
-							}
-						}
-
-						if typeID == TokenTypeFT {
-							ftCount := len(txn.Tokens.FT)
-							if ftCount > 0 {
-								tokenToSave.TokenValue = burnedSum / float64(ftCount)
-							} else {
-								tokenToSave.TokenValue = 1.0 // Default
-							}
-						} else if typeID == TokenTypeNFT || typeID == TokenTypeSC {
-							// For SC/NFT, the value is the total RBT burned for this deployment
-							tokenToSave.TokenValue = burnedSum
-						}
-					}
-				} else {
-					// Update existing token
-					prevOwner = existing.DID
-					tokenToSave = existing
-
-					// Detect history gaps/mismatches
-					if info.PreviousTransactionID != "" && info.PreviousTransactionID != existing.TransactionID {
-						tokenToSave.NeedsSync = true
-					}
-
-					// Maintain ownership logic:
-					// - For SC: DeployerDID stays, but DID (current owner) only changes on explicit transfer.
-					// - For all: Use txn.Owner as the target owner.
-					targetOwner := txn.Owner
-					if typeID == TokenTypeSC && info.PreviousTransactionID != "" {
-						// For SC interactions like "Execute", don't change owner automatically to initiator
-						// unless txn.Owner is explicitly set. Use Initiator ONLY if owner is empty and it's a deployment.
-						if targetOwner == "" {
-							targetOwner = existing.DID // Default to current owner
-						}
-					}
-
-					tokenToSave.DID = targetOwner
-
-					tokenToSave.TransactionID = txnID
-					tokenToSave.TokenStatus = models.TokenStatus_Free
-
-					// Update Data if new data is provided
-					if info.Data != "" {
-						tokenToSave.Data = info.Data
-					}
-
-					// Contextual Role Inference
-					var inferredRole int16 = 2 // Default to Transfer
-					if typeID == TokenTypeSC {
-						if info.PreviousTransactionID == "" {
-							inferredRole = models.TokenRole_Deploy
-						} else {
-							inferredRole = models.TokenRole_Execute
-						}
-					} else {
-						if info.PreviousTransactionID == "" {
-							inferredRole = models.TokenRole_Mint
-
-							// FT/NFT/SC dynamic value calculation from burned RBTs
-							if typeID == TokenTypeFT || typeID == TokenTypeNFT || typeID == TokenTypeSC {
-								// Calculate total burned value for this transaction
-								var burnedSum float64
-								for _, ct := range txn.CommittedTokens {
-									// Only count RBTs (contains _ and no Qm/DID)
-									if !strings.Contains(ct.TokenID, "Qm") && !strings.Contains(ct.TokenID, "_DID") && strings.Contains(ct.TokenID, "_") {
-										v, _ := util.GetTokenValueFromTokenID(ct.TokenID)
-										burnedSum += v
-									}
-								}
-
-								if typeID == TokenTypeFT {
-									ftCount := len(txn.Tokens.FT)
-									if ftCount > 0 {
-										tokenToSave.TokenValue = burnedSum / float64(ftCount)
-									}
-								} else {
-									// For SC/NFT, the value is the total RBT burned for this deployment
-									tokenToSave.TokenValue = burnedSum
-								}
-							}
-						} else {
-							inferredRole = models.TokenRole_Transfer
-						}
-					}
-					tokenToSave.LatestRole = inferredRole
-				}
-
-				// 1. Write the Token updates to the Token Table First
-				if err := tx.Save(&tokenToSave).Error; err != nil {
-					return err
-				}
-
-				// 2. Append to Token History (with sequencing via PreviousTransactionID)
-				if err := appendTokenHistory(tx, info.TokenID, txnID, info.PreviousTransactionID, tokenToSave.LatestRole); err != nil {
-					return err
-				}
-
-				// 3. Update Balances LAST
-				// Special Case: Smart Contracts (SC). Balance counts deployments only.
-				if typeID == TokenTypeSC {
-					if isNew && tokenToSave.DID != "" && tokenToSave.DID != "0" {
-						if err := updateBalances(tx, tokenToSave.DID, &tokenToSave, 1); err != nil {
-							return err
-						}
-					}
-					// Note: SC execution (isNew=false) updates the 'did' field in Tokens table (latest executor)
-					// but does not trigger a balance transfer in DIDBalances.
-				} else if prevOwner != tokenToSave.DID {
-					// Standard Logic: RBT, FT, NFT transfer ownership/balances
-					if prevOwner != "" && prevOwner != "0" {
-						if err := updateBalances(tx, prevOwner, &tokenToSave, -1); err != nil {
-							return err
-						}
-					}
-					if tokenToSave.DID != "" && tokenToSave.DID != "0" {
-						if err := updateBalances(tx, tokenToSave.DID, &tokenToSave, 1); err != nil {
-							return err
-						}
-					}
-				}
-			}
-			return nil
-		}
-
-		// Process each type
-		if txn.Tokens.RBT != nil {
-			if err := processTokens(txn.Tokens.RBT, "RBT"); err != nil {
-				return err
-			}
-		}
-		if txn.Tokens.FT != nil {
-			if err := processTokens(txn.Tokens.FT, "FT"); err != nil {
-				return err
-			}
-		}
-		if txn.Tokens.NFT != nil {
-			if err := processTokens(txn.Tokens.NFT, "NFT"); err != nil {
-				return err
-			}
-		}
-		if txn.Tokens.SmartContract != nil {
-			if err := processTokens(txn.Tokens.SmartContract, "SC"); err != nil {
-				return err
-			}
-		}
-
-		// 5. Process Quorum Pledges (RolePledge = 8)
-		if txn.Quorums != nil {
-			for _, q := range txn.Quorums {
-				for _, info := range q.Tokens {
-					var tokenToSave models.Token
-					if err := tx.Where("token_id = ?", info.TokenID).First(&tokenToSave).Error; err == nil {
-						tokenToSave.LatestRole = models.TokenRole_Pledge
-						tokenToSave.TransactionID = txnID
-						tokenToSave.TokenStatus = models.TokenStatus_Pledged
-						if err := tx.Save(&tokenToSave).Error; err != nil {
-							return err
-						}
-						if err := appendTokenHistory(tx, info.TokenID, txnID, info.PreviousTransactionID, models.TokenRole_Pledge); err != nil {
-							return err
-						}
-						// Decrement balance for pledged quorum tokens
-						if q.Did != "" && q.Did != "0" && tokenToSave.TokenType != TokenTypeSC {
-							if err := updateBalances(tx, q.Did, &tokenToSave, -1); err != nil {
-								return err
-							}
-						}
-					}
-				}
-			}
-		}
-
-		// 6. Process Committed Tokens (RoleBurn = 5)
-		if txn.CommittedTokens != nil {
-			for _, info := range txn.CommittedTokens {
-				var tokenToSave models.Token
-				if err := tx.Where("token_id = ?", info.TokenID).First(&tokenToSave).Error; err == nil {
-					prevDID := tokenToSave.DID
-					tokenToSave.LatestRole = models.TokenRole_Burn
-					tokenToSave.TransactionID = txnID
-					tokenToSave.TokenStatus = models.TokenStatus_Burnt
-					if err := tx.Save(&tokenToSave).Error; err != nil {
-						return err
-					}
-					if err := appendTokenHistory(tx, info.TokenID, txnID, info.PreviousTransactionID, models.TokenRole_Burn); err != nil {
-						return err
-					}
-					// Decrement balance for burned tokens
-					if prevDID != "" && tokenToSave.TokenType != TokenTypeSC {
-						if err := updateBalances(tx, prevDID, &tokenToSave, -1); err != nil {
-							return err
-						}
-					}
-				}
-			}
-		}
-
-		// 7. Unpledge Detection
-		// When a token from a previous transaction (T1) is used in this transaction,
-		// any Quorums pledged during T1 should be released (unpledged) and their balance restored.
-		var prevTxIDs []string
-		prevTxSet := make(map[string]struct{})
-
-		collectPrevIDs := func(tokenInfos []*model.TokenInfo) {
-			if tokenInfos == nil {
-				return
-			}
-			for _, info := range tokenInfos {
-				// Don't track Genesis/Mint tokens
-				if info.PreviousTransactionID != "" && info.PreviousTransactionID != "0" {
-					if _, exists := prevTxSet[info.PreviousTransactionID]; !exists {
-						prevTxSet[info.PreviousTransactionID] = struct{}{}
-						prevTxIDs = append(prevTxIDs, info.PreviousTransactionID)
-					}
-				}
-			}
-		}
-
-		if txn.Tokens != nil {
-			collectPrevIDs(txn.Tokens.RBT)
-			collectPrevIDs(txn.Tokens.FT)
-			collectPrevIDs(txn.Tokens.NFT)
-			collectPrevIDs(txn.Tokens.SmartContract)
-		}
-
-		if len(prevTxIDs) > 0 {
-			var prevTxns []models.TransactionInfo
-			if err := tx.Where("transaction_id IN ?", prevTxIDs).Find(&prevTxns).Error; err == nil {
-				for _, pTx := range prevTxns {
-					if pTx.Quorums != nil {
-						var quorums []*model.QuorumInfo
-						if err := json.Unmarshal(pTx.Quorums, &quorums); err == nil {
-							for _, q := range quorums {
-								for _, qToken := range q.Tokens {
-									var tokenToUnpledge models.Token
-									if err := tx.Where("token_id = ?", qToken.TokenID).First(&tokenToUnpledge).Error; err == nil {
-										if tokenToUnpledge.TokenStatus == models.TokenStatus_Pledged || tokenToUnpledge.TokenStatus == models.TokenStatus_QuorumPledged {
-											
-											// Release the pledge
-											tokenToUnpledge.LatestRole = models.TokenRole_Unpledge
-											tokenToUnpledge.TransactionID = txnID
-											tokenToUnpledge.TokenStatus = models.TokenStatus_Free
-
-											if err := tx.Save(&tokenToUnpledge).Error; err != nil {
-												return err
-											}
-											
-											// Restore balance to the quorum DID
-											if q.Did != "" && q.Did != "0" && tokenToUnpledge.TokenType != TokenTypeSC {
-												if err := updateBalances(tx, q.Did, &tokenToUnpledge, 1); err != nil {
-													return err
-												}
-											}
-										}
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-
+	if txn.Tokens == nil && txn.Quorums == nil && txn.CommittedTokens == nil {
 		return nil
-	})
+	}
+
+	// 1. Collect all involved TokenIDs to fetch existing state in one query
+	tokenIDSet := make(map[string]struct{})
+	collectIDs := func(tokenInfos []*model.TokenInfo) {
+		for _, info := range tokenInfos {
+			tokenIDSet[info.TokenID] = struct{}{}
+		}
+	}
+	if txn.Tokens != nil {
+		collectIDs(txn.Tokens.RBT)
+		collectIDs(txn.Tokens.FT)
+		collectIDs(txn.Tokens.NFT)
+		collectIDs(txn.Tokens.SmartContract)
+	}
+	for _, q := range txn.Quorums {
+		for _, t := range q.Tokens {
+			tokenIDSet[t.TokenID] = struct{}{}
+		}
+	}
+	for _, ct := range txn.CommittedTokens {
+		tokenIDSet[ct.TokenID] = struct{}{}
+	}
+
+	allTokenIDs := make([]string, 0, len(tokenIDSet))
+	for id := range tokenIDSet {
+		allTokenIDs = append(allTokenIDs, id)
+	}
+
+	// 2. Fetch existing tokens
+	existingTokens := make(map[string]models.Token)
+	if len(allTokenIDs) > 0 {
+		var tokens []models.Token
+		if err := tx.Where("token_id IN ?", allTokenIDs).Find(&tokens).Error; err != nil {
+			return err
+		}
+		for _, t := range tokens {
+			existingTokens[t.TokenID] = t
+		}
+	}
+
+	// 3. Balance Aggregation Map: DID -> Net Change for this transaction
+	// Since one DID might send/receive multiple tokens in one txn, we aggregate first.
+	type balanceKey struct {
+		DID        string
+		AssetType  string
+		TokenName  string
+		CreatorDID string
+	}
+	balanceChanges := make(map[balanceKey]float64)
+
+	addBalanceChange := func(did string, token *models.Token, direction float64) {
+		if did == "" || did == "0" {
+			return
+		}
+		typeName := tokenTypeName(token.TokenType)
+		var val float64
+		if token.TokenType == TokenTypeRBT {
+			val = token.TokenValue
+		} else {
+			val = 1.0
+		}
+
+		key := balanceKey{DID: did, AssetType: typeName}
+		if token.TokenType == TokenTypeFT {
+			parts := strings.Split(token.TokenID, "_")
+			if len(parts) >= 3 {
+				key.TokenName = parts[0]
+				key.CreatorDID = parts[len(parts)-1]
+			} else if len(parts) > 0 {
+				key.TokenName = parts[0]
+			}
+		}
+		balanceChanges[key] += (val * direction)
+	}
+
+	tokensToUpsert := make([]models.Token, 0)
+	chainsToInsert := make([]models.TokenChain, 0)
+
+	// Sub-function to generate models for a group of tokens
+	prepareTokens := func(tokenInfos []*model.TokenInfo, tokenType string) error {
+		typeID := tokenTypeMap[tokenType]
+		for _, info := range tokenInfos {
+			existing, exists := existingTokens[info.TokenID]
+			isNew := !exists
+			var prevOwner string
+			var tokenToSave models.Token
+
+			if isNew {
+				tokenToSave = models.Token{
+					TokenID:       info.TokenID,
+					TokenType:     typeID,
+					TransactionID: txnID,
+					TokenStatus:   models.TokenStatus_Free,
+					NeedsSync:     true,
+				}
+				if typeID == TokenTypeSC {
+					tokenToSave.DID = txn.Initiator
+					tokenToSave.DeployerDID = txn.Initiator
+				} else {
+					tokenToSave.DID = txn.Owner
+				}
+				if info.Data != "" {
+					tokenToSave.Data = info.Data
+				}
+				if typeID == TokenTypeRBT {
+					val, _ := util.GetTokenValueFromTokenID(info.TokenID)
+					tokenToSave.TokenValue = val
+				} else {
+					// FT/NFT/SC value calculation logic (kept legacy logic)
+					var burnedSum float64
+					for _, ct := range txn.CommittedTokens {
+						if !strings.Contains(ct.TokenID, "Qm") && !strings.Contains(ct.TokenID, "_DID") && strings.Contains(ct.TokenID, "_") {
+							v, _ := util.GetTokenValueFromTokenID(ct.TokenID)
+							burnedSum += v
+						}
+					}
+					if typeID == TokenTypeFT {
+						ftCount := len(txn.Tokens.FT)
+						if ftCount > 0 {
+							tokenToSave.TokenValue = burnedSum / float64(ftCount)
+						} else {
+							tokenToSave.TokenValue = 1.0
+						}
+					} else {
+						tokenToSave.TokenValue = burnedSum
+					}
+				}
+				tokenToSave.LatestRole = models.TokenRole_Mint
+				if typeID == TokenTypeSC {
+					tokenToSave.LatestRole = models.TokenRole_Deploy
+				}
+			} else {
+				prevOwner = existing.DID
+				tokenToSave = existing
+				if info.PreviousTransactionID != "" && info.PreviousTransactionID != existing.TransactionID {
+					tokenToSave.NeedsSync = true
+				}
+				targetOwner := txn.Owner
+				if typeID == TokenTypeSC && targetOwner == "" {
+					targetOwner = existing.DID
+				}
+				tokenToSave.DID = targetOwner
+				tokenToSave.TransactionID = txnID
+				tokenToSave.TokenStatus = models.TokenStatus_Free
+				if info.Data != "" {
+					tokenToSave.Data = info.Data
+				}
+				inferredRole := models.TokenRole_Transfer
+				if typeID == TokenTypeSC {
+					inferredRole = models.TokenRole_Execute
+				}
+				tokenToSave.LatestRole = inferredRole
+			}
+
+			tokensToUpsert = append(tokensToUpsert, tokenToSave)
+			chainsToInsert = append(chainsToInsert, models.TokenChain{
+				TokenID:               info.TokenID,
+				TransactionID:         txnID,
+				PreviousTransactionID: info.PreviousTransactionID,
+				Role:                  tokenToSave.LatestRole,
+			})
+
+			// Aggregate Balance Changes
+			if typeID == TokenTypeSC {
+				if isNew && tokenToSave.DID != "" && tokenToSave.DID != "0" {
+					addBalanceChange(tokenToSave.DID, &tokenToSave, 1)
+				}
+			} else if prevOwner != tokenToSave.DID {
+				addBalanceChange(prevOwner, &tokenToSave, -1)
+				addBalanceChange(tokenToSave.DID, &tokenToSave, 1)
+			}
+		}
+		return nil
+	}
+
+	// 4. Group Processing (Phase 2: Model Prep)
+	if txn.Tokens != nil {
+		prepareTokens(txn.Tokens.RBT, "RBT")
+		prepareTokens(txn.Tokens.FT, "FT")
+		prepareTokens(txn.Tokens.NFT, "NFT")
+		prepareTokens(txn.Tokens.SmartContract, "SC")
+	}
+
+	// 5. Quorum Pledges Processing
+	for _, q := range txn.Quorums {
+		for _, info := range q.Tokens {
+			if t, exists := existingTokens[info.TokenID]; exists {
+				t.LatestRole = models.TokenRole_Pledge
+				t.TransactionID = txnID
+				t.TokenStatus = models.TokenStatus_Pledged
+				tokensToUpsert = append(tokensToUpsert, t)
+				chainsToInsert = append(chainsToInsert, models.TokenChain{
+					TokenID:               info.TokenID,
+					TransactionID:         txnID,
+					PreviousTransactionID: info.PreviousTransactionID,
+					Role:                  models.TokenRole_Pledge,
+				})
+				if q.Did != "" && t.TokenType != TokenTypeSC {
+					addBalanceChange(q.Did, &t, -1)
+				}
+			}
+		}
+	}
+
+	// 6. Committed Tokens Processing (Burn)
+	for _, info := range txn.CommittedTokens {
+		if t, exists := existingTokens[info.TokenID]; exists {
+			prevDID := t.DID
+			t.LatestRole = models.TokenRole_Burn
+			t.TransactionID = txnID
+			t.TokenStatus = models.TokenStatus_Burnt
+			tokensToUpsert = append(tokensToUpsert, t)
+			chainsToInsert = append(chainsToInsert, models.TokenChain{
+				TokenID:               info.TokenID,
+				TransactionID:         txnID,
+				PreviousTransactionID: info.PreviousTransactionID,
+				Role:                  models.TokenRole_Burn,
+			})
+			if prevDID != "" && t.TokenType != TokenTypeSC {
+				addBalanceChange(prevDID, &t, -1)
+			}
+		}
+	}
+
+	// 7. Unpledge Detection logic integrated into bulk...
+	// (Keeping the logic of Restoring balance to quorum DIDs if their pledged token is used)
+	prevTxIDs := make([]string, 0)
+	collectPrevIDs := func(tokenInfos []*model.TokenInfo) {
+		for _, info := range tokenInfos {
+			if info.PreviousTransactionID != "" && info.PreviousTransactionID != "0" {
+				prevTxIDs = append(prevTxIDs, info.PreviousTransactionID)
+			}
+		}
+	}
+	if txn.Tokens != nil {
+		collectPrevIDs(txn.Tokens.RBT)
+		collectPrevIDs(txn.Tokens.FT)
+		collectPrevIDs(txn.Tokens.NFT)
+		collectPrevIDs(txn.Tokens.SmartContract)
+	}
+
+	if len(prevTxIDs) > 0 {
+		var prevTxns []models.TransactionInfo
+		if err := tx.Where("transaction_id IN ?", prevTxIDs).Find(&prevTxns).Error; err == nil {
+			for _, pTx := range prevTxns {
+				var quorums []*model.QuorumInfo
+				if err := json.Unmarshal(pTx.Quorums, &quorums); err == nil {
+					for _, q := range quorums {
+						for _, qToken := range q.Tokens {
+							if t, exists := existingTokens[qToken.TokenID]; exists {
+								if t.TokenStatus == models.TokenStatus_Pledged || t.TokenStatus == models.TokenStatus_QuorumPledged {
+									t.LatestRole = models.TokenRole_Unpledge
+									t.TransactionID = txnID
+									t.TokenStatus = models.TokenStatus_Free
+									// Don't re-add to tokensToUpsert if already there with different state? 
+									// In Rubix, a token can't be both "used" and "pledged" in the same block usually.
+									tokensToUpsert = append(tokensToUpsert, t)
+									if q.Did != "" && t.TokenType != TokenTypeSC {
+										addBalanceChange(q.Did, &t, 1)
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 8. FINAL BULK COMMIT
+	// Bulk Upsert Tokens
+	if len(tokensToUpsert) > 0 {
+		if err := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "token_id"}},
+			UpdateAll: true,
+		}).CreateInBatches(tokensToUpsert, 1000).Error; err != nil {
+			return err
+		}
+	}
+
+	// Bulk Insert History
+	if len(chainsToInsert) > 0 {
+		if err := tx.CreateInBatches(chainsToInsert, 1000).Error; err != nil {
+			return err
+		}
+	}
+
+	// Bulk Update Balances (One update per unique DID)
+	for key, delta := range balanceChanges {
+		if delta == 0 {
+			continue
+		}
+		if err := updateBalances(tx, key.DID, key.AssetType, key.TokenName, key.CreatorDID, delta); err != nil {
+			return err
+		}
+	}
+
+	// 9. Token Chain Array Sequence (Legacy helper, still needs to be called per-token for now)
+	for _, info := range chainsToInsert {
+		if err := updateTokenChainArray(tx, info.TokenID, info.ID, info.PreviousTransactionID); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // tokenTypeName maps int16 to string for balance lookups
@@ -409,40 +403,10 @@ func tokenTypeName(t int16) string {
 	}
 }
 
-// updateBalances handles DIDBalances (granular) table
-func updateBalances(tx *gorm.DB, did string, token *models.Token, direction float64) error {
-	typeName := tokenTypeName(token.TokenType)
-
-	// Determine the amount to increment/decrement the balance by:
-	// - RBT: Sum up the actual fractional values
-	// - FT, NFT, SC: Simply count the number of tokens (1.0 each)
-	var balanceIncrement float64
-	if token.TokenType == TokenTypeRBT {
-		balanceIncrement = token.TokenValue
-	} else {
-		balanceIncrement = 1.0
-	}
-
-	valueToAdd := balanceIncrement * direction
-
-	// Token Name, CreatorDID, and TokenValue: only populated for FTs
-	assetName := ""
-	creatorDID := ""
-	var storeTokenValue float64 // Only > 0 for FTs
-
-	if token.TokenType == TokenTypeFT {
-		storeTokenValue = token.TokenValue // Store face value for FTs
-		parts := strings.Split(token.TokenID, "_")
-		if len(parts) >= 3 {
-			assetName = parts[0]
-			creatorDID = parts[len(parts)-1]
-		} else if len(parts) > 0 && parts[0] != "" {
-			assetName = parts[0]
-		}
-	}
-
+// updateBalances handles DIDBalances (granular) table updates using aggregated values.
+func updateBalances(tx *gorm.DB, did, assetType, tokenName, creatorDID string, valueToAdd float64) error {
 	var balance models.DIDBalance
-	err := tx.Where("did = ? AND asset_type = ? AND token_name = ? AND creator_did = ?", did, typeName, assetName, creatorDID).First(&balance).Error
+	err := tx.Where("did = ? AND asset_type = ? AND token_name = ? AND creator_did = ?", did, assetType, tokenName, creatorDID).First(&balance).Error
 	if err == gorm.ErrRecordNotFound {
 		// New balance record: Try to fetch PeerID/DIDAlgo from any existing row for this DID
 		var meta models.DIDBalance
@@ -453,10 +417,9 @@ func updateBalances(tx *gorm.DB, did string, token *models.Token, direction floa
 		}
 
 		balance.DID = did
-		balance.AssetType = typeName
-		balance.TokenName = assetName
+		balance.AssetType = assetType
+		balance.TokenName = tokenName
 		balance.CreatorDID = creatorDID
-		balance.TokenValue = storeTokenValue // 0 for RBT/NFT/SC, actual value for FT
 		balance.Balance = valueToAdd
 		return tx.Create(&balance).Error
 	} else if err != nil {
@@ -468,30 +431,14 @@ func updateBalances(tx *gorm.DB, did string, token *models.Token, direction floa
 		"balance": gorm.Expr("GREATEST(0, balance + ?)", valueToAdd),
 	}
 
-	// Only update token_value for FTs
-	if token.TokenType == TokenTypeFT {
-		updates["token_value"] = storeTokenValue
-	}
-
 	return tx.Model(&models.DIDBalance{}).
-		Where("did = ? AND asset_type = ? AND token_name = ? AND creator_did = ?", did, typeName, assetName, creatorDID).
+		Where("did = ? AND asset_type = ? AND token_name = ? AND creator_did = ?", did, assetType, tokenName, creatorDID).
 		Updates(updates).Error
 }
 
-// appendTokenHistory records the token's movement and ensures the TokenChainArray is logically sequenced
-func appendTokenHistory(tx *gorm.DB, tokenID, txnID, prevTxnID string, role int16) error {
-	// 1. Insert into TokenChain
-	historyEntry := models.TokenChain{
-		TokenID:               tokenID,
-		TransactionID:         txnID,
-		PreviousTransactionID: prevTxnID,
-		Role:                  role,
-	}
-	if err := tx.Create(&historyEntry).Error; err != nil {
-		return err
-	}
-
-	// 2. Load existing TokenChainArray
+// updateTokenChainArray updates the TokenChainArray index for a token that already has a new history entry ID.
+func updateTokenChainArray(tx *gorm.DB, tokenID string, historyID uint64, prevTxnID string) error {
+	// 1. Load existing TokenChainArray
 	var tca models.TokenChainArray
 	err := tx.Where("token_id = ?", tokenID).First(&tca).Error
 
@@ -502,8 +449,8 @@ func appendTokenHistory(tx *gorm.DB, tokenID, txnID, prevTxnID string, role int1
 		return err
 	}
 
-	// 3. Determine logical position
-	newID := historyEntry.ID
+	// 2. Determine logical position
+	newID := historyID
 	inserted := false
 
 	if prevTxnID != "" {
@@ -540,7 +487,7 @@ func appendTokenHistory(tx *gorm.DB, tokenID, txnID, prevTxnID string, role int1
 
 	chainJSON, _ := json.Marshal(chain)
 
-	// 4. Upsert TokenChainArray
+	// 3. Upsert TokenChainArray
 	if err == gorm.ErrRecordNotFound {
 		tca = models.TokenChainArray{
 			TokenID: tokenID,

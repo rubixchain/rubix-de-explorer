@@ -1,11 +1,14 @@
 package processor
 
 import (
+	"explorer-server/database"
 	"explorer-server/database/models"
 	"explorer-server/database/operations"
 	"explorer-server/model"
 	"explorer-server/util"
 	"log"
+
+	"gorm.io/gorm"
 )
 
 // HandleIncomingTxn orchestrates the unmarshaling, validation, and enqueuing of a transaction
@@ -121,6 +124,7 @@ func ProcessDBTransaction(newEvent *model.EventTransaction, workerID int) {
 
 	// 1. Save EventTransaction (always — captures both success and failed consensus)
 	if err := operations.SaveEventTransaction(
+		nil, // Use default DB
 		txnID,
 		newEvent.Status,
 		newEvent.Message,
@@ -147,14 +151,14 @@ func ProcessDBTransaction(newEvent *model.EventTransaction, workerID int) {
 		Info:      newEvent.Transaction.Info,
 		Signature: newEvent.Transaction.Signature,
 	}
-	if err := operations.SaveTransaction(dbTxn); err != nil {
+	if err := operations.SaveTransaction(nil, dbTxn); err != nil {
 		log.Printf("[Worker %d] Error saving raw transaction: %v", workerID, err)
 	} else {
 		log.Printf("[Worker %d] Step 2: raw Transaction saved", workerID)
 	}
 
 	// 3. Save flattened TransactionInfo (to success or failure table)
-	if err := operations.SaveTransactionDetails(txnID, txnInfo, newEvent.Status); err != nil {
+	if err := operations.SaveTransactionDetails(nil, txnID, txnInfo, newEvent.Status); err != nil {
 		log.Printf("[Worker %d] Error saving transaction details: %v", workerID, err)
 	} else {
 		log.Printf("[Worker %d] Step 3: TransactionInfo saved (Status: %v)", workerID, newEvent.Status)
@@ -167,9 +171,14 @@ func ProcessDBTransaction(newEvent *model.EventTransaction, workerID int) {
 	}
 
 	// 4. Process Assets (Tokens, Balances, Provenance) — ONLY for successful transactions
-	log.Printf("[Worker %d] Step 4: Starting Asset Processing...", workerID)
-	if err := operations.ProcessTransactionAssets(txnInfo, txnID); err != nil {
-		log.Printf("[Worker %d] Error processing transaction assets: %v", workerID, err)
+	// This block is ATOMIC: either all assets update or none.
+	log.Printf("[Worker %d] Step 4: Starting Atomic Asset Processing...", workerID)
+	err = database.WriteDB.Transaction(func(tx *gorm.DB) error {
+		return operations.ProcessTransactionAssets(tx, txnInfo, txnID)
+	})
+
+	if err != nil {
+		log.Printf("[Worker %d] Error in atomic asset processing: %v", workerID, err)
 	} else {
 		log.Printf("[Worker %d] Step 4: Asset Processing completed successfully", workerID)
 	}
