@@ -215,8 +215,10 @@ func GetDAGTransactions(page int) (model.DAGResponse, error) {
 	}
 
 	var allTxns []model.DAGTxn
+	// seenChildren tracks txn IDs already emitted across all levels to avoid duplicates
+	seenChildren := make(map[string]struct{})
 
-	// 2. BFS level by level — one DB query per level, cap parents at 20
+	// 2. BFS level by level — one DB query per level, cap parents at levelCap
 	for d := 0; d < depth && len(frontier) > 0; d++ {
 		var rows []edgeRow
 		if err := database.ReadDB.Raw(`
@@ -243,16 +245,22 @@ func GetDAGTransactions(page int) (model.DAGResponse, error) {
 			}
 		}
 
-		// Only include edges whose parent is within the cap
-		nextFrontier := make([]string, 0, len(parentSeen))
+		// Emit one edge per unique child txn ID whose parent is within the cap
 		for _, row := range rows {
-			if _, ok := parentSeen[row.ParentTxnID]; ok {
-				allTxns = append(allTxns, model.DAGTxn{
-					TransactionID:         row.ChildTxnID,
-					PreviousTransactionID: row.ParentTxnID,
-				})
+			if _, parentOk := parentSeen[row.ParentTxnID]; !parentOk {
+				continue
 			}
+			if _, alreadySeen := seenChildren[row.ChildTxnID]; alreadySeen {
+				continue
+			}
+			seenChildren[row.ChildTxnID] = struct{}{}
+			allTxns = append(allTxns, model.DAGTxn{
+				TransactionID:         row.ChildTxnID,
+				PreviousTransactionID: row.ParentTxnID,
+			})
 		}
+
+		nextFrontier := make([]string, 0, len(parentSeen))
 		for pid := range parentSeen {
 			nextFrontier = append(nextFrontier, pid)
 		}
