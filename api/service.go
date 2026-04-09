@@ -183,7 +183,7 @@ func GetDAGFromTxn(txnID string, depth int) (model.DAGResponse, error) {
 // buildDAGResponse converts edge rows into DAGTxn nodes, grouping parents per
 // child and capping at 20 unique parents per transaction.
 func buildDAGResponse(edges []dagEdgeRow) model.DAGResponse {
-	const maxParents = 20
+	const maxParents = 6
 	// parentMap: child -> ordered unique parents (max 20)
 	parentMap := make(map[string][]string)
 	parentSeen := make(map[string]map[string]struct{})
@@ -218,8 +218,14 @@ func GetDAGTransactions() (model.DAGResponse, error) {
 	const depth = 5
 	const targetNodes = 500
 
-	// txnParents: child -> unique parents (max 20)
+	const maxParents = 6
+
+	// txnParents: txn_id -> unique parent IDs (max 6)
+	// orderedIDs: insertion-ordered list of txn IDs — anchors first (epoch DESC), then parents
+	// queriedFrontier: txn IDs whose parents have already been fetched — prevents re-querying
 	txnParents := make(map[string][]string, targetNodes)
+	orderedIDs := make([]string, 0, targetNodes)
+	queriedFrontier := make(map[string]struct{})
 	seenEdges := make(map[string]struct{})
 	offset := 0
 
@@ -239,18 +245,25 @@ func GetDAGTransactions() (model.DAGResponse, error) {
 		}
 		offset += len(anchors)
 
-		// Register all anchors
-		anchorIDs := make([]string, 0, len(anchors))
+		// Register all anchors; queue unqueried ones as the first frontier
+		frontier := make([]string, 0, len(anchors))
 		for _, a := range anchors {
 			if _, seen := txnParents[a.TransactionID]; !seen {
 				txnParents[a.TransactionID] = []string{}
-				anchorIDs = append(anchorIDs, a.TransactionID)
+				orderedIDs = append(orderedIDs, a.TransactionID)
+			}
+			if _, queried := queriedFrontier[a.TransactionID]; !queried {
+				frontier = append(frontier, a.TransactionID)
 			}
 		}
 
-		// BFS level by level from this batch
-		frontier := anchorIDs
+		// BFS level by level
 		for d := 0; d < depth && len(frontier) > 0; d++ {
+			// Mark frontier as queried before fetching
+			for _, id := range frontier {
+				queriedFrontier[id] = struct{}{}
+			}
+
 			var rows []dagEdgeRow
 			if err := database.ReadDB.Raw(`
 				SELECT DISTINCT transaction_id AS child_txn_id, previous_transaction_id AS parent_txn_id
@@ -273,13 +286,16 @@ func GetDAGTransactions() (model.DAGResponse, error) {
 				}
 				seenEdges[edgeKey] = struct{}{}
 
-				// Add parent to child's list (max 20)
-				if len(txnParents[row.ChildTxnID]) < 20 {
+				// Add parent to child's list (max 6)
+				if len(txnParents[row.ChildTxnID]) < maxParents {
 					txnParents[row.ChildTxnID] = append(txnParents[row.ChildTxnID], row.ParentTxnID)
 				}
-				// Register parent as a node and add to next frontier
+				// Register parent node; queue it for next BFS level if not yet queried
 				if _, seen := txnParents[row.ParentTxnID]; !seen {
 					txnParents[row.ParentTxnID] = []string{}
+					orderedIDs = append(orderedIDs, row.ParentTxnID)
+				}
+				if _, queried := queriedFrontier[row.ParentTxnID]; !queried {
 					nextFrontier[row.ParentTxnID] = struct{}{}
 				}
 			}
@@ -291,11 +307,11 @@ func GetDAGTransactions() (model.DAGResponse, error) {
 		}
 	}
 
-	txns := make([]model.DAGTxn, 0, len(txnParents))
-	for txnID, parents := range txnParents {
+	txns := make([]model.DAGTxn, 0, len(orderedIDs))
+	for _, txnID := range orderedIDs {
 		txns = append(txns, model.DAGTxn{
 			TransactionID:          txnID,
-			PreviousTransactionIDs: parents,
+			PreviousTransactionIDs: txnParents[txnID],
 		})
 	}
 	return model.DAGResponse{Transactions: txns}, nil
