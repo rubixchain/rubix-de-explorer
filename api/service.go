@@ -237,40 +237,34 @@ func GetDAGTransactions() (model.DAGResponse, error) {
 		anchorIDs[i] = a.TransactionID
 	}
 
-	// Step 2: recursive CTE — walk up to `depth` ancestor levels, ≤maxParents per node.
-	// ROW_NUMBER inside each CTE arm caps how many parent rows per child are kept.
+	// Step 2: recursive CTE — walk up to `depth` ancestor levels.
+	// Parents are capped per node in Go (maxParents). DISTINCT prevents cycles.
 	var edges []dagEdgeRow
 	if err := database.ReadDB.Raw(`
 		WITH RECURSIVE dag AS (
-			SELECT child_txn_id, parent_txn_id, depth FROM (
-				SELECT
-					transaction_id          AS child_txn_id,
-					previous_transaction_id AS parent_txn_id,
-					1                       AS depth,
-					ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY id) AS rn
-				FROM "TokenChain"
-				WHERE transaction_id IN ?
-				  AND previous_transaction_id IS NOT NULL
-				  AND previous_transaction_id <> ''
-			) t WHERE rn <= ?
+			SELECT DISTINCT
+				transaction_id          AS child_txn_id,
+				previous_transaction_id AS parent_txn_id,
+				1                       AS depth
+			FROM "TokenChain"
+			WHERE transaction_id IN ?
+			  AND previous_transaction_id IS NOT NULL
+			  AND previous_transaction_id <> ''
 
 			UNION
 
-			SELECT child_txn_id, parent_txn_id, depth FROM (
-				SELECT
-					tc.transaction_id          AS child_txn_id,
-					tc.previous_transaction_id AS parent_txn_id,
-					dag.depth + 1              AS depth,
-					ROW_NUMBER() OVER (PARTITION BY tc.transaction_id ORDER BY tc.id) AS rn
-				FROM "TokenChain" tc
-				JOIN dag ON tc.transaction_id = dag.parent_txn_id
-				WHERE dag.depth < ?
-				  AND tc.previous_transaction_id IS NOT NULL
-				  AND tc.previous_transaction_id <> ''
-			) t WHERE rn <= ?
+			SELECT DISTINCT
+				tc.transaction_id          AS child_txn_id,
+				tc.previous_transaction_id AS parent_txn_id,
+				dag.depth + 1              AS depth
+			FROM "TokenChain" tc
+			JOIN dag ON tc.transaction_id = dag.parent_txn_id
+			WHERE dag.depth < ?
+			  AND tc.previous_transaction_id IS NOT NULL
+			  AND tc.previous_transaction_id <> ''
 		)
 		SELECT DISTINCT child_txn_id, parent_txn_id FROM dag
-	`, anchorIDs, maxParents, depth, maxParents).Scan(&edges).Error; err != nil {
+	`, anchorIDs, depth).Scan(&edges).Error; err != nil {
 		return model.DAGResponse{}, err
 	}
 
@@ -361,35 +355,29 @@ func GetDAGWithSearch(searchTxnID string) (model.DAGResponse, error) {
 	var edges []dagEdgeRow
 	if err := database.ReadDB.Raw(`
 		WITH RECURSIVE dag AS (
-			SELECT child_txn_id, parent_txn_id, depth FROM (
-				SELECT
-					transaction_id          AS child_txn_id,
-					previous_transaction_id AS parent_txn_id,
-					1                       AS depth,
-					ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY id) AS rn
-				FROM "TokenChain"
-				WHERE transaction_id = ?
-				  AND previous_transaction_id IS NOT NULL
-				  AND previous_transaction_id <> ''
-			) t WHERE rn <= ?
+			SELECT DISTINCT
+				transaction_id          AS child_txn_id,
+				previous_transaction_id AS parent_txn_id,
+				1                       AS depth
+			FROM "TokenChain"
+			WHERE transaction_id = ?
+			  AND previous_transaction_id IS NOT NULL
+			  AND previous_transaction_id <> ''
 
 			UNION
 
-			SELECT child_txn_id, parent_txn_id, depth FROM (
-				SELECT
-					tc.transaction_id          AS child_txn_id,
-					tc.previous_transaction_id AS parent_txn_id,
-					dag.depth + 1              AS depth,
-					ROW_NUMBER() OVER (PARTITION BY tc.transaction_id ORDER BY tc.id) AS rn
-				FROM "TokenChain" tc
-				JOIN dag ON tc.transaction_id = dag.parent_txn_id
-				WHERE dag.depth < ?
-				  AND tc.previous_transaction_id IS NOT NULL
-				  AND tc.previous_transaction_id <> ''
-			) t WHERE rn <= ?
+			SELECT DISTINCT
+				tc.transaction_id          AS child_txn_id,
+				tc.previous_transaction_id AS parent_txn_id,
+				dag.depth + 1              AS depth
+			FROM "TokenChain" tc
+			JOIN dag ON tc.transaction_id = dag.parent_txn_id
+			WHERE dag.depth < ?
+			  AND tc.previous_transaction_id IS NOT NULL
+			  AND tc.previous_transaction_id <> ''
 		)
 		SELECT DISTINCT child_txn_id, parent_txn_id FROM dag
-	`, searchTxnID, maxParents, depth, maxParents).Scan(&edges).Error; err != nil {
+	`, searchTxnID, depth).Scan(&edges).Error; err != nil {
 		return model.DAGResponse{}, err
 	}
 
