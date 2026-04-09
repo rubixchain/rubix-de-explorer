@@ -227,7 +227,7 @@ func GetDAGTransactions() (model.DAGResponse, error) {
 				previous_transaction_id AS parent_txn_id,
 				1                       AS depth
 			FROM "TokenChain"
-			WHERE transaction_id = ANY(?)
+			WHERE transaction_id IN ?
 			  AND previous_transaction_id IS NOT NULL
 			  AND previous_transaction_id <> ''
 
@@ -269,7 +269,7 @@ func GetDAGTransactions() (model.DAGResponse, error) {
 	// 4. Fetch TransactionInfo for all nodes — single query
 	var txns []models.TransactionInfo
 	if err := database.ReadDB.Table("TransactionInfo").
-		Where("transaction_id = ANY(?)", allIDs).
+		Where("transaction_id IN ?", allIDs).
 		Order("epoch DESC").
 		Find(&txns).Error; err != nil {
 		return model.DAGResponse{}, err
