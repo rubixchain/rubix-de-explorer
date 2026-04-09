@@ -42,7 +42,7 @@ func UpdateTokenAndBalances(token *models.Token, prevOwner string) error {
 			if (prevOwner == "" || prevOwner == "0") && token.TokenStatus != models.TokenStatus_Burnt {
 				// If it's new (Mint/Deploy), increment for the owner
 				if token.DID != "" && token.DID != "0" {
-					if err := updateBalances(tx, token.DID, tokenTypeName(token.TokenType), "", "", 1); err != nil {
+					if err := updateBalances(tx, token.DID, tokenTypeName(token.TokenType), "", "", 1, 0); err != nil {
 						return err
 					}
 				}
@@ -51,12 +51,12 @@ func UpdateTokenAndBalances(token *models.Token, prevOwner string) error {
 		} else if prevOwner != token.DID {
 			// Standard Logic: RBT, FT, NFT transfer ownership/balances
 			if prevOwner != "" && prevOwner != "0" {
-				if err := updateBalances(tx, prevOwner, tokenTypeName(token.TokenType), "", "", -1); err != nil {
+				if err := updateBalances(tx, prevOwner, tokenTypeName(token.TokenType), "", "", -1, 0); err != nil {
 					return err
 				}
 			}
 			if token.DID != "" && token.DID != "0" {
-				if err := updateBalances(tx, token.DID, tokenTypeName(token.TokenType), "", "", 1); err != nil {
+				if err := updateBalances(tx, token.DID, tokenTypeName(token.TokenType), "", "", 1, 0); err != nil {
 					return err
 				}
 			}
@@ -121,16 +121,20 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 	}
 
 	// 3. Balance Aggregation Map: DID -> Net Change for this transaction
-	// Since one DID might send/receive multiple tokens in one txn, we aggregate first.
+	// Since one DID might send/receive/pledge multiple tokens in one txn, we aggregate first.
+	type balanceChange struct {
+		Balance        float64
+		PledgedBalance float64
+	}
 	type balanceKey struct {
 		DID        string
 		AssetType  string
 		TokenName  string
 		CreatorDID string
 	}
-	balanceChanges := make(map[balanceKey]float64)
+	balanceChanges := make(map[balanceKey]*balanceChange)
 
-	addBalanceChange := func(did string, token *models.Token, direction float64) {
+	addBalanceChange := func(did string, token *models.Token, balanceDelta, pledgeDelta float64) {
 		if did == "" || did == "0" {
 			return
 		}
@@ -152,7 +156,11 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 				key.TokenName = parts[0]
 			}
 		}
-		balanceChanges[key] += (val * direction)
+		if _, ok := balanceChanges[key]; !ok {
+			balanceChanges[key] = &balanceChange{}
+		}
+		balanceChanges[key].Balance += (val * balanceDelta)
+		balanceChanges[key].PledgedBalance += (val * pledgeDelta)
 	}
 
 	tokensToUpsert := make([]models.Token, 0)
@@ -245,11 +253,11 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 			// Aggregate Balance Changes
 			if typeID == TokenTypeSC {
 				if isNew && tokenToSave.DID != "" && tokenToSave.DID != "0" {
-					addBalanceChange(tokenToSave.DID, &tokenToSave, 1)
+					addBalanceChange(tokenToSave.DID, &tokenToSave, 1, 0)
 				}
 			} else if prevOwner != tokenToSave.DID {
-				addBalanceChange(prevOwner, &tokenToSave, -1)
-				addBalanceChange(tokenToSave.DID, &tokenToSave, 1)
+				addBalanceChange(prevOwner, &tokenToSave, -1, 0)
+				addBalanceChange(tokenToSave.DID, &tokenToSave, 1, 0)
 			}
 		}
 		return nil
@@ -278,7 +286,8 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 					Role:                  models.TokenRole_Pledge,
 				})
 				if q.Did != "" && t.TokenType != TokenTypeSC {
-					addBalanceChange(q.Did, &t, -1)
+					// Deduct from Regular balance, add to Pledged balance
+					addBalanceChange(q.Did, &t, -1, 1)
 				}
 			}
 		}
@@ -299,7 +308,8 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 				Role:                  models.TokenRole_Burn,
 			})
 			if prevDID != "" && t.TokenType != TokenTypeSC {
-				addBalanceChange(prevDID, &t, -1)
+				// Deduct from Regular balance (Burned tokens are gone)
+				addBalanceChange(prevDID, &t, -1, 0)
 			}
 		}
 	}
@@ -329,16 +339,31 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 				if err := json.Unmarshal(pTx.Quorums, &quorums); err == nil {
 					for _, q := range quorums {
 						for _, qToken := range q.Tokens {
-							if t, exists := existingTokens[qToken.TokenID]; exists {
+							// Determine if we have this token in our current batch or need to fetch it
+							var t models.Token
+							found := false
+							if cached, ok := existingTokens[qToken.TokenID]; ok {
+								t = cached
+								found = true
+							} else {
+								// Fetch from DB if not in current transaction set
+								if err := tx.Where("token_id = ?", qToken.TokenID).First(&t).Error; err == nil {
+									found = true
+								}
+							}
+
+							if found {
 								if t.TokenStatus == models.TokenStatus_Pledged || t.TokenStatus == models.TokenStatus_QuorumPledged {
 									t.LatestRole = models.TokenRole_Unpledge
 									t.TransactionID = txnID
-									t.TokenStatus = models.TokenStatus_Free
-									// Don't re-add to tokensToUpsert if already there with different state? 
-									// In Rubix, a token can't be both "used" and "pledged" in the same block usually.
+									t.TokenStatus = models.TokenStatus_Unpledged
+
+									// Add to bulk upsert list
 									tokensToUpsert = append(tokensToUpsert, t)
+
 									if q.Did != "" && t.TokenType != TokenTypeSC {
-										addBalanceChange(q.Did, &t, 1)
+										// Restore to Regular balance, deduct from Pledged balance
+										addBalanceChange(q.Did, &t, 1, -1)
 									}
 								}
 							}
@@ -367,12 +392,12 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 		}
 	}
 
-	// Bulk Update Balances (One update per unique DID)
-	for key, delta := range balanceChanges {
-		if delta == 0 {
+	// Bulk Update Balances (One update per unique DID/Asset)
+	for key, deltas := range balanceChanges {
+		if deltas.Balance == 0 && deltas.PledgedBalance == 0 {
 			continue
 		}
-		if err := updateBalances(tx, key.DID, key.AssetType, key.TokenName, key.CreatorDID, delta); err != nil {
+		if err := updateBalances(tx, key.DID, key.AssetType, key.TokenName, key.CreatorDID, deltas.Balance, deltas.PledgedBalance); err != nil {
 			return err
 		}
 	}
@@ -404,7 +429,7 @@ func tokenTypeName(t int16) string {
 }
 
 // updateBalances handles DIDBalances (granular) table updates using aggregated values.
-func updateBalances(tx *gorm.DB, did, assetType, tokenName, creatorDID string, valueToAdd float64) error {
+func updateBalances(tx *gorm.DB, did, assetType, tokenName, creatorDID string, balanceDelta, pledgedDelta float64) error {
 	var balance models.DIDBalance
 	err := tx.Where("did = ? AND asset_type = ? AND token_name = ? AND creator_did = ?", did, assetType, tokenName, creatorDID).First(&balance).Error
 	if err == gorm.ErrRecordNotFound {
@@ -420,7 +445,8 @@ func updateBalances(tx *gorm.DB, did, assetType, tokenName, creatorDID string, v
 		balance.AssetType = assetType
 		balance.TokenName = tokenName
 		balance.CreatorDID = creatorDID
-		balance.Balance = valueToAdd
+		balance.Balance = balanceDelta
+		balance.PledgedBalance = pledgedDelta
 		return tx.Create(&balance).Error
 	} else if err != nil {
 		return err
@@ -428,7 +454,8 @@ func updateBalances(tx *gorm.DB, did, assetType, tokenName, creatorDID string, v
 
 	// Use explicit WHERE-based update with a safety clamp to prevent negative balances
 	updates := map[string]interface{}{
-		"balance": gorm.Expr("GREATEST(0, balance + ?)", valueToAdd),
+		"balance":         gorm.Expr("GREATEST(0, balance + ?)", balanceDelta),
+		"pledged_balance": gorm.Expr("GREATEST(0, pledged_balance + ?)", pledgedDelta),
 	}
 
 	return tx.Model(&models.DIDBalance{}).
@@ -497,4 +524,64 @@ func updateTokenChainArray(tx *gorm.DB, tokenID string, historyID uint64, prevTx
 	}
 
 	return tx.Model(&tca).Update("index", chainJSON).Error
+}
+
+// SyncPledgedBalances is a one-time migration helper to populate the pledged_balance column
+// for existing DIDs by scanning the Tokens table.
+func SyncPledgedBalances(db *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		// 1. Reset all pledged balances to 0
+		if err := tx.Model(&models.DIDBalance{}).Where("asset_type = ?", "RBT").Update("pledged_balance", 0).Error; err != nil {
+			return err
+		}
+
+		// 2. Aggregate RBT pledged tokens per DID
+		type pledgedResult struct {
+			DID          string  `gorm:"column:did"`
+			TotalPledged float64 `gorm:"column:total_pledged"`
+		}
+		var results []pledgedResult
+		err := tx.Table("Tokens").
+			Select("did, SUM(token_value) as total_pledged").
+			Where("token_type = ? AND token_status IN (?, ?)", TokenTypeRBT, models.TokenStatus_Pledged, models.TokenStatus_QuorumPledged).
+			Group("did").
+			Scan(&results).Error
+		if err != nil {
+			return err
+		}
+
+		// 3. Update or Create entries in DIDBalances table
+		for _, res := range results {
+			if res.TotalPledged <= 0 {
+				continue
+			}
+
+			var balance models.DIDBalance
+			err := tx.Where("did = ? AND asset_type = ? AND token_name = ? AND creator_did = ?", res.DID, "RBT", "", "").First(&balance).Error
+			if err == gorm.ErrRecordNotFound {
+				// Create new record for DIDs that had no balance row
+				balance.DID = res.DID
+				balance.AssetType = "RBT"
+				balance.PledgedBalance = res.TotalPledged
+				// Try to fetch peer_id/algo if possible
+				var meta models.DIDBalance
+				if tx.Where("did = ? AND (peer_id IS NOT NULL AND peer_id != '')", res.DID).
+					Select("peer_id, did_algo").First(&meta).Error == nil {
+					balance.PeerID = meta.PeerID
+					balance.DIDAlgo = meta.DIDAlgo
+				}
+				if err := tx.Create(&balance).Error; err != nil {
+					return err
+				}
+			} else if err != nil {
+				return err
+			} else {
+				// Update existing
+				if err := tx.Model(&balance).Update("pledged_balance", res.TotalPledged).Error; err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
 }

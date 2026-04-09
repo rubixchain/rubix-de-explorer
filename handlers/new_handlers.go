@@ -115,8 +115,8 @@ func GetDIDCountHandler(w http.ResponseWriter, r *http.Request) {
 //   3. Lists and Holders Handlers
 // ==========================================
 
-// GetLatestTransactionsListHandler returns a paginated list of latest transactions
-func GetLatestTransactionsListHandler(w http.ResponseWriter, r *http.Request) {
+// GetLatestTransactionsInfoListHandler returns a paginated list of latest transactions (FULL)
+func GetLatestTransactionsInfoListHandler(w http.ResponseWriter, r *http.Request) {
 	limit, page := getPagination(r)
 	data, total, err := api.GetTransactionInfoList(limit, page)
 	if err != nil {
@@ -125,6 +125,21 @@ func GetLatestTransactionsListHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if data == nil {
 		data = []models.TransactionInfo{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(model.NewPaginated(data, total, page, limit))
+}
+
+// GetLatestTransactionsHandler returns a lightweight list of latest transactions (Summary)
+func GetLatestTransactionsHandler(w http.ResponseWriter, r *http.Request) {
+	limit, page := getPagination(r)
+	data, total, err := api.GetTransactionSummaryList(limit, page)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if data == nil {
+		data = []models.TransactionSummary{}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(model.NewPaginated(data, total, page, limit))

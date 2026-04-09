@@ -340,6 +340,51 @@ func GetTransactionInfoList(limit, page int) ([]models.TransactionInfo, int64, e
 	return result, total, nil
 }
 
+// GetTransactionSummaryList returns a lightweight list of transactions (no token details)
+func GetTransactionSummaryList(limit, page int) ([]models.TransactionSummary, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 10
+	}
+	offset := (page - 1) * limit
+
+	// 1. Calculate total count
+	var total int64
+	countQuery := `
+		SELECT COUNT(*) FROM (
+			SELECT transaction_id FROM "TransactionInfo" WHERE amount > 0
+			UNION ALL
+			SELECT transaction_id FROM "FailedTransactionInfo" WHERE amount > 0
+		) AS combined
+	`
+	if err := database.ReadDB.Raw(countQuery).Scan(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	// 2. Fetch paginated results (Summary ONLY)
+	var result []models.TransactionSummary
+	dataQuery := `
+		SELECT transaction_id, initiator, owner, epoch, network, status, amount, created_at FROM (
+			SELECT transaction_id, initiator, owner, epoch, network, status, amount, created_at FROM "TransactionInfo" WHERE amount > 0
+			UNION ALL
+			SELECT transaction_id, initiator, owner, epoch, network, status, amount, created_at FROM "FailedTransactionInfo" WHERE amount > 0
+		) AS combined
+		ORDER BY created_at DESC
+		LIMIT ? OFFSET ?
+	`
+	if err := database.ReadDB.Raw(dataQuery, limit, offset).Scan(&result).Error; err != nil {
+		return nil, 0, err
+	}
+
+	if result == nil {
+		result = make([]models.TransactionSummary, 0)
+	}
+
+	return result, total, nil
+}
+
 func GetDIDHoldersList(limit, page int) ([]models.DIDBalance, int64, error) {
 	if page < 1 {
 		page = 1
