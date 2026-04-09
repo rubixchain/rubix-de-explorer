@@ -152,6 +152,7 @@ type DAGTxn struct {
 type DAGResponse struct {
 	Transactions []DAGTxn `json:"transactions"`
 	HasMore      bool     `json:"has_more"`
+	NextOffset   int      `json:"next_offset"` // pass this as ?offset= in the next Load More call
 }
 
 type FTHolder struct {

@@ -254,11 +254,11 @@ func GetDAGTxnHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(data)
 }
 
-// GetDAGTransactionsHandler returns 20 anchor txns + their ancestors (depth 4) for the given page.
-// Query param: page (default 1). Response includes has_more to drive the "Load More" button.
+// GetDAGTransactionsHandler returns up to 500 unique txns starting from the given offset.
+// Query param: offset (default 0). Use next_offset from the response for the Load More call.
 func GetDAGTransactionsHandler(w http.ResponseWriter, r *http.Request) {
-	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-	data, err := api.GetDAGTransactions(page)
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	data, err := api.GetDAGTransactions(offset)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

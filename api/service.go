@@ -168,45 +168,22 @@ func GetDAGFromTxn(txnID string, depth int) (model.DAGResponse, error) {
 	return model.DAGResponse{Transactions: txns, HasMore: false}, nil
 }
 
-// GetDAGTransactions fetches 50 latest anchor txns (paginated), then walks
-// their ancestor chain level by level up to depth 5. At each level, unique
-// parent txn IDs are capped at 20 — only edges pointing to those 20 parents
-// are included, and only those 20 become the frontier for the next level.
-// This is done with one simple DB query per level (max 6 total round trips).
-func GetDAGTransactions(page int) (model.DAGResponse, error) {
-	const anchorLimit = 50
+// GetDAGTransactions fetches anchor txns in batches of 50, starting at `offset`.
+// For each batch:
+//   - All 50 anchors are added as nodes (with empty previous_transaction_id if no chain found).
+//   - BFS walks up to depth 5, capping unique parents at 20 per level.
+//   - Parent txns discovered by BFS are also added as nodes.
+//
+// Keeps fetching more batches until 500 unique txns are collected or no more exist.
+// Returns next_offset for the Load More button.
+func GetDAGTransactions(offset int) (model.DAGResponse, error) {
+	const anchorBatch = 50
 	const depth = 5
 	const levelCap = 20
+	const targetTxns = 500
 
-	if page < 1 {
-		page = 1
-	}
-	offset := (page - 1) * anchorLimit
-
-	// 1. Fetch anchor IDs (one extra to detect has_more)
-	var anchors []struct {
-		TransactionID string `gorm:"column:transaction_id"`
-	}
-	if err := database.ReadDB.Table("TransactionInfo").
-		Select("transaction_id").
-		Order("epoch DESC").
-		Limit(anchorLimit + 1).
-		Offset(offset).
-		Scan(&anchors).Error; err != nil {
-		return model.DAGResponse{}, err
-	}
-
-	hasMore := len(anchors) > anchorLimit
-	if hasMore {
-		anchors = anchors[:anchorLimit]
-	}
-	if len(anchors) == 0 {
-		return model.DAGResponse{Transactions: []model.DAGTxn{}, HasMore: false}, nil
-	}
-
-	frontier := make([]string, len(anchors))
-	for i, a := range anchors {
-		frontier[i] = a.TransactionID
+	if offset < 0 {
+		offset = 0
 	}
 
 	type edgeRow struct {
@@ -214,63 +191,110 @@ func GetDAGTransactions(page int) (model.DAGResponse, error) {
 		ParentTxnID string `gorm:"column:parent_txn_id"`
 	}
 
-	var allTxns []model.DAGTxn
-	// seenChildren tracks txn IDs already emitted across all levels to avoid duplicates
-	seenChildren := make(map[string]struct{})
+	// txnMap: txn_id -> previous_txn_id ("" if genesis/unknown)
+	// Using a map ensures every txn appears exactly once.
+	txnMap := make(map[string]string, targetTxns)
 
-	// 2. BFS level by level — one DB query per level, cap parents at levelCap
-	for d := 0; d < depth && len(frontier) > 0; d++ {
-		var rows []edgeRow
-		if err := database.ReadDB.Raw(`
-			SELECT DISTINCT transaction_id AS child_txn_id, previous_transaction_id AS parent_txn_id
-			FROM "TokenChain"
-			WHERE transaction_id IN ?
-			  AND previous_transaction_id IS NOT NULL
-			  AND previous_transaction_id <> ''
-		`, frontier).Scan(&rows).Error; err != nil {
+	currentOffset := offset
+	hasMore := false
+
+	for len(txnMap) < targetTxns {
+		// Fetch next batch of anchor IDs (one extra to detect has_more)
+		var anchors []struct {
+			TransactionID string `gorm:"column:transaction_id"`
+		}
+		if err := database.ReadDB.Table("TransactionInfo").
+			Select("transaction_id").
+			Order("epoch DESC").
+			Limit(anchorBatch+1).
+			Offset(currentOffset).
+			Scan(&anchors).Error; err != nil {
 			return model.DAGResponse{}, err
 		}
-		if len(rows) == 0 {
+
+		hasMore = len(anchors) > anchorBatch
+		if hasMore {
+			anchors = anchors[:anchorBatch]
+		}
+		if len(anchors) == 0 {
+			hasMore = false
 			break
 		}
+		currentOffset += len(anchors)
 
-		// Collect unique parents, capped at levelCap
-		parentSeen := make(map[string]struct{}, levelCap)
-		for _, row := range rows {
-			if _, ok := parentSeen[row.ParentTxnID]; !ok {
-				if len(parentSeen) >= levelCap {
-					break
+		// Add all anchors with empty previous — BFS will fill them in if chain exists
+		frontier := make([]string, 0, len(anchors))
+		for _, a := range anchors {
+			if _, seen := txnMap[a.TransactionID]; !seen {
+				txnMap[a.TransactionID] = ""
+				frontier = append(frontier, a.TransactionID)
+			}
+		}
+
+		// BFS: walk ancestors level by level
+		for d := 0; d < depth && len(frontier) > 0; d++ {
+			var rows []edgeRow
+			if err := database.ReadDB.Raw(`
+				SELECT DISTINCT transaction_id AS child_txn_id, previous_transaction_id AS parent_txn_id
+				FROM "TokenChain"
+				WHERE transaction_id IN ?
+				  AND previous_transaction_id IS NOT NULL
+				  AND previous_transaction_id <> ''
+			`, frontier).Scan(&rows).Error; err != nil {
+				return model.DAGResponse{}, err
+			}
+			if len(rows) == 0 {
+				break
+			}
+
+			// Collect unique parents, capped at levelCap
+			parentSeen := make(map[string]struct{}, levelCap)
+			for _, row := range rows {
+				if _, ok := parentSeen[row.ParentTxnID]; !ok {
+					if len(parentSeen) >= levelCap {
+						break
+					}
+					parentSeen[row.ParentTxnID] = struct{}{}
 				}
-				parentSeen[row.ParentTxnID] = struct{}{}
 			}
-		}
 
-		// Emit one edge per unique child txn ID whose parent is within the cap
-		for _, row := range rows {
-			if _, parentOk := parentSeen[row.ParentTxnID]; !parentOk {
-				continue
+			// Update child->parent mapping; add new parent nodes
+			for _, row := range rows {
+				if _, parentOk := parentSeen[row.ParentTxnID]; !parentOk {
+					continue
+				}
+				// Fill in previous_transaction_id for this child if not set yet
+				if prev, exists := txnMap[row.ChildTxnID]; exists && prev == "" {
+					txnMap[row.ChildTxnID] = row.ParentTxnID
+				}
+				// Add parent as a new node if not seen
+				if _, seen := txnMap[row.ParentTxnID]; !seen {
+					txnMap[row.ParentTxnID] = ""
+				}
 			}
-			if _, alreadySeen := seenChildren[row.ChildTxnID]; alreadySeen {
-				continue
-			}
-			seenChildren[row.ChildTxnID] = struct{}{}
-			allTxns = append(allTxns, model.DAGTxn{
-				TransactionID:         row.ChildTxnID,
-				PreviousTransactionID: row.ParentTxnID,
-			})
-		}
 
-		nextFrontier := make([]string, 0, len(parentSeen))
-		for pid := range parentSeen {
-			nextFrontier = append(nextFrontier, pid)
+			nextFrontier := make([]string, 0, len(parentSeen))
+			for pid := range parentSeen {
+				nextFrontier = append(nextFrontier, pid)
+			}
+			frontier = nextFrontier
 		}
-		frontier = nextFrontier
 	}
 
-	if allTxns == nil {
-		allTxns = []model.DAGTxn{}
+	// Build output slice from map
+	allTxns := make([]model.DAGTxn, 0, len(txnMap))
+	for txnID, prevID := range txnMap {
+		allTxns = append(allTxns, model.DAGTxn{
+			TransactionID:         txnID,
+			PreviousTransactionID: prevID,
+		})
 	}
-	return model.DAGResponse{Transactions: allTxns, HasMore: hasMore}, nil
+
+	return model.DAGResponse{
+		Transactions: allTxns,
+		HasMore:      hasMore,
+		NextOffset:   currentOffset,
+	}, nil
 }
 
 func GetTransactionInfoList(limit, page int) ([]models.TransactionInfo, int64, error) {
