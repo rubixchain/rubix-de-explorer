@@ -12,7 +12,7 @@ import (
 // SearchResult is the unified structure for search API responses
 type SearchResult struct {
 	Type string      `json:"type"` // "DID", "Token", "Transaction"
-	Data interface{} `json:"data"`
+	Data any `json:"data"`
 }
 
 // -------------------------------------------------------------------
@@ -160,51 +160,46 @@ func GetDAGFromTxn(txnID string, depth int) (model.DAGResponse, error) {
 		txnIDs = append(txnIDs, id)
 	}
 
-	// Fetch TransactionInfo for all collected txnIDs.
-	var txns []models.TransactionInfo
-	if err := database.ReadDB.Table("TransactionInfo").
-		Where("transaction_id IN ?", txnIDs).
-		Order("epoch DESC").
-		Find(&txns).Error; err != nil {
-		return model.DAGResponse{}, err
-	}
-
-	// Build the DAGEdge slice for the response.
-	dagEdges := make([]model.DAGEdge, len(edges))
+	// Build DAGTxn pairs from edges
+	txns := make([]model.DAGTxn, len(edges))
 	for i, e := range edges {
-		dagEdges[i] = model.DAGEdge{From: e.ChildTxnID, To: e.ParentTxnID}
+		txns[i] = model.DAGTxn{TransactionID: e.ChildTxnID, PreviousTransactionID: e.ParentTxnID}
 	}
-
-	if txns == nil {
-		txns = []models.TransactionInfo{}
-	}
-	return model.DAGResponse{Transactions: txns, Edges: dagEdges}, nil
+	return model.DAGResponse{Transactions: txns, HasMore: false}, nil
 }
 
-// GetDAGTransactions builds a DAG in two DB round trips:
-//  1. One recursive CTE from the latest 50 anchors, depth 7.
-//  2. One SELECT to fetch TransactionInfo for up to 500 unique node IDs.
-//
-// The indexes on TokenChain(transaction_id) and TokenChain(previous_transaction_id)
-// are required for the recursive join to be fast.
-func GetDAGTransactions() (model.DAGResponse, error) {
-	const anchorLimit = 50
-	const depth = 7
-	const maxNodes = 500
+// GetDAGTransactions fetches 20 anchor txns for the given page, walks their
+// ancestors up to depth 4, and returns at most 50 (txn_hash, prev_txn_hash)
+// pairs. has_more is true when there are more anchor pages available.
+func GetDAGTransactions(page int) (model.DAGResponse, error) {
+	const anchorLimit = 20
+	const depth = 5
+	const maxEdges = 50
 
-	// 1. Fetch anchor IDs — single query
+	if page < 1 {
+		page = 1
+	}
+	offset := (page - 1) * anchorLimit
+
+	// 1. Fetch anchor IDs for this page (fetch one extra to detect has_more)
 	var anchors []struct {
 		TransactionID string `gorm:"column:transaction_id"`
 	}
 	if err := database.ReadDB.Table("TransactionInfo").
 		Select("transaction_id").
 		Order("epoch DESC").
-		Limit(anchorLimit).
+		Limit(anchorLimit + 1).
+		Offset(offset).
 		Scan(&anchors).Error; err != nil {
 		return model.DAGResponse{}, err
 	}
+
+	hasMore := len(anchors) > anchorLimit
+	if hasMore {
+		anchors = anchors[:anchorLimit]
+	}
 	if len(anchors) == 0 {
-		return model.DAGResponse{Transactions: []models.TransactionInfo{}, Edges: []model.DAGEdge{}}, nil
+		return model.DAGResponse{Transactions: []model.DAGTxn{}, HasMore: false}, nil
 	}
 
 	anchorIDs := make([]string, len(anchors))
@@ -212,14 +207,8 @@ func GetDAGTransactions() (model.DAGResponse, error) {
 		anchorIDs[i] = a.TransactionID
 	}
 
-	// 2. Single recursive CTE from all anchors simultaneously.
-	// UNION deduplicates at each recursion level, preventing re-traversal.
-	// Indexes on transaction_id and previous_transaction_id make the join fast.
-	type edgeRow struct {
-		ChildTxnID  string `gorm:"column:child_txn_id"`
-		ParentTxnID string `gorm:"column:parent_txn_id"`
-	}
-	var edges []edgeRow
+	// 2. Single recursive CTE — walk all anchors simultaneously, capped at maxEdges
+	var txns []model.DAGTxn
 	if err := database.ReadDB.Raw(`
 		WITH RECURSIVE dag_edges AS (
 			SELECT
@@ -244,51 +233,15 @@ func GetDAGTransactions() (model.DAGResponse, error) {
 			  AND tc.previous_transaction_id <> ''
 		)
 		SELECT DISTINCT child_txn_id, parent_txn_id FROM dag_edges
-	`, anchorIDs, depth).Scan(&edges).Error; err != nil {
+		LIMIT ?
+	`, anchorIDs, depth, maxEdges).Scan(&txns).Error; err != nil {
 		return model.DAGResponse{}, err
-	}
-
-	// 3. Collect unique node IDs (anchors + all edge endpoints), capped at maxNodes
-	seen := make(map[string]struct{}, maxNodes)
-	for _, id := range anchorIDs {
-		seen[id] = struct{}{}
-	}
-	for _, e := range edges {
-		if len(seen) >= maxNodes {
-			break
-		}
-		seen[e.ChildTxnID] = struct{}{}
-		seen[e.ParentTxnID] = struct{}{}
-	}
-
-	allIDs := make([]string, 0, len(seen))
-	for id := range seen {
-		allIDs = append(allIDs, id)
-	}
-
-	// 4. Fetch TransactionInfo for all nodes — single query
-	var txns []models.TransactionInfo
-	if err := database.ReadDB.Table("TransactionInfo").
-		Where("transaction_id IN ?", allIDs).
-		Order("epoch DESC").
-		Find(&txns).Error; err != nil {
-		return model.DAGResponse{}, err
-	}
-
-	dagEdges := make([]model.DAGEdge, 0, len(edges))
-	for _, e := range edges {
-		// Only include edges where both endpoints are in our node set
-		_, childOk := seen[e.ChildTxnID]
-		_, parentOk := seen[e.ParentTxnID]
-		if childOk && parentOk {
-			dagEdges = append(dagEdges, model.DAGEdge{From: e.ChildTxnID, To: e.ParentTxnID})
-		}
 	}
 
 	if txns == nil {
-		txns = []models.TransactionInfo{}
+		txns = []model.DAGTxn{}
 	}
-	return model.DAGResponse{Transactions: txns, Edges: dagEdges}, nil
+	return model.DAGResponse{Transactions: txns, HasMore: hasMore}, nil
 }
 
 func GetTransactionInfoList(limit, page int) ([]models.TransactionInfo, int64, error) {

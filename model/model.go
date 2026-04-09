@@ -2,7 +2,6 @@ package model
 
 import (
 	"encoding/json"
-	"explorer-server/database/models"
 )
 
 // --- Paginated Response Wrappers ---
@@ -143,13 +142,16 @@ type DAGEdge struct {
 	To   string `json:"to"`
 }
 
-// DAGResponse is returned by /api/dagtxn/{txnID}.
-// Transactions contains all nodes (including the anchor), Edges contains all directed links.
-// For infinite scroll: use the oldest transaction in the current response as the
-// anchor for the next call to extend the graph further back.
+// DAGTxn is a single transaction link: the txn hash and its direct parent hash.
+type DAGTxn struct {
+	TransactionID         string `json:"transaction_id"          gorm:"column:child_txn_id"`
+	PreviousTransactionID string `json:"previous_transaction_id" gorm:"column:parent_txn_id"`
+}
+
+// DAGResponse is returned by /api/dagtxns.
 type DAGResponse struct {
-	Transactions []models.TransactionInfo `json:"transactions"`
-	Edges        []DAGEdge                `json:"edges"`
+	Transactions []DAGTxn `json:"transactions"`
+	HasMore      bool     `json:"has_more"`
 }
 
 type FTHolder struct {

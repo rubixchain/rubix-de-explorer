@@ -254,11 +254,11 @@ func GetDAGTxnHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(data)
 }
 
-// GetDAGTransactionsHandler builds a DAG of up to 500 nodes.
-// Fetches latest transactions in batches of 50, walks ancestors up to depth 7,
-// and keeps adding batches until 500 total nodes are collected.
+// GetDAGTransactionsHandler returns 20 anchor txns + their ancestors (depth 4) for the given page.
+// Query param: page (default 1). Response includes has_more to drive the "Load More" button.
 func GetDAGTransactionsHandler(w http.ResponseWriter, r *http.Request) {
-	data, err := api.GetDAGTransactions()
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	data, err := api.GetDAGTransactions(page)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
