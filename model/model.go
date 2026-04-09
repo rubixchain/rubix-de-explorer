@@ -142,10 +142,10 @@ type DAGEdge struct {
 	To   string `json:"to"`
 }
 
-// DAGTxn is a single transaction link: the txn hash and its direct parent hash.
+// DAGTxn is a transaction node with up to 20 unique parent transaction IDs.
 type DAGTxn struct {
-	TransactionID         string `json:"transaction_id"          gorm:"column:child_txn_id"`
-	PreviousTransactionID string `json:"previous_transaction_id" gorm:"column:parent_txn_id"`
+	TransactionID          string   `json:"transaction_id"`
+	PreviousTransactionIDs []string `json:"previous_transaction_ids"`
 }
 
 // DAGResponse is returned by /api/dagtxns.

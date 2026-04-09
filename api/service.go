@@ -160,10 +160,16 @@ func GetDAGFromTxn(txnID string, depth int) (model.DAGResponse, error) {
 		txnIDs = append(txnIDs, id)
 	}
 
-	// Build DAGTxn pairs from edges
-	txns := make([]model.DAGTxn, len(edges))
-	for i, e := range edges {
-		txns[i] = model.DAGTxn{TransactionID: e.ChildTxnID, PreviousTransactionID: e.ParentTxnID}
+	// Build DAGTxn: group parents by child, cap at 20
+	parentMap := make(map[string][]string)
+	for _, e := range edges {
+		if len(parentMap[e.ChildTxnID]) < 20 {
+			parentMap[e.ChildTxnID] = append(parentMap[e.ChildTxnID], e.ParentTxnID)
+		}
+	}
+	txns := make([]model.DAGTxn, 0, len(parentMap))
+	for childID, parents := range parentMap {
+		txns = append(txns, model.DAGTxn{TransactionID: childID, PreviousTransactionIDs: parents})
 	}
 	return model.DAGResponse{Transactions: txns, HasMore: false}, nil
 }
@@ -191,14 +197,13 @@ func GetDAGTransactions(offset int) (model.DAGResponse, error) {
 		ParentTxnID string `gorm:"column:parent_txn_id"`
 	}
 
-	// txnMap: txn_id -> previous_txn_id ("" if genesis/unknown)
-	// Using a map ensures every txn appears exactly once.
-	txnMap := make(map[string]string, targetTxns)
+	// txnParents: txn_id -> unique parent IDs (up to 20)
+	txnParents := make(map[string][]string, targetTxns)
 
 	currentOffset := offset
 	hasMore := false
 
-	for len(txnMap) < targetTxns {
+	for len(txnParents) < targetTxns {
 		// Fetch next batch of anchor IDs (one extra to detect has_more)
 		var anchors []struct {
 			TransactionID string `gorm:"column:transaction_id"`
@@ -222,11 +227,11 @@ func GetDAGTransactions(offset int) (model.DAGResponse, error) {
 		}
 		currentOffset += len(anchors)
 
-		// Add all anchors with empty previous — BFS will fill them in if chain exists
+		// Register all anchors (empty parents for now)
 		frontier := make([]string, 0, len(anchors))
 		for _, a := range anchors {
-			if _, seen := txnMap[a.TransactionID]; !seen {
-				txnMap[a.TransactionID] = ""
+			if _, seen := txnParents[a.TransactionID]; !seen {
+				txnParents[a.TransactionID] = []string{}
 				frontier = append(frontier, a.TransactionID)
 			}
 		}
@@ -247,46 +252,57 @@ func GetDAGTransactions(offset int) (model.DAGResponse, error) {
 				break
 			}
 
-			// Collect unique parents, capped at levelCap
-			parentSeen := make(map[string]struct{}, levelCap)
+			// For each child: collect up to 20 unique parents
+			// childParents tracks which parents we've already assigned per child this level
+			childParents := make(map[string]map[string]struct{})
 			for _, row := range rows {
-				if _, ok := parentSeen[row.ParentTxnID]; !ok {
-					if len(parentSeen) >= levelCap {
-						break
+				if _, ok := childParents[row.ChildTxnID]; !ok {
+					childParents[row.ChildTxnID] = make(map[string]struct{})
+				}
+				if len(childParents[row.ChildTxnID]) < levelCap {
+					childParents[row.ChildTxnID][row.ParentTxnID] = struct{}{}
+				}
+			}
+
+			// Collect all unique parents across all children for next frontier
+			nextParentSeen := make(map[string]struct{})
+			for childID, parents := range childParents {
+				// Merge into txnParents, keeping total per txn <= 20
+				existing := txnParents[childID]
+				existingSet := make(map[string]struct{}, len(existing))
+				for _, p := range existing {
+					existingSet[p] = struct{}{}
+				}
+				for parentID := range parents {
+					if _, alreadyHave := existingSet[parentID]; !alreadyHave && len(existing) < levelCap {
+						existing = append(existing, parentID)
+						existingSet[parentID] = struct{}{}
 					}
-					parentSeen[row.ParentTxnID] = struct{}{}
+					// Register parent as a node and add to next frontier
+					if _, seen := txnParents[parentID]; !seen {
+						txnParents[parentID] = []string{}
+						nextParentSeen[parentID] = struct{}{}
+					}
 				}
+				txnParents[childID] = existing
 			}
 
-			// Update child->parent mapping; add new parent nodes
-			for _, row := range rows {
-				if _, parentOk := parentSeen[row.ParentTxnID]; !parentOk {
-					continue
-				}
-				// Fill in previous_transaction_id for this child if not set yet
-				if prev, exists := txnMap[row.ChildTxnID]; exists && prev == "" {
-					txnMap[row.ChildTxnID] = row.ParentTxnID
-				}
-				// Add parent as a new node if not seen
-				if _, seen := txnMap[row.ParentTxnID]; !seen {
-					txnMap[row.ParentTxnID] = ""
-				}
+			frontier = make([]string, 0, len(nextParentSeen))
+			for pid := range nextParentSeen {
+				frontier = append(frontier, pid)
 			}
-
-			nextFrontier := make([]string, 0, len(parentSeen))
-			for pid := range parentSeen {
-				nextFrontier = append(nextFrontier, pid)
-			}
-			frontier = nextFrontier
 		}
 	}
 
 	// Build output slice from map
-	allTxns := make([]model.DAGTxn, 0, len(txnMap))
-	for txnID, prevID := range txnMap {
+	allTxns := make([]model.DAGTxn, 0, len(txnParents))
+	for txnID, parents := range txnParents {
+		if parents == nil {
+			parents = []string{}
+		}
 		allTxns = append(allTxns, model.DAGTxn{
-			TransactionID:         txnID,
-			PreviousTransactionID: prevID,
+			TransactionID:          txnID,
+			PreviousTransactionIDs: parents,
 		})
 	}
 
