@@ -307,6 +307,44 @@ func GetDAGTransactions() (model.DAGResponse, error) {
 		}
 	}
 
+	// --- Fallback: batch-fetch parents from TransactionInfo.tokens JSONB
+	// for any node that TokenChain returned no parents for ---
+	missingParents := make([]string, 0)
+	for _, id := range orderedIDs {
+		if len(txnParents[id]) == 0 {
+			missingParents = append(missingParents, id)
+		}
+	}
+	if len(missingParents) > 0 {
+		var fallbackRows []dagEdgeRow
+		if err := database.ReadDB.Raw(`
+			SELECT DISTINCT
+				transaction_id AS child_txn_id,
+				elem->>'previousTransactionID' AS parent_txn_id
+			FROM "TransactionInfo",
+			     jsonb_array_elements(
+			         COALESCE(tokens->'rbt', '[]'::jsonb) ||
+			         COALESCE(tokens->'ft', '[]'::jsonb) ||
+			         COALESCE(tokens->'nft', '[]'::jsonb) ||
+			         COALESCE(tokens->'smartContract', '[]'::jsonb)
+			     ) AS elem
+			WHERE transaction_id IN ?
+			  AND elem->>'previousTransactionID' IS NOT NULL
+			  AND elem->>'previousTransactionID' <> ''
+		`, missingParents).Scan(&fallbackRows).Error; err == nil {
+			for _, row := range fallbackRows {
+				if len(txnParents[row.ChildTxnID]) < maxParents {
+					txnParents[row.ChildTxnID] = append(txnParents[row.ChildTxnID], row.ParentTxnID)
+				}
+				// Register the parent node if not already known
+				if _, seen := txnParents[row.ParentTxnID]; !seen {
+					txnParents[row.ParentTxnID] = []string{}
+					orderedIDs = append(orderedIDs, row.ParentTxnID)
+				}
+			}
+		}
+	}
+
 	txns := make([]model.DAGTxn, 0, len(orderedIDs))
 	for _, txnID := range orderedIDs {
 		txns = append(txns, model.DAGTxn{
