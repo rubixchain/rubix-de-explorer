@@ -317,6 +317,39 @@ func GetDAGTransactions() (model.DAGResponse, error) {
 	return model.DAGResponse{Transactions: txns}, nil
 }
 
+// getParentsFromTransactionInfo extracts previousTransactionID values from
+// TransactionInfo.tokens JSONB for a given transaction. Used as a fallback
+// when TokenChain has no entries for the transaction.
+func getParentsFromTransactionInfo(txnID string, maxParents int) ([]string, error) {
+	var rows []struct {
+		ParentTxnID string `gorm:"column:parent_txn_id"`
+	}
+	err := database.ReadDB.Raw(`
+		SELECT DISTINCT elem->>'previousTransactionID' AS parent_txn_id
+		FROM "TransactionInfo",
+		     jsonb_array_elements(
+		         COALESCE(tokens->'rbt', '[]'::jsonb) ||
+		         COALESCE(tokens->'ft', '[]'::jsonb) ||
+		         COALESCE(tokens->'nft', '[]'::jsonb) ||
+		         COALESCE(tokens->'smartContract', '[]'::jsonb)
+		     ) AS elem
+		WHERE transaction_id = ?
+		  AND elem->>'previousTransactionID' IS NOT NULL
+		  AND elem->>'previousTransactionID' <> ''
+		LIMIT ?
+	`, txnID, maxParents).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	parents := make([]string, 0, len(rows))
+	for _, r := range rows {
+		if r.ParentTxnID != "" {
+			parents = append(parents, r.ParentTxnID)
+		}
+	}
+	return parents, nil
+}
+
 // GetDAGWithSearch returns the normal DAG (same as GetDAGTransactions) merged with
 // the searched txnID and its ancestors up to depth 5 (max 6 parents per level).
 // The searched txn and its ancestors are prepended so they appear first.
@@ -375,6 +408,21 @@ func GetDAGWithSearch(searchTxnID string) (model.DAGResponse, error) {
 		frontier = make([]string, 0, len(nextFrontier))
 		for id := range nextFrontier {
 			frontier = append(frontier, id)
+		}
+	}
+
+	// --- Fallback: if TokenChain returned no parents for the searched txn,
+	// try parsing TransactionInfo.tokens JSONB directly ---
+	if len(searchParents[searchTxnID]) == 0 {
+		parents, ferr := getParentsFromTransactionInfo(searchTxnID, maxParents)
+		if ferr == nil && len(parents) > 0 {
+			searchParents[searchTxnID] = parents
+			for _, p := range parents {
+				if _, seen := searchParents[p]; !seen {
+					searchParents[p] = []string{}
+					searchOrdered = append(searchOrdered, p)
+				}
+			}
 		}
 	}
 
