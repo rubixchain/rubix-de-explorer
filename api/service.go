@@ -218,9 +218,9 @@ func GetDAGTransactions() (model.DAGResponse, error) {
 	const depth = 5
 	const targetNodes = 500
 
-	const maxParents = 6
+	const maxParents = 5
 
-	// txnParents: txn_id -> unique parent IDs (max 6)
+	// txnParents: txn_id -> unique parent IDs (max 5)
 	// orderedIDs: insertion-ordered list of txn IDs — anchors first (epoch DESC), then parents
 	// queriedFrontier: txn IDs whose parents have already been fetched — prevents re-querying
 	txnParents := make(map[string][]string, targetNodes)
@@ -257,12 +257,14 @@ func GetDAGTransactions() (model.DAGResponse, error) {
 			}
 		}
 
-		// BFS level by level
+		// BFS level by level, with JSONB fallback at each level
 		for d := 0; d < depth && len(frontier) > 0; d++ {
-			// Mark frontier as queried before fetching
 			for _, id := range frontier {
 				queriedFrontier[id] = struct{}{}
 			}
+
+			// Track which frontier nodes got at least one parent from TokenChain
+			gotParents := make(map[string]struct{})
 
 			var rows []dagEdgeRow
 			if err := database.ReadDB.Raw(`
@@ -274,9 +276,6 @@ func GetDAGTransactions() (model.DAGResponse, error) {
 			`, frontier).Scan(&rows).Error; err != nil {
 				return model.DAGResponse{}, err
 			}
-			if len(rows) == 0 {
-				break
-			}
 
 			nextFrontier := make(map[string]struct{})
 			for _, row := range rows {
@@ -285,12 +284,11 @@ func GetDAGTransactions() (model.DAGResponse, error) {
 					continue
 				}
 				seenEdges[edgeKey] = struct{}{}
+				gotParents[row.ChildTxnID] = struct{}{}
 
-				// Add parent to child's list (max 6)
 				if len(txnParents[row.ChildTxnID]) < maxParents {
 					txnParents[row.ChildTxnID] = append(txnParents[row.ChildTxnID], row.ParentTxnID)
 				}
-				// Register parent node; queue it for next BFS level if not yet queried
 				if _, seen := txnParents[row.ParentTxnID]; !seen {
 					txnParents[row.ParentTxnID] = []string{}
 					orderedIDs = append(orderedIDs, row.ParentTxnID)
@@ -300,47 +298,54 @@ func GetDAGTransactions() (model.DAGResponse, error) {
 				}
 			}
 
+			// Fallback: for frontier nodes with no TokenChain parents, query JSONB
+			noParents := make([]string, 0)
+			for _, id := range frontier {
+				if _, ok := gotParents[id]; !ok {
+					noParents = append(noParents, id)
+				}
+			}
+			if len(noParents) > 0 {
+				var fallbackRows []dagEdgeRow
+				if err := database.ReadDB.Raw(`
+					SELECT DISTINCT
+						transaction_id AS child_txn_id,
+						elem->>'previousTransactionID' AS parent_txn_id
+					FROM "TransactionInfo",
+					     jsonb_array_elements(
+					         COALESCE(tokens->'rbt', '[]'::jsonb) ||
+					         COALESCE(tokens->'ft', '[]'::jsonb) ||
+					         COALESCE(tokens->'nft', '[]'::jsonb) ||
+					         COALESCE(tokens->'smartContract', '[]'::jsonb)
+					     ) AS elem
+					WHERE transaction_id IN ?
+					  AND elem->>'previousTransactionID' IS NOT NULL
+					  AND elem->>'previousTransactionID' <> ''
+				`, noParents).Scan(&fallbackRows).Error; err == nil {
+					for _, row := range fallbackRows {
+						edgeKey := row.ChildTxnID + "|" + row.ParentTxnID
+						if _, exists := seenEdges[edgeKey]; exists {
+							continue
+						}
+						seenEdges[edgeKey] = struct{}{}
+
+						if len(txnParents[row.ChildTxnID]) < maxParents {
+							txnParents[row.ChildTxnID] = append(txnParents[row.ChildTxnID], row.ParentTxnID)
+						}
+						if _, seen := txnParents[row.ParentTxnID]; !seen {
+							txnParents[row.ParentTxnID] = []string{}
+							orderedIDs = append(orderedIDs, row.ParentTxnID)
+						}
+						if _, queried := queriedFrontier[row.ParentTxnID]; !queried {
+							nextFrontier[row.ParentTxnID] = struct{}{}
+						}
+					}
+				}
+			}
+
 			frontier = make([]string, 0, len(nextFrontier))
 			for id := range nextFrontier {
 				frontier = append(frontier, id)
-			}
-		}
-	}
-
-	// --- Fallback: batch-fetch parents from TransactionInfo.tokens JSONB
-	// for any node that TokenChain returned no parents for ---
-	missingParents := make([]string, 0)
-	for _, id := range orderedIDs {
-		if len(txnParents[id]) == 0 {
-			missingParents = append(missingParents, id)
-		}
-	}
-	if len(missingParents) > 0 {
-		var fallbackRows []dagEdgeRow
-		if err := database.ReadDB.Raw(`
-			SELECT DISTINCT
-				transaction_id AS child_txn_id,
-				elem->>'previousTransactionID' AS parent_txn_id
-			FROM "TransactionInfo",
-			     jsonb_array_elements(
-			         COALESCE(tokens->'rbt', '[]'::jsonb) ||
-			         COALESCE(tokens->'ft', '[]'::jsonb) ||
-			         COALESCE(tokens->'nft', '[]'::jsonb) ||
-			         COALESCE(tokens->'smartContract', '[]'::jsonb)
-			     ) AS elem
-			WHERE transaction_id IN ?
-			  AND elem->>'previousTransactionID' IS NOT NULL
-			  AND elem->>'previousTransactionID' <> ''
-		`, missingParents).Scan(&fallbackRows).Error; err == nil {
-			for _, row := range fallbackRows {
-				if len(txnParents[row.ChildTxnID]) < maxParents {
-					txnParents[row.ChildTxnID] = append(txnParents[row.ChildTxnID], row.ParentTxnID)
-				}
-				// Register the parent node if not already known
-				if _, seen := txnParents[row.ParentTxnID]; !seen {
-					txnParents[row.ParentTxnID] = []string{}
-					orderedIDs = append(orderedIDs, row.ParentTxnID)
-				}
 			}
 		}
 	}
