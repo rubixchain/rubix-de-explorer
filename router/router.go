@@ -49,6 +49,7 @@ func NewRouter() *mux.Router {
 	// Latest transactions
 	r.HandleFunc("/api/get-latest-transactions", handlers.GetLatestTransactionsListHandler).Methods(http.MethodGet)
 	r.HandleFunc("/api/dagtxns", handlers.GetDAGTransactionsHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/dagtxns/search", handlers.GetDAGWithSearchHandler).Methods(http.MethodGet)
 	r.HandleFunc("/api/dagtxn/{txnID}", handlers.GetDAGTxnHandler).Methods(http.MethodGet)
 
 	// Top Holders

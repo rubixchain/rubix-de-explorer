@@ -317,6 +317,94 @@ func GetDAGTransactions() (model.DAGResponse, error) {
 	return model.DAGResponse{Transactions: txns}, nil
 }
 
+// GetDAGWithSearch returns the normal DAG (same as GetDAGTransactions) merged with
+// the searched txnID and its ancestors up to depth 5 (max 6 parents per level).
+// The searched txn and its ancestors are prepended so they appear first.
+func GetDAGWithSearch(searchTxnID string) (model.DAGResponse, error) {
+	const depth = 5
+	const maxParents = 6
+
+	// --- Step 1: BFS from searched txnID ---
+	searchParents := make(map[string][]string)
+	searchOrdered := make([]string, 0)
+	searchQueried := make(map[string]struct{})
+	searchEdges := make(map[string]struct{})
+
+	// Register the searched txn itself
+	searchParents[searchTxnID] = []string{}
+	searchOrdered = append(searchOrdered, searchTxnID)
+	frontier := []string{searchTxnID}
+
+	for d := 0; d < depth && len(frontier) > 0; d++ {
+		for _, id := range frontier {
+			searchQueried[id] = struct{}{}
+		}
+		var rows []dagEdgeRow
+		if err := database.ReadDB.Raw(`
+			SELECT DISTINCT transaction_id AS child_txn_id, previous_transaction_id AS parent_txn_id
+			FROM "TokenChain"
+			WHERE transaction_id IN ?
+			  AND previous_transaction_id IS NOT NULL
+			  AND previous_transaction_id <> ''
+		`, frontier).Scan(&rows).Error; err != nil {
+			return model.DAGResponse{}, err
+		}
+		if len(rows) == 0 {
+			break
+		}
+
+		nextFrontier := make(map[string]struct{})
+		for _, row := range rows {
+			edgeKey := row.ChildTxnID + "|" + row.ParentTxnID
+			if _, exists := searchEdges[edgeKey]; exists {
+				continue
+			}
+			searchEdges[edgeKey] = struct{}{}
+
+			if len(searchParents[row.ChildTxnID]) < maxParents {
+				searchParents[row.ChildTxnID] = append(searchParents[row.ChildTxnID], row.ParentTxnID)
+			}
+			if _, seen := searchParents[row.ParentTxnID]; !seen {
+				searchParents[row.ParentTxnID] = []string{}
+				searchOrdered = append(searchOrdered, row.ParentTxnID)
+			}
+			if _, queried := searchQueried[row.ParentTxnID]; !queried {
+				nextFrontier[row.ParentTxnID] = struct{}{}
+			}
+		}
+		frontier = make([]string, 0, len(nextFrontier))
+		for id := range nextFrontier {
+			frontier = append(frontier, id)
+		}
+	}
+
+	// --- Step 2: Get the normal DAG ---
+	baseDAG, err := GetDAGTransactions()
+	if err != nil {
+		return model.DAGResponse{}, err
+	}
+
+	// --- Step 3: Merge — search txn + ancestors first, then base DAG deduplicated ---
+	merged := make([]model.DAGTxn, 0, len(searchOrdered)+len(baseDAG.Transactions))
+	seen := make(map[string]struct{}, len(searchOrdered)+len(baseDAG.Transactions))
+
+	for _, txnID := range searchOrdered {
+		merged = append(merged, model.DAGTxn{
+			TransactionID:          txnID,
+			PreviousTransactionIDs: searchParents[txnID],
+		})
+		seen[txnID] = struct{}{}
+	}
+	for _, t := range baseDAG.Transactions {
+		if _, exists := seen[t.TransactionID]; !exists {
+			merged = append(merged, t)
+			seen[t.TransactionID] = struct{}{}
+		}
+	}
+
+	return model.DAGResponse{Transactions: merged}, nil
+}
+
 func GetTransactionInfoList(limit, page int) ([]models.TransactionInfo, int64, error) {
 	if page < 1 {
 		page = 1
