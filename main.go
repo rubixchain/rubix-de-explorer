@@ -102,7 +102,11 @@ func main() {
 	// HTTP router + CORS
 	// --------------------------------------------------
 	r := router.NewRouter()
-	handler := cors.Default().Handler(r)
+	handler := cors.New(cors.Options{
+		AllowedOrigins: []string{"*"},
+		AllowedMethods: []string{"GET", "POST", "OPTIONS"},
+		AllowedHeaders: []string{"Content-Type", "Authorization"},
+	}).Handler(r)
 
 	// Port
 	port := os.Getenv("PORT")
