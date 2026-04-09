@@ -282,6 +282,23 @@ func GetDAGTransactionsHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(data)
 }
 
+// GetDAGWithSearchHandler returns the full DAG merged with the searched txn's ancestor chain.
+// Query param: txnID (required).
+func GetDAGWithSearchHandler(w http.ResponseWriter, r *http.Request) {
+	txnID := r.URL.Query().Get("txnID")
+	if txnID == "" {
+		http.Error(w, `{"error":"txnID parameter is required"}`, http.StatusBadRequest)
+		return
+	}
+	data, err := api.GetDAGWithSearch(txnID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(data)
+}
+
 // GetTransactionInfoHandler returns details for a single transaction
 func GetTxnsByDIDHandler(w http.ResponseWriter, r *http.Request) {
 	did := r.URL.Query().Get("did")
