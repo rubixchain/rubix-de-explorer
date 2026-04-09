@@ -168,20 +168,22 @@ func GetDAGFromTxn(txnID string, depth int) (model.DAGResponse, error) {
 	return model.DAGResponse{Transactions: txns, HasMore: false}, nil
 }
 
-// GetDAGTransactions fetches 20 anchor txns for the given page, walks their
-// ancestors up to depth 4, and returns at most 50 (txn_hash, prev_txn_hash)
-// pairs. has_more is true when there are more anchor pages available.
+// GetDAGTransactions fetches 50 latest anchor txns (paginated), then walks
+// their ancestor chain level by level up to depth 5. At each level, unique
+// parent txn IDs are capped at 20 — only edges pointing to those 20 parents
+// are included, and only those 20 become the frontier for the next level.
+// This is done with one simple DB query per level (max 6 total round trips).
 func GetDAGTransactions(page int) (model.DAGResponse, error) {
-	const anchorLimit = 20
+	const anchorLimit = 50
 	const depth = 5
-	const maxEdges = 50
+	const levelCap = 20
 
 	if page < 1 {
 		page = 1
 	}
 	offset := (page - 1) * anchorLimit
 
-	// 1. Fetch anchor IDs for this page (fetch one extra to detect has_more)
+	// 1. Fetch anchor IDs (one extra to detect has_more)
 	var anchors []struct {
 		TransactionID string `gorm:"column:transaction_id"`
 	}
@@ -202,46 +204,65 @@ func GetDAGTransactions(page int) (model.DAGResponse, error) {
 		return model.DAGResponse{Transactions: []model.DAGTxn{}, HasMore: false}, nil
 	}
 
-	anchorIDs := make([]string, len(anchors))
+	frontier := make([]string, len(anchors))
 	for i, a := range anchors {
-		anchorIDs[i] = a.TransactionID
+		frontier[i] = a.TransactionID
 	}
 
-	// 2. Single recursive CTE — walk all anchors simultaneously, capped at maxEdges
-	var txns []model.DAGTxn
-	if err := database.ReadDB.Raw(`
-		WITH RECURSIVE dag_edges AS (
-			SELECT
-				transaction_id          AS child_txn_id,
-				previous_transaction_id AS parent_txn_id,
-				1                       AS depth
+	type edgeRow struct {
+		ChildTxnID  string `gorm:"column:child_txn_id"`
+		ParentTxnID string `gorm:"column:parent_txn_id"`
+	}
+
+	var allTxns []model.DAGTxn
+
+	// 2. BFS level by level — one DB query per level, cap parents at 20
+	for d := 0; d < depth && len(frontier) > 0; d++ {
+		var rows []edgeRow
+		if err := database.ReadDB.Raw(`
+			SELECT DISTINCT transaction_id AS child_txn_id, previous_transaction_id AS parent_txn_id
 			FROM "TokenChain"
 			WHERE transaction_id IN ?
 			  AND previous_transaction_id IS NOT NULL
 			  AND previous_transaction_id <> ''
+		`, frontier).Scan(&rows).Error; err != nil {
+			return model.DAGResponse{}, err
+		}
+		if len(rows) == 0 {
+			break
+		}
 
-			UNION
+		// Collect unique parents, capped at levelCap
+		parentSeen := make(map[string]struct{}, levelCap)
+		for _, row := range rows {
+			if _, ok := parentSeen[row.ParentTxnID]; !ok {
+				if len(parentSeen) >= levelCap {
+					break
+				}
+				parentSeen[row.ParentTxnID] = struct{}{}
+			}
+		}
 
-			SELECT
-				tc.transaction_id,
-				tc.previous_transaction_id,
-				de.depth + 1
-			FROM "TokenChain" tc
-			INNER JOIN dag_edges de ON tc.transaction_id = de.parent_txn_id
-			WHERE de.depth < ?
-			  AND tc.previous_transaction_id IS NOT NULL
-			  AND tc.previous_transaction_id <> ''
-		)
-		SELECT DISTINCT child_txn_id, parent_txn_id FROM dag_edges
-		LIMIT ?
-	`, anchorIDs, depth, maxEdges).Scan(&txns).Error; err != nil {
-		return model.DAGResponse{}, err
+		// Only include edges whose parent is within the cap
+		nextFrontier := make([]string, 0, len(parentSeen))
+		for _, row := range rows {
+			if _, ok := parentSeen[row.ParentTxnID]; ok {
+				allTxns = append(allTxns, model.DAGTxn{
+					TransactionID:         row.ChildTxnID,
+					PreviousTransactionID: row.ParentTxnID,
+				})
+			}
+		}
+		for pid := range parentSeen {
+			nextFrontier = append(nextFrontier, pid)
+		}
+		frontier = nextFrontier
 	}
 
-	if txns == nil {
-		txns = []model.DAGTxn{}
+	if allTxns == nil {
+		allTxns = []model.DAGTxn{}
 	}
-	return model.DAGResponse{Transactions: txns, HasMore: hasMore}, nil
+	return model.DAGResponse{Transactions: allTxns, HasMore: hasMore}, nil
 }
 
 func GetTransactionInfoList(limit, page int) ([]models.TransactionInfo, int64, error) {
