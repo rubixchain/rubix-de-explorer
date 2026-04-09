@@ -110,66 +110,87 @@ func GetDIDCount() (int64, error) {
 // traversing the TokenChain backwards via previous_transaction_id.
 // Nodes are all unique TransactionInfo records. Edges are directed child → parent links.
 func GetDAGFromTxn(txnID string, depth int) (model.DAGResponse, error) {
+	const maxPrevParents = 20
+
 	if depth <= 0 || depth > 100 {
 		depth = 100
 	}
 
-	// Recursive CTE: walk backwards through TokenChain up to `depth` hops.
-	// UNION (not UNION ALL) deduplicates rows and prevents cycles.
 	type edgeRow struct {
 		ChildTxnID  string `gorm:"column:child_txn_id"`
 		ParentTxnID string `gorm:"column:parent_txn_id"`
 	}
+
 	var edges []edgeRow
 	if err := database.ReadDB.Raw(`
 		WITH RECURSIVE dag_edges AS (
-			SELECT DISTINCT
-				transaction_id          AS child_txn_id,
-				previous_transaction_id AS parent_txn_id,
-				1                       AS depth
-			FROM "TokenChain"
-			WHERE transaction_id = ?
-			  AND previous_transaction_id IS NOT NULL
-			  AND previous_transaction_id <> ''
+
+			-- Base case (limit parents)
+			SELECT child_txn_id, parent_txn_id, depth FROM (
+				SELECT
+					transaction_id AS child_txn_id,
+					previous_transaction_id AS parent_txn_id,
+					1 AS depth,
+					ROW_NUMBER() OVER (
+						PARTITION BY transaction_id 
+						ORDER BY transaction_id
+					) as rn
+				FROM "TokenChain"
+				WHERE transaction_id = ?
+				  AND previous_transaction_id IS NOT NULL
+				  AND previous_transaction_id <> ''
+			) t
+			WHERE rn <= ?
 
 			UNION
 
-			SELECT
-				tc.transaction_id,
-				tc.previous_transaction_id,
-				de.depth + 1
-			FROM "TokenChain" tc
-			INNER JOIN dag_edges de ON tc.transaction_id = de.parent_txn_id
-			WHERE de.depth < ?
-			  AND tc.previous_transaction_id IS NOT NULL
-			  AND tc.previous_transaction_id <> ''
+			-- Recursive step (limit parents per node)
+			SELECT child_txn_id, parent_txn_id, depth FROM (
+				SELECT
+					tc.transaction_id AS child_txn_id,
+					tc.previous_transaction_id AS parent_txn_id,
+					de.depth + 1 AS depth,
+					ROW_NUMBER() OVER (
+						PARTITION BY tc.transaction_id 
+						ORDER BY tc.transaction_id
+					) as rn
+				FROM "TokenChain" tc
+				INNER JOIN dag_edges de 
+					ON tc.transaction_id = de.parent_txn_id
+				WHERE de.depth < ?
+				  AND tc.previous_transaction_id IS NOT NULL
+				  AND tc.previous_transaction_id <> ''
+			) t
+			WHERE rn <= ?
 		)
+
 		SELECT DISTINCT child_txn_id, parent_txn_id FROM dag_edges
-	`, txnID, depth).Scan(&edges).Error; err != nil {
+	`, txnID, maxPrevParents, depth, maxPrevParents).Scan(&edges).Error; err != nil {
 		return model.DAGResponse{}, err
 	}
 
-	// Collect all unique txnIDs (anchor + all nodes from edges).
+	// Collect unique txn IDs
 	seen := map[string]struct{}{txnID: {}}
 	for _, e := range edges {
 		seen[e.ChildTxnID] = struct{}{}
 		seen[e.ParentTxnID] = struct{}{}
 	}
+
 	txnIDs := make([]string, 0, len(seen))
 	for id := range seen {
 		txnIDs = append(txnIDs, id)
 	}
 
-	// Fetch TransactionInfo for all collected txnIDs.
 	var txns []models.TransactionInfo
-	if err := database.ReadDB.Table("TransactionInfo").
-		Where("transaction_id IN ?", txnIDs).
-		Order("epoch DESC").
-		Find(&txns).Error; err != nil {
-		return model.DAGResponse{}, err
+	if len(txnIDs) > 0 {
+		if err := database.ReadDB.Table("TransactionInfo").
+			Where("transaction_id IN ?", txnIDs).
+			Order("epoch DESC").
+			Find(&txns).Error; err != nil {
+			return model.DAGResponse{}, err
+		}
 	}
 
-	// Build the DAGEdge slice for the response.
 	dagEdges := make([]model.DAGEdge, len(edges))
 	for i, e := range edges {
 		dagEdges[i] = model.DAGEdge{From: e.ChildTxnID, To: e.ParentTxnID}
@@ -178,7 +199,11 @@ func GetDAGFromTxn(txnID string, depth int) (model.DAGResponse, error) {
 	if txns == nil {
 		txns = []models.TransactionInfo{}
 	}
-	return model.DAGResponse{Transactions: txns, Edges: dagEdges}, nil
+
+	return model.DAGResponse{
+		Transactions: txns,
+		Edges:        dagEdges,
+	}, nil
 }
 
 // GetDAGTransactions builds a DAG by fetching the latest transactions as anchors
