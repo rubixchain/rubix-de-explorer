@@ -94,9 +94,9 @@ func (Token) TableName() string { return "Tokens" }
 type TokenChain struct {
 	ID                    uint64    `json:"id" gorm:"primaryKey;autoIncrement"`
 	TokenID               string    `json:"token_id" gorm:"column:token_id;index"`
-	TransactionID         string    `json:"transaction_id" gorm:"column:transaction_id"`
+	TransactionID         string    `json:"transaction_id" gorm:"column:transaction_id;index"`
 	Role                  int16     `json:"role" gorm:"column:role"`
-	PreviousTransactionID string    `json:"previous_transaction_id" gorm:"column:previous_transaction_id"`
+	PreviousTransactionID string    `json:"previous_transaction_id" gorm:"column:previous_transaction_id;index"`
 	CreatedAt             time.Time `json:"created_at" gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt             time.Time `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
 }

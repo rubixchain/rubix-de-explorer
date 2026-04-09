@@ -119,7 +119,7 @@ func main() {
 		Addr:           "0.0.0.0:" + port,
 		Handler:        handler,
 		ReadTimeout:    15 * time.Second,
-		WriteTimeout:   15 * time.Second,
+		WriteTimeout:   120 * time.Second,
 		MaxHeaderBytes: 1 << 20,
 	}
 

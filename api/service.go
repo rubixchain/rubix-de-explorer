@@ -181,117 +181,112 @@ func GetDAGFromTxn(txnID string, depth int) (model.DAGResponse, error) {
 	return model.DAGResponse{Transactions: txns, Edges: dagEdges}, nil
 }
 
-// GetDAGTransactions builds a DAG by fetching the latest transactions as anchors
-// and walking their ancestors up to the given depth. If the total node count is
-// below targetNodes, it fetches more anchors in batches and repeats until the
-// target is met or there are no more transactions to fetch.
+// GetDAGTransactions builds a DAG in two DB round trips:
+//  1. One recursive CTE from the latest 50 anchors, depth 7.
+//  2. One SELECT to fetch TransactionInfo for up to 500 unique node IDs.
 //
-// Fixed params: anchorBatch=50, depth=7, targetNodes=500.
+// The indexes on TokenChain(transaction_id) and TokenChain(previous_transaction_id)
+// are required for the recursive join to be fast.
 func GetDAGTransactions() (model.DAGResponse, error) {
-	const anchorBatch = 50
+	const anchorLimit = 50
 	const depth = 7
-	const targetNodes = 500
+	const maxNodes = 500
 
+	// 1. Fetch anchor IDs — single query
+	var anchors []struct {
+		TransactionID string `gorm:"column:transaction_id"`
+	}
+	if err := database.ReadDB.Table("TransactionInfo").
+		Select("transaction_id").
+		Order("epoch DESC").
+		Limit(anchorLimit).
+		Scan(&anchors).Error; err != nil {
+		return model.DAGResponse{}, err
+	}
+	if len(anchors) == 0 {
+		return model.DAGResponse{Transactions: []models.TransactionInfo{}, Edges: []model.DAGEdge{}}, nil
+	}
+
+	anchorIDs := make([]string, len(anchors))
+	for i, a := range anchors {
+		anchorIDs[i] = a.TransactionID
+	}
+
+	// 2. Single recursive CTE from all anchors simultaneously.
+	// UNION deduplicates at each recursion level, preventing re-traversal.
+	// Indexes on transaction_id and previous_transaction_id make the join fast.
 	type edgeRow struct {
 		ChildTxnID  string `gorm:"column:child_txn_id"`
 		ParentTxnID string `gorm:"column:parent_txn_id"`
 	}
+	var edges []edgeRow
+	if err := database.ReadDB.Raw(`
+		WITH RECURSIVE dag_edges AS (
+			SELECT
+				transaction_id          AS child_txn_id,
+				previous_transaction_id AS parent_txn_id,
+				1                       AS depth
+			FROM "TokenChain"
+			WHERE transaction_id = ANY(?)
+			  AND previous_transaction_id IS NOT NULL
+			  AND previous_transaction_id <> ''
 
-	seenNodes := make(map[string]struct{})
-	seenEdges := make(map[string]struct{})
-	var allEdges []edgeRow
-	offset := 0
+			UNION
 
-	for len(seenNodes) < targetNodes {
-		// Fetch next batch of anchor txn IDs
-		var anchors []struct {
-			TransactionID string `gorm:"column:transaction_id"`
-		}
-		if err := database.ReadDB.Table("TransactionInfo").
-			Select("transaction_id").
-			Order("epoch DESC").
-			Limit(anchorBatch).Offset(offset).
-			Scan(&anchors).Error; err != nil {
-			return model.DAGResponse{}, err
-		}
-		if len(anchors) == 0 {
-			break // no more txns
-		}
-		offset += len(anchors)
-
-		anchorIDs := make([]string, len(anchors))
-		for i, a := range anchors {
-			anchorIDs[i] = a.TransactionID
-			seenNodes[a.TransactionID] = struct{}{}
-		}
-
-		// Walk ancestors from this batch of anchors
-		var batchEdges []edgeRow
-		if err := database.ReadDB.Raw(`
-			WITH RECURSIVE dag_edges AS (
-				SELECT DISTINCT
-					transaction_id          AS child_txn_id,
-					previous_transaction_id AS parent_txn_id,
-					1                       AS depth
-				FROM "TokenChain"
-				WHERE transaction_id IN ?
-				  AND previous_transaction_id IS NOT NULL
-				  AND previous_transaction_id <> ''
-
-				UNION
-
-				SELECT
-					tc.transaction_id,
-					tc.previous_transaction_id,
-					de.depth + 1
-				FROM "TokenChain" tc
-				INNER JOIN dag_edges de ON tc.transaction_id = de.parent_txn_id
-				WHERE de.depth < ?
-				  AND tc.previous_transaction_id IS NOT NULL
-				  AND tc.previous_transaction_id <> ''
-			)
-			SELECT DISTINCT child_txn_id, parent_txn_id FROM dag_edges
-		`, anchorIDs, depth).Scan(&batchEdges).Error; err != nil {
-			return model.DAGResponse{}, err
-		}
-
-		for _, e := range batchEdges {
-			seenNodes[e.ChildTxnID] = struct{}{}
-			seenNodes[e.ParentTxnID] = struct{}{}
-			key := e.ChildTxnID + "|" + e.ParentTxnID
-			if _, exists := seenEdges[key]; !exists {
-				seenEdges[key] = struct{}{}
-				allEdges = append(allEdges, e)
-			}
-		}
+			SELECT
+				tc.transaction_id,
+				tc.previous_transaction_id,
+				de.depth + 1
+			FROM "TokenChain" tc
+			INNER JOIN dag_edges de ON tc.transaction_id = de.parent_txn_id
+			WHERE de.depth < ?
+			  AND tc.previous_transaction_id IS NOT NULL
+			  AND tc.previous_transaction_id <> ''
+		)
+		SELECT DISTINCT child_txn_id, parent_txn_id FROM dag_edges
+	`, anchorIDs, depth).Scan(&edges).Error; err != nil {
+		return model.DAGResponse{}, err
 	}
 
-	// Fetch TransactionInfo for all collected node IDs
-	allIDs := make([]string, 0, len(seenNodes))
-	for id := range seenNodes {
+	// 3. Collect unique node IDs (anchors + all edge endpoints), capped at maxNodes
+	seen := make(map[string]struct{}, maxNodes)
+	for _, id := range anchorIDs {
+		seen[id] = struct{}{}
+	}
+	for _, e := range edges {
+		if len(seen) >= maxNodes {
+			break
+		}
+		seen[e.ChildTxnID] = struct{}{}
+		seen[e.ParentTxnID] = struct{}{}
+	}
+
+	allIDs := make([]string, 0, len(seen))
+	for id := range seen {
 		allIDs = append(allIDs, id)
 	}
 
+	// 4. Fetch TransactionInfo for all nodes — single query
 	var txns []models.TransactionInfo
-	if len(allIDs) > 0 {
-		if err := database.ReadDB.Table("TransactionInfo").
-			Where("transaction_id IN ?", allIDs).
-			Order("epoch DESC").
-			Find(&txns).Error; err != nil {
-			return model.DAGResponse{}, err
-		}
+	if err := database.ReadDB.Table("TransactionInfo").
+		Where("transaction_id = ANY(?)", allIDs).
+		Order("epoch DESC").
+		Find(&txns).Error; err != nil {
+		return model.DAGResponse{}, err
 	}
 
-	dagEdges := make([]model.DAGEdge, len(allEdges))
-	for i, e := range allEdges {
-		dagEdges[i] = model.DAGEdge{From: e.ChildTxnID, To: e.ParentTxnID}
+	dagEdges := make([]model.DAGEdge, 0, len(edges))
+	for _, e := range edges {
+		// Only include edges where both endpoints are in our node set
+		_, childOk := seen[e.ChildTxnID]
+		_, parentOk := seen[e.ParentTxnID]
+		if childOk && parentOk {
+			dagEdges = append(dagEdges, model.DAGEdge{From: e.ChildTxnID, To: e.ParentTxnID})
+		}
 	}
 
 	if txns == nil {
 		txns = []models.TransactionInfo{}
-	}
-	if dagEdges == nil {
-		dagEdges = []model.DAGEdge{}
 	}
 	return model.DAGResponse{Transactions: txns, Edges: dagEdges}, nil
 }
