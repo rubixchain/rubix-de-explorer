@@ -273,7 +273,11 @@ func GetDAGTxnHandler(w http.ResponseWriter, r *http.Request) {
 // Fetches latest transactions in batches of 50, walks ancestors up to depth 7,
 // and keeps adding batches until 500 total nodes are collected.
 func GetDAGTransactionsHandler(w http.ResponseWriter, r *http.Request) {
-	data, err := api.GetDAGTransactions()
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+	data, err := api.GetDAGTransactions(offset)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
