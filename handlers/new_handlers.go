@@ -294,7 +294,11 @@ func GetDAGWithSearchHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"txnID parameter is required"}`, http.StatusBadRequest)
 		return
 	}
-	data, err := api.GetDAGWithSearch(txnID)
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+	data, err := api.GetDAGWithSearch(txnID, offset)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

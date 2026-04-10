@@ -336,7 +336,7 @@ func GetDAGTransactions(offset int) (model.DAGResponse, error) {
 // GetDAGWithSearch returns the normal DAG (same as GetDAGTransactions) merged with
 // the searched txnID and its ancestors up to depth 5 (max 6 parents per level).
 // The searched txn and its ancestors are prepended so they appear first.
-func GetDAGWithSearch(searchTxnID string) (model.DAGResponse, error) {
+func GetDAGWithSearch(searchTxnID string, offset int) (model.DAGResponse, error) {
 	const depth = 5
 	const maxParents = 5
 
@@ -390,7 +390,7 @@ func GetDAGWithSearch(searchTxnID string) (model.DAGResponse, error) {
 	}
 
 	// --- Step 2: Get the normal DAG ---
-	baseDAG, err := GetDAGTransactions(0)
+	baseDAG, err := GetDAGTransactions(offset)
 	if err != nil {
 		return model.DAGResponse{}, err
 	}
