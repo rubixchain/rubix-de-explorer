@@ -218,6 +218,7 @@ func GetDAGTransactions(offset int) (model.DAGResponse, error) {
 	const anchorBatch = 50
 	const depth = 5
 	const maxParents = 5
+	const maxTxns = 500
 
 	// Step 1: fetch anchor batch ordered by epoch DESC with offset
 	var anchors []struct {
@@ -234,93 +235,89 @@ func GetDAGTransactions(offset int) (model.DAGResponse, error) {
 	if len(anchors) == 0 {
 		return model.DAGResponse{}, nil
 	}
-	anchorIDs := make([]string, len(anchors))
-	for i, a := range anchors {
-		anchorIDs[i] = a.TransactionID
-	}
 
-	// Step 2: recursive CTE — walk up to `depth` ancestor levels.
-	// Parents are capped per node in Go (maxParents). DISTINCT prevents cycles.
-	var edges []dagEdgeRow
-	if err := database.ReadDB.Raw(`
-		WITH RECURSIVE dag AS (
-			SELECT DISTINCT
-				transaction_id          AS child_txn_id,
-				previous_transaction_id AS parent_txn_id,
-				1                       AS depth
-			FROM "TokenChain"
-			WHERE transaction_id IN ?
-			  AND previous_transaction_id IS NOT NULL
-			  AND previous_transaction_id <> ''
-
-			UNION
-
-			SELECT DISTINCT
-				tc.transaction_id          AS child_txn_id,
-				tc.previous_transaction_id AS parent_txn_id,
-				dag.depth + 1              AS depth
-			FROM "TokenChain" tc
-			JOIN dag ON tc.transaction_id = dag.parent_txn_id
-			WHERE dag.depth < ?
-			  AND tc.previous_transaction_id IS NOT NULL
-			  AND tc.previous_transaction_id <> ''
-		)
-		SELECT DISTINCT child_txn_id, parent_txn_id FROM dag
-	`, anchorIDs, depth).Scan(&edges).Error; err != nil {
-		return model.DAGResponse{}, err
-	}
-
-	// Step 3: build ordered maps (anchors first, then discovered nodes in order)
 	txnParents := make(map[string][]string)
-	parentSeen := make(map[string]map[string]struct{})
 	orderedIDs := make([]string, 0)
-	seenIDs := make(map[string]struct{})
+	queried := make(map[string]struct{})
 
 	addNode := func(id string) {
-		if _, ok := seenIDs[id]; !ok {
-			seenIDs[id] = struct{}{}
+		if _, ok := txnParents[id]; !ok {
 			txnParents[id] = []string{}
-			parentSeen[id] = make(map[string]struct{})
 			orderedIDs = append(orderedIDs, id)
 		}
 	}
 
-	for _, id := range anchorIDs {
-		addNode(id)
+	// Register anchors first (preserves epoch DESC order)
+	frontier := make([]string, 0, len(anchors))
+	for _, a := range anchors {
+		addNode(a.TransactionID)
+		frontier = append(frontier, a.TransactionID)
 	}
-	for _, e := range edges {
-		addNode(e.ChildTxnID)
-		addNode(e.ParentTxnID)
-		ps := parentSeen[e.ChildTxnID]
-		if _, exists := ps[e.ParentTxnID]; !exists && len(txnParents[e.ChildTxnID]) < maxParents {
-			txnParents[e.ChildTxnID] = append(txnParents[e.ChildTxnID], e.ParentTxnID)
-			ps[e.ParentTxnID] = struct{}{}
+
+	// Step 2: iterative level-by-level loop — one DB query per level
+	for d := 0; d < depth && len(frontier) > 0; d++ {
+		// Mark all frontier nodes as queried
+		for _, id := range frontier {
+			queried[id] = struct{}{}
+		}
+
+		var rows []dagEdgeRow
+		if err := database.ReadDB.Raw(`
+			SELECT DISTINCT transaction_id AS child_txn_id, previous_transaction_id AS parent_txn_id
+			FROM "TokenChain"
+			WHERE transaction_id IN ?
+			  AND previous_transaction_id IS NOT NULL
+			  AND previous_transaction_id <> ''
+		`, frontier).Scan(&rows).Error; err != nil {
+			return model.DAGResponse{}, err
+		}
+
+		nextFrontier := make(map[string]struct{})
+		for _, row := range rows {
+			addNode(row.ChildTxnID)
+			// Cap parents per node at maxParents
+			if len(txnParents[row.ChildTxnID]) < maxParents {
+				txnParents[row.ChildTxnID] = append(txnParents[row.ChildTxnID], row.ParentTxnID)
+			}
+			// Register parent node and queue for next level if not yet queried
+			addNode(row.ParentTxnID)
+			if _, done := queried[row.ParentTxnID]; !done {
+				nextFrontier[row.ParentTxnID] = struct{}{}
+			}
+		}
+
+		frontier = make([]string, 0, len(nextFrontier))
+		for id := range nextFrontier {
+			frontier = append(frontier, id)
 		}
 	}
 
-	// Filter orderedIDs to only those that exist in TransactionInfo
-	var existingIDs []struct {
+	// Step 3: filter to only txns that exist in TransactionInfo (no phantom IDs)
+	if len(orderedIDs) == 0 {
+		return model.DAGResponse{}, nil
+	}
+	var existingRows []struct {
 		TransactionID string `gorm:"column:transaction_id"`
 	}
 	if err := database.ReadDB.Table("TransactionInfo").
 		Select("transaction_id").
 		Where("transaction_id IN ?", orderedIDs).
-		Scan(&existingIDs).Error; err != nil {
+		Scan(&existingRows).Error; err != nil {
 		return model.DAGResponse{}, err
 	}
-	existingSet := make(map[string]struct{}, len(existingIDs))
-	for _, e := range existingIDs {
+	existingSet := make(map[string]struct{}, len(existingRows))
+	for _, e := range existingRows {
 		existingSet[e.TransactionID] = struct{}{}
 	}
 
-	const maxTxns = 300
 	txns := make([]model.DAGTxn, 0, len(orderedIDs))
 	for _, id := range orderedIDs {
 		if _, ok := existingSet[id]; !ok {
 			continue
 		}
-		filtered := make([]string, 0, len(txnParents[id]))
-		for _, p := range txnParents[id] {
+		parents := txnParents[id]
+		filtered := make([]string, 0, len(parents))
+		for _, p := range parents {
 			if _, ok := existingSet[p]; ok {
 				filtered = append(filtered, p)
 			}
@@ -343,60 +340,52 @@ func GetDAGWithSearch(searchTxnID string) (model.DAGResponse, error) {
 	const depth = 5
 	const maxParents = 5
 
-	// --- Step 1: recursive CTE from searched txnID (same pattern as GetDAGTransactions) ---
-
-	var edges []dagEdgeRow
-	if err := database.ReadDB.Raw(`
-		WITH RECURSIVE dag AS (
-			SELECT DISTINCT
-				transaction_id          AS child_txn_id,
-				previous_transaction_id AS parent_txn_id,
-				1                       AS depth
-			FROM "TokenChain"
-			WHERE transaction_id = ?
-			  AND previous_transaction_id IS NOT NULL
-			  AND previous_transaction_id <> ''
-
-			UNION
-
-			SELECT DISTINCT
-				tc.transaction_id          AS child_txn_id,
-				tc.previous_transaction_id AS parent_txn_id,
-				dag.depth + 1              AS depth
-			FROM "TokenChain" tc
-			JOIN dag ON tc.transaction_id = dag.parent_txn_id
-			WHERE dag.depth < ?
-			  AND tc.previous_transaction_id IS NOT NULL
-			  AND tc.previous_transaction_id <> ''
-		)
-		SELECT DISTINCT child_txn_id, parent_txn_id FROM dag
-	`, searchTxnID, depth).Scan(&edges).Error; err != nil {
-		return model.DAGResponse{}, err
-	}
-
-	// Build ordered map for the searched txn's subgraph
+	// --- Step 1: iterative level-by-level walk from searched txnID ---
 	searchParents := make(map[string][]string)
-	parentSeen := make(map[string]map[string]struct{})
 	searchOrdered := make([]string, 0)
-	searchSeen := make(map[string]struct{})
+	queried := make(map[string]struct{})
 
-	addSearchNode := func(id string) {
-		if _, ok := searchSeen[id]; !ok {
-			searchSeen[id] = struct{}{}
+	addNode := func(id string) {
+		if _, ok := searchParents[id]; !ok {
 			searchParents[id] = []string{}
-			parentSeen[id] = make(map[string]struct{})
 			searchOrdered = append(searchOrdered, id)
 		}
 	}
 
-	addSearchNode(searchTxnID)
-	for _, e := range edges {
-		addSearchNode(e.ChildTxnID)
-		addSearchNode(e.ParentTxnID)
-		ps := parentSeen[e.ChildTxnID]
-		if _, exists := ps[e.ParentTxnID]; !exists && len(searchParents[e.ChildTxnID]) < maxParents {
-			searchParents[e.ChildTxnID] = append(searchParents[e.ChildTxnID], e.ParentTxnID)
-			ps[e.ParentTxnID] = struct{}{}
+	addNode(searchTxnID)
+	frontier := []string{searchTxnID}
+
+	for d := 0; d < depth && len(frontier) > 0; d++ {
+		for _, id := range frontier {
+			queried[id] = struct{}{}
+		}
+
+		var rows []dagEdgeRow
+		if err := database.ReadDB.Raw(`
+			SELECT DISTINCT transaction_id AS child_txn_id, previous_transaction_id AS parent_txn_id
+			FROM "TokenChain"
+			WHERE transaction_id IN ?
+			  AND previous_transaction_id IS NOT NULL
+			  AND previous_transaction_id <> ''
+		`, frontier).Scan(&rows).Error; err != nil {
+			return model.DAGResponse{}, err
+		}
+
+		nextFrontier := make(map[string]struct{})
+		for _, row := range rows {
+			addNode(row.ChildTxnID)
+			if len(searchParents[row.ChildTxnID]) < maxParents {
+				searchParents[row.ChildTxnID] = append(searchParents[row.ChildTxnID], row.ParentTxnID)
+			}
+			addNode(row.ParentTxnID)
+			if _, done := queried[row.ParentTxnID]; !done {
+				nextFrontier[row.ParentTxnID] = struct{}{}
+			}
+		}
+
+		frontier = make([]string, 0, len(nextFrontier))
+		for id := range nextFrontier {
+			frontier = append(frontier, id)
 		}
 	}
 
@@ -410,12 +399,12 @@ func GetDAGWithSearch(searchTxnID string) (model.DAGResponse, error) {
 	merged := make([]model.DAGTxn, 0, len(searchOrdered)+len(baseDAG.Transactions))
 	seen := make(map[string]struct{}, len(searchOrdered)+len(baseDAG.Transactions))
 
-	for _, txnID := range searchOrdered {
+	for _, id := range searchOrdered {
 		merged = append(merged, model.DAGTxn{
-			TransactionID:          txnID,
-			PreviousTransactionIDs: searchParents[txnID],
+			TransactionID:          id,
+			PreviousTransactionIDs: searchParents[id],
 		})
-		seen[txnID] = struct{}{}
+		seen[id] = struct{}{}
 	}
 	for _, t := range baseDAG.Transactions {
 		if _, exists := seen[t.TransactionID]; !exists {
