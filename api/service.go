@@ -39,6 +39,10 @@ func GetSearchInfo(query string) (*SearchResult, error) {
 	if err := database.ReadDB.Table("TransactionInfo").Where("transaction_id = ?", query).First(&txn).Error; err == nil {
 		return &SearchResult{Type: "Transaction", Data: txn}, nil
 	}
+	// Fallback: Check FailedTransactionInfo
+	if err := database.ReadDB.Table("FailedTransactionInfo").Where("transaction_id = ?", query).First(&txn).Error; err == nil {
+		return &SearchResult{Type: "Transaction", Data: txn}, nil
+	}
 
 	// 3. Token Search (starts with Qm or contains _)
 	if strings.HasPrefix(query, "Qm") || strings.Contains(query, "_") {
@@ -725,7 +729,10 @@ func GetSCList(limit, page int) ([]models.Token, int64, error) {
 func GetTransactionInfo(txnID string) (models.TransactionInfo, error) {
 	var transaction models.TransactionInfo
 	if err := database.ReadDB.Table("TransactionInfo").Where("transaction_id = ?", txnID).First(&transaction).Error; err != nil {
-		return transaction, err
+		// Fallback: Check FailedTransactionInfo
+		if ferr := database.ReadDB.Table("FailedTransactionInfo").Where("transaction_id = ?", txnID).First(&transaction).Error; ferr != nil {
+			return transaction, err // Return the original Error if both fail
+		}
 	}
 	return transaction, nil
 }
@@ -739,21 +746,38 @@ func GetTxnsByDID(did string, page, limit int) ([]models.TransactionInfo, int64,
 	}
 	offset := (page - 1) * limit
 
+	// 1. Calculate combined total count
 	var total int64
-	if err := database.ReadDB.Table("TransactionInfo").
-		Where("initiator = ? OR owner = ?", did, did).
-		Count(&total).Error; err != nil {
+	countQuery := `
+		SELECT COUNT(*) FROM (
+			SELECT transaction_id FROM "TransactionInfo" WHERE initiator = ? OR owner = ?
+			UNION ALL
+			SELECT transaction_id FROM "FailedTransactionInfo" WHERE initiator = ? OR owner = ?
+		) AS combined
+	`
+	if err := database.ReadDB.Raw(countQuery, did, did, did, did).Scan(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
+	// 2. Fetch combined paginated results
 	var transactions []models.TransactionInfo
-	if err := database.ReadDB.Table("TransactionInfo").
-		Where("initiator = ? OR owner = ?", did, did).
-		Order("epoch DESC").
-		Limit(limit).Offset(offset).
-		Find(&transactions).Error; err != nil {
+	dataQuery := `
+		SELECT * FROM (
+			SELECT transaction_id, initiator, owner, epoch, network, tokens, committed_tokens, quorums, memo, status, amount, created_at, updated_at FROM "TransactionInfo" WHERE initiator = ? OR owner = ?
+			UNION ALL
+			SELECT transaction_id, initiator, owner, epoch, network, tokens, committed_tokens, quorums, memo, status, amount, created_at, updated_at FROM "FailedTransactionInfo" WHERE initiator = ? OR owner = ?
+		) AS combined
+		ORDER BY epoch DESC
+		LIMIT ? OFFSET ?
+	`
+	if err := database.ReadDB.Raw(dataQuery, did, did, did, did, limit, offset).Scan(&transactions).Error; err != nil {
 		return nil, 0, err
 	}
+
+	if transactions == nil {
+		transactions = make([]models.TransactionInfo, 0)
+	}
+
 	return transactions, total, nil
 }
 
