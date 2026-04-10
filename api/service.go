@@ -210,15 +210,16 @@ func buildDAGResponse(edges []dagEdgeRow) model.DAGResponse {
 	return model.DAGResponse{Transactions: txns}
 }
 
-// GetDAGTransactions fetches the latest 50 txns as anchors, then uses a recursive
-// CTE to walk ancestors up to 5 levels deep (max 5 parents per node).
+// GetDAGTransactions fetches anchors ordered by epoch DESC (anchorBatch at a time),
+// walks ancestors up to 5 levels deep (max 5 parents per node).
+// offset controls which batch of anchors to start from for "show more" pagination.
 // Falls back to TransactionInfo.tokens JSONB for any node TokenChain has no entry for.
-func GetDAGTransactions() (model.DAGResponse, error) {
-	const anchorBatch = 50
+func GetDAGTransactions(offset int) (model.DAGResponse, error) {
+	const anchorBatch = 100
 	const depth = 5
 	const maxParents = 5
 
-	// Step 1: latest 50 anchors ordered by epoch DESC
+	// Step 1: fetch anchor batch ordered by epoch DESC with offset
 	var anchors []struct {
 		TransactionID string `gorm:"column:transaction_id"`
 	}
@@ -226,6 +227,7 @@ func GetDAGTransactions() (model.DAGResponse, error) {
 		Select("transaction_id").
 		Order("epoch DESC").
 		Limit(anchorBatch).
+		Offset(offset).
 		Scan(&anchors).Error; err != nil {
 		return model.DAGResponse{}, err
 	}
@@ -444,7 +446,7 @@ func GetDAGWithSearch(searchTxnID string) (model.DAGResponse, error) {
 	}
 
 	// --- Step 2: Get the normal DAG ---
-	baseDAG, err := GetDAGTransactions()
+	baseDAG, err := GetDAGTransactions(0)
 	if err != nil {
 		return model.DAGResponse{}, err
 	}
