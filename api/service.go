@@ -215,7 +215,7 @@ func buildDAGResponse(edges []dagEdgeRow) model.DAGResponse {
 // offset controls which batch of anchors to start from for "show more" pagination.
 // Falls back to TransactionInfo.tokens JSONB for any node TokenChain has no entry for.
 func GetDAGTransactions(offset int) (model.DAGResponse, error) {
-	const anchorBatch = 100
+	const anchorBatch = 50
 	const depth = 5
 	const maxParents = 5
 
@@ -333,6 +333,11 @@ func GetDAGTransactions(offset int) (model.DAGResponse, error) {
 				}
 			}
 		}
+	}
+
+	const maxTxns = 300
+	if len(orderedIDs) > maxTxns {
+		orderedIDs = orderedIDs[:maxTxns]
 	}
 
 	txns := make([]model.DAGTxn, 0, len(orderedIDs))
