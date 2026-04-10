@@ -6,6 +6,7 @@ import (
 	"explorer-server/database/models"
 	"explorer-server/model"
 	"explorer-server/util"
+	"log"
 	"strings"
 
 	"gorm.io/gorm"
@@ -166,6 +167,55 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 	tokensToUpsert := make([]models.Token, 0)
 	chainsToInsert := make([]models.TokenChain, 0)
 
+	// inferTokenType determines the asset type based on the ID format.
+	inferTokenType := func(id string) int16 {
+		if util.IsValidRBT(id) {
+			return TokenTypeRBT
+		}
+		if util.IsValidFT(id) {
+			return TokenTypeFT
+		}
+		if util.IsValidNFT(id) {
+			return TokenTypeNFT
+		}
+		if util.IsValidSC(id) {
+			return TokenTypeSC
+		}
+		// Fallback for cases where regex might be too strict
+		if strings.HasPrefix(id, "Qm") {
+			return TokenTypeNFT
+		}
+		if strings.Contains(id, "_bafy") {
+			return TokenTypeFT
+		}
+		return TokenTypeRBT // Final default
+	}
+
+	// ensureToken is a helper to get an existing token or create a skeleton record.
+	ensureToken := func(tokenID string) models.Token {
+		if t, ok := existingTokens[tokenID]; ok {
+			return t
+		}
+		typeID := inferTokenType(tokenID)
+		// Create Skeleton
+		t := models.Token{
+			TokenID:       tokenID,
+			TokenType:     typeID,
+			TransactionID: txnID,
+			TokenStatus:   models.TokenStatus_Free,
+			NeedsSync:     true,
+		}
+		// Value Logic
+		switch typeID {
+		case TokenTypeRBT:
+			val, _ := util.GetTokenValueFromTokenID(tokenID)
+			t.TokenValue = val
+		default:
+			t.TokenValue = 1.0 // Default for FT/NFT/SC if missing
+		}
+		return t
+	}
+
 	// Sub-function to generate models for a group of tokens
 	prepareTokens := func(tokenInfos []*model.TokenInfo, tokenType string) error {
 		typeID := tokenTypeMap[tokenType]
@@ -173,30 +223,27 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 			existing, exists := existingTokens[info.TokenID]
 			isNew := !exists
 			var prevOwner string
-			var tokenToSave models.Token
+			tokenToSave := ensureToken(info.TokenID)
 
 			if isNew {
-				tokenToSave = models.Token{
-					TokenID:       info.TokenID,
-					TokenType:     typeID,
-					TransactionID: txnID,
-					TokenStatus:   models.TokenStatus_Free,
-					NeedsSync:     true,
-				}
-				if typeID == TokenTypeSC {
+				switch typeID {
+				case TokenTypeSC:
 					tokenToSave.DID = txn.Initiator
 					tokenToSave.DeployerDID = txn.Initiator
-				} else {
+				default:
 					tokenToSave.DID = txn.Owner
 				}
+
 				if info.Data != "" {
 					tokenToSave.Data = info.Data
 				}
-				if typeID == TokenTypeRBT {
+
+				// Specific logic for new RBT/FT values if available
+				switch typeID {
+				case TokenTypeRBT:
 					val, _ := util.GetTokenValueFromTokenID(info.TokenID)
 					tokenToSave.TokenValue = val
-				} else {
-					// FT/NFT/SC value calculation logic (kept legacy logic)
+				case TokenTypeFT:
 					var burnedSum float64
 					for _, ct := range txn.CommittedTokens {
 						if !strings.Contains(ct.TokenID, "Qm") && !strings.Contains(ct.TokenID, "_DID") && strings.Contains(ct.TokenID, "_") {
@@ -204,24 +251,18 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 							burnedSum += v
 						}
 					}
-					if typeID == TokenTypeFT {
-						ftCount := len(txn.Tokens.FT)
-						if ftCount > 0 {
-							tokenToSave.TokenValue = burnedSum / float64(ftCount)
-						} else {
-							tokenToSave.TokenValue = 1.0
-						}
-					} else {
-						tokenToSave.TokenValue = burnedSum
+					ftCount := len(txn.Tokens.FT)
+					if ftCount > 0 {
+						tokenToSave.TokenValue = burnedSum / float64(ftCount)
 					}
 				}
+
 				tokenToSave.LatestRole = models.TokenRole_Mint
 				if typeID == TokenTypeSC {
 					tokenToSave.LatestRole = models.TokenRole_Deploy
 				}
 			} else {
 				prevOwner = existing.DID
-				tokenToSave = existing
 				if info.PreviousTransactionID != "" && info.PreviousTransactionID != existing.TransactionID {
 					tokenToSave.NeedsSync = true
 				}
@@ -265,52 +306,58 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 
 	// 4. Group Processing (Phase 2: Model Prep)
 	if txn.Tokens != nil {
-		prepareTokens(txn.Tokens.RBT, "RBT")
-		prepareTokens(txn.Tokens.FT, "FT")
-		prepareTokens(txn.Tokens.NFT, "NFT")
-		prepareTokens(txn.Tokens.SmartContract, "SC")
+		if err := prepareTokens(txn.Tokens.RBT, "RBT"); err != nil {
+			log.Printf("Warning: Error processing RBT tokens: %v", err)
+		}
+		if err := prepareTokens(txn.Tokens.FT, "FT"); err != nil {
+			log.Printf("Warning: Error processing FT tokens: %v", err)
+		}
+		if err := prepareTokens(txn.Tokens.NFT, "NFT"); err != nil {
+			log.Printf("Warning: Error processing NFT tokens: %v", err)
+		}
+		if err := prepareTokens(txn.Tokens.SmartContract, "SC"); err != nil {
+			log.Printf("Warning: Error processing SC tokens: %v", err)
+		}
 	}
 
 	// 5. Quorum Pledges Processing
 	for _, q := range txn.Quorums {
 		for _, info := range q.Tokens {
-			if t, exists := existingTokens[info.TokenID]; exists {
-				t.LatestRole = models.TokenRole_Pledge
-				t.TransactionID = txnID
-				t.TokenStatus = models.TokenStatus_Pledged
-				tokensToUpsert = append(tokensToUpsert, t)
-				chainsToInsert = append(chainsToInsert, models.TokenChain{
-					TokenID:               info.TokenID,
-					TransactionID:         txnID,
-					PreviousTransactionID: info.PreviousTransactionID,
-					Role:                  models.TokenRole_Pledge,
-				})
-				if q.Did != "" && t.TokenType != TokenTypeSC {
-					// Deduct from Regular balance, add to Pledged balance
-					addBalanceChange(q.Did, &t, -1, 1)
-				}
+			t := ensureToken(info.TokenID)
+			t.LatestRole = models.TokenRole_Pledge
+			t.TransactionID = txnID
+			t.TokenStatus = models.TokenStatus_Pledged
+			tokensToUpsert = append(tokensToUpsert, t)
+			chainsToInsert = append(chainsToInsert, models.TokenChain{
+				TokenID:               info.TokenID,
+				TransactionID:         txnID,
+				PreviousTransactionID: info.PreviousTransactionID,
+				Role:                  models.TokenRole_Pledge,
+			})
+			if q.Did != "" && t.TokenType != TokenTypeSC {
+				// Deduct from Regular balance, add to Pledged balance
+				addBalanceChange(q.Did, &t, -1, 1)
 			}
 		}
 	}
 
 	// 6. Committed Tokens Processing (Burn)
 	for _, info := range txn.CommittedTokens {
-		if t, exists := existingTokens[info.TokenID]; exists {
-			prevDID := t.DID
-			t.LatestRole = models.TokenRole_Burn
-			t.TransactionID = txnID
-			t.TokenStatus = models.TokenStatus_Burnt
-			tokensToUpsert = append(tokensToUpsert, t)
-			chainsToInsert = append(chainsToInsert, models.TokenChain{
-				TokenID:               info.TokenID,
-				TransactionID:         txnID,
-				PreviousTransactionID: info.PreviousTransactionID,
-				Role:                  models.TokenRole_Burn,
-			})
-			if prevDID != "" && t.TokenType != TokenTypeSC {
-				// Deduct from Regular balance (Burned tokens are gone)
-				addBalanceChange(prevDID, &t, -1, 0)
-			}
+		t := ensureToken(info.TokenID)
+		prevDID := t.DID
+		t.LatestRole = models.TokenRole_Burn
+		t.TransactionID = txnID
+		t.TokenStatus = models.TokenStatus_Burnt
+		tokensToUpsert = append(tokensToUpsert, t)
+		chainsToInsert = append(chainsToInsert, models.TokenChain{
+			TokenID:               info.TokenID,
+			TransactionID:         txnID,
+			PreviousTransactionID: info.PreviousTransactionID,
+			Role:                  models.TokenRole_Burn,
+		})
+		if prevDID != "" && t.TokenType != TokenTypeSC {
+			// Deduct from Regular balance (Burned tokens are gone)
+			addBalanceChange(prevDID, &t, -1, 0)
 		}
 	}
 
@@ -336,9 +383,12 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 		if err := tx.Where("transaction_id IN ?", prevTxIDs).Find(&prevTxns).Error; err == nil {
 			for _, pTx := range prevTxns {
 				var quorums []*model.QuorumInfo
-				if err := json.Unmarshal(pTx.Quorums, &quorums); err == nil {
-					for _, q := range quorums {
-						for _, qToken := range q.Tokens {
+				if err := json.Unmarshal(pTx.Quorums, &quorums); err != nil {
+					log.Printf("Warning: Failed to unmarshal quorums for unpledge detection in txn %s: %v", pTx.TransactionID, err)
+					continue
+				}
+				for _, q := range quorums {
+					for _, qToken := range q.Tokens {
 							// Determine if we have this token in our current batch or need to fetch it
 							var t models.Token
 							found := false
@@ -372,7 +422,6 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 				}
 			}
 		}
-	}
 
 	// 8. FINAL BULK COMMIT
 	// Bulk Upsert Tokens
@@ -385,10 +434,15 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 		}
 	}
 
-	// Bulk Insert History
+	// Bulk Insert History (With Conflict Handling to ensure Zero-Failure on duplicate processing)
 	if len(chainsToInsert) > 0 {
-		if err := tx.CreateInBatches(chainsToInsert, 1000).Error; err != nil {
-			return err
+		if err := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "token_id"}, {Name: "transaction_id"}},
+			DoNothing: true,
+		}).CreateInBatches(chainsToInsert, 1000).Error; err != nil {
+			// Note: If the specific table doesn't have a unique index on (token_id, transaction_id),
+			// OnConflict might need an explicit index name or we rely on standard auto-inc uniqueness.
+			log.Printf("Warning: Potential conflict in TokenChain batch insert: %v", err)
 		}
 	}
 

@@ -10,16 +10,14 @@ import (
 // MaxSupportedDecimalPlaces matches rubixgoplatform/constants
 const MaxSupportedDecimalPlaces = 3
 
-// treeLevelRanges holds [min, max] part-index range for each tree level.
-// Computed once at init time.
-var treeLevelRanges [][2]int
+// TreeLevelRanges holds [min, max] part-index range for each tree level.
+var TreeLevelRanges [][2]int
 
 func init() {
-	treeLevelRanges = computeTreeLevelRanges()
+	TreeLevelRanges = computeTreeLevelRanges()
 }
 
 // getNumberOfChildren returns the branching factor for a node at the given level.
-// Even levels split into 2 children, odd levels split into 5 children.
 func getNumberOfChildren(parentLevel int) int {
 	if parentLevel%2 == 0 {
 		return 2
@@ -28,16 +26,7 @@ func getNumberOfChildren(parentLevel int) int {
 }
 
 // computeTreeLevelRanges dynamically builds the [min, max] part-index range
-// for each level of the token-subdivision tree.
-//
-// The tree subdivides 1 token down to MaxSupportedDecimalPlaces decimal places:
-//   - Even-level nodes have 2 children (÷2 subdivision)
-//   - Odd-level nodes have 5 children (÷5 subdivision)
-//
-// With MaxSupportedDecimalPlaces=3:
-//
-//	L0=1.0(root) ; L1=0.5(÷2) ; L2=0.1(÷5) ; L3=0.05(÷2) ;
-//	L4=0.01(÷5) ; L5=0.005(÷2) ; L6=0.001(÷5) ; maxDepth=6
+// for each level (0-6) of the token-subdivision tree.
 func computeTreeLevelRanges() [][2]int {
 	scaledValue := 1
 	for i := 0; i < MaxSupportedDecimalPlaces; i++ {
@@ -73,25 +62,67 @@ func computeTreeLevelRanges() [][2]int {
 	return ranges
 }
 
-// getTreeLevelFromPartIndex returns the tree level for a given part index.
-func getTreeLevelFromPartIndex(x int) (int, error) {
-	for level, r := range treeLevelRanges {
+// RbtIDElements holds the parsed components of an RBT token ID.
+type RbtIDElements struct {
+	Level       int
+	TokenNumber int
+	PartIndex   int
+}
+
+// GetRbtIDElements parses an RBT token ID string (e.g. "x_yzabcdef" or "x_yzabcdef_ghijkl")
+// into its constituent elements: network level, token number, and optional part index.
+func GetRbtIDElements(tokenID string) (RbtIDElements, error) {
+	// check if token id is ft id, by checking if the length of the id is more than length of DID (59)
+	if len(tokenID) > 59 {
+		return RbtIDElements{}, fmt.Errorf("invalid token id format for rbt: %s, id length should be <= 59", tokenID)
+	}
+
+	idElems := strings.Split(tokenID, "_")
+	if len(idElems) < 2 || len(idElems) > 3 { // ensure id is in proper RBT id format
+		return RbtIDElements{}, fmt.Errorf("invalid token id format for rbt: %s, id elements should be 2 (whole) or 3 (part)", tokenID)
+	}
+
+	var err error
+	rbtElems := RbtIDElements{}
+
+	rbtElems.Level, err = strconv.Atoi(idElems[0])
+	if err != nil {
+		return RbtIDElements{}, fmt.Errorf("failed to convert level into int for rbt: %s, error: %v", tokenID, err)
+	}
+	rbtElems.TokenNumber, err = strconv.Atoi(idElems[1])
+	if err != nil {
+		return RbtIDElements{}, fmt.Errorf("failed to convert token number into int for rbt: %s, error: %v", tokenID, err)
+	}
+
+	switch len(idElems) {
+	case 2:
+		rbtElems.PartIndex = 0 // Case for whole token
+	case 3:
+		rbtElems.PartIndex, err = strconv.Atoi(idElems[2]) // Case for part token
+		if err != nil {
+			return RbtIDElements{}, fmt.Errorf("failed to convert part index into int for rbt: %s, error: %v", tokenID, err)
+		}
+	default:
+		return RbtIDElements{}, fmt.Errorf("invalid token id format for rbt: %s, id elements should be 2 (whole) or 3 (part)", tokenID)
+	}
+	return rbtElems, nil
+}
+
+// GetTreeLevelFromPartIndex returns the tree level (0-6) for a given part index x.
+func GetTreeLevelFromPartIndex(x int) (int, error) {
+	if x == 0 {
+		return 0, nil // Level 0 is the root (Whole token)
+	}
+	for level, r := range TreeLevelRanges {
 		if x >= r[0] && x <= r[1] {
 			return level, nil
 		}
 	}
-	return 0, fmt.Errorf("part index %d is out of range", x)
+	return 0, fmt.Errorf("part index %d is out of range (valid: 1 - 1332)", x)
 }
 
 // LevelToDenom converts a tree level to its denomination value.
-//
-//	Level 0 -> 1.0   (whole token)
-//	Level 1 -> 0.5
-//	Level 2 -> 0.1
-//	Level 3 -> 0.05
-//	Level 4 -> 0.01
-//	Level 5 -> 0.005
-//	Level 6 -> 0.001
+// Level 0 -> 1.0 (Whole Token)
 func LevelToDenom(level int) (float64, error) {
 	if level < 0 {
 		return 0, fmt.Errorf("LevelToDenom: level cannot be negative, provided level: %v", level)
@@ -104,64 +135,21 @@ func LevelToDenom(level int) (float64, error) {
 	return 5 * math.Pow(10, -float64(k+1)), nil
 }
 
-// RbtIDElements holds the parsed components of an RBT token ID.
-type RbtIDElements struct {
-	Level       int
-	TokenNumber int
-	PartIndex   int
-}
-
-// ParseRbtTokenID parses an RBT token ID string (e.g. "1_12345" or "1_12345_3")
-// into its constituent elements.
-func ParseRbtTokenID(tokenID string) (RbtIDElements, error) {
-	elems := strings.Split(tokenID, "_")
-	if len(elems) < 2 || len(elems) > 3 {
-		return RbtIDElements{}, fmt.Errorf("invalid RBT token ID format: %s, expected 2 or 3 parts separated by '_'", tokenID)
-	}
-
-	level, err := strconv.Atoi(elems[0])
-	if err != nil {
-		return RbtIDElements{}, fmt.Errorf("failed to parse level from RBT token ID: %s, error: %v", tokenID, err)
-	}
-
-	tokenNumber, err := strconv.Atoi(elems[1])
-	if err != nil {
-		return RbtIDElements{}, fmt.Errorf("failed to parse token number from RBT token ID: %s, error: %v", tokenID, err)
-	}
-
-	result := RbtIDElements{
-		Level:       level,
-		TokenNumber: tokenNumber,
-		PartIndex:   0, // whole token default
-	}
-
-	if len(elems) == 3 {
-		result.PartIndex, err = strconv.Atoi(elems[2])
-		if err != nil {
-			return RbtIDElements{}, fmt.Errorf("failed to parse part index from RBT token ID: %s, error: %v", tokenID, err)
-		}
-	}
-
-	return result, nil
-}
-
 // GetTokenValueFromTokenID derives the token's denomination value directly
-// from its RBT token ID format (e.g. "1_12345" -> 1.0, "1_12345_3" -> 0.1).
-//
-// The algorithm:
-//  1. Parse the token ID to extract the PartIndex
-//  2. Map the PartIndex to a tree level using pre-computed ranges
-//  3. Convert the tree level to a denomination value
+// from its RBT token ID format (e.g. "x_yzabcdef" -> 1.0, "x_yzabcdef_ghijkl" -> derived value).
 func GetTokenValueFromTokenID(tokenID string) (float64, error) {
-	tokenElems, err := ParseRbtTokenID(tokenID)
+	// split RBT id elements
+	tokenElems, err := GetRbtIDElements(tokenID)
 	if err != nil {
-		return 0, fmt.Errorf("GetTokenValueFromTokenID: %v", err)
+		return 0, fmt.Errorf("GetTokenValueFromTokenID: failed to split elements of token ID %s, err: %v", tokenID, err)
 	}
 
-	treeLevel, err := getTreeLevelFromPartIndex(tokenElems.PartIndex)
+	// get token level
+	tokenTreeLevel, err := GetTreeLevelFromPartIndex(tokenElems.PartIndex)
 	if err != nil {
 		return 0, fmt.Errorf("GetTokenValueFromTokenID: failed to get tree level for token %s, err: %v", tokenID, err)
 	}
 
-	return LevelToDenom(treeLevel)
+	// get token value from tree level
+	return LevelToDenom(tokenTreeLevel)
 }
