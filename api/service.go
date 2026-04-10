@@ -397,18 +397,28 @@ func GetDAGTransactions(offset int) (model.DAGResponse, error) {
 	return model.DAGResponse{Transactions: txns}, nil
 }
 
-// GetDAGWithSearch prepends the searched txn (and its parent chain up to 5 levels)
-// to the normal DAG response. Use offset for pagination of the base DAG.
+// GetDAGWithSearch returns a structured DAG response:
+//   - indices 0–29 : base DAG txns not linked to the searched txn
+//   - index  30    : the searched txn itself
+//   - index  31–32 : 2 random unlinked txns (visual spacers between linked blocks)
+//   - index  33+   : ancestors of the searched txn
+//   - remainder    : rest of base DAG (deduped)
 func GetDAGWithSearch(searchTxnID string, offset int) (model.DAGResponse, error) {
 	// Step 1: walk the searched txn's parent chain
 	txnParents := make(map[string][]string)
-	orderedIDs := make([]string, 0)
+	searchOrdered := make([]string, 0)
 	visited := make(map[string]struct{})
 
 	txnParents[searchTxnID] = []string{}
-	orderedIDs = append(orderedIDs, searchTxnID)
+	searchOrdered = append(searchOrdered, searchTxnID)
 
-	walkTxn(searchTxnID, 0, txnParents, &orderedIDs, visited)
+	walkTxn(searchTxnID, 0, txnParents, &searchOrdered, visited)
+
+	// Build a set of all txns in the search subgraph for fast lookup
+	searchSet := make(map[string]struct{}, len(searchOrdered))
+	for _, id := range searchOrdered {
+		searchSet[id] = struct{}{}
+	}
 
 	// Step 2: get normal DAG
 	baseDAG, err := GetDAGTransactions(offset)
@@ -416,21 +426,68 @@ func GetDAGWithSearch(searchTxnID string, offset int) (model.DAGResponse, error)
 		return model.DAGResponse{}, err
 	}
 
-	// Step 3: merge — searched txn + its ancestors first, then base DAG (deduped)
-	seen := make(map[string]struct{}, len(orderedIDs)+len(baseDAG.Transactions))
-	merged := make([]model.DAGTxn, 0, len(orderedIDs)+len(baseDAG.Transactions))
+	// Separate base DAG into unlinked txns (not in search subgraph)
+	unlinked := make([]model.DAGTxn, 0, len(baseDAG.Transactions))
+	for _, t := range baseDAG.Transactions {
+		if _, inSearch := searchSet[t.TransactionID]; !inSearch {
+			unlinked = append(unlinked, t)
+		}
+	}
 
-	for _, id := range orderedIDs {
+	// Step 3: assemble final result
+	merged := make([]model.DAGTxn, 0, len(baseDAG.Transactions)+len(searchOrdered))
+	seen := make(map[string]struct{})
+
+	// [0-29]: first 30 unlinked base txns before the searched txn
+	pre := unlinked
+	if len(pre) > 30 {
+		pre = unlinked[:30]
+	}
+	for _, t := range pre {
+		merged = append(merged, t)
+		seen[t.TransactionID] = struct{}{}
+	}
+
+	// [30]: searched txn
+	merged = append(merged, model.DAGTxn{
+		TransactionID:          searchTxnID,
+		PreviousTransactionIDs: txnParents[searchTxnID],
+	})
+	seen[searchTxnID] = struct{}{}
+
+	// [31-32]: 2 random unlinked txns as visual spacers between linked blocks
+	spacerCount := 0
+	for _, t := range unlinked {
+		if spacerCount >= 2 {
+			break
+		}
+		if _, already := seen[t.TransactionID]; already {
+			continue
+		}
+		merged = append(merged, t)
+		seen[t.TransactionID] = struct{}{}
+		spacerCount++
+	}
+
+	// [33+]: ancestors of the searched txn (searchOrdered[1:] skips the txn itself)
+	for _, id := range searchOrdered[1:] {
+		if _, already := seen[id]; already {
+			continue
+		}
 		merged = append(merged, model.DAGTxn{
 			TransactionID:          id,
 			PreviousTransactionIDs: txnParents[id],
 		})
 		seen[id] = struct{}{}
 	}
-	for _, t := range baseDAG.Transactions {
-		if _, exists := seen[t.TransactionID]; !exists {
-			merged = append(merged, t)
+
+	// remainder: rest of base DAG not yet included
+	for _, t := range unlinked {
+		if _, already := seen[t.TransactionID]; already {
+			continue
 		}
+		merged = append(merged, t)
+		seen[t.TransactionID] = struct{}{}
 	}
 
 	return model.DAGResponse{Transactions: merged}, nil
