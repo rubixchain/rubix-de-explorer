@@ -231,9 +231,25 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 					}
 				}
 
-				tokenToSave.LatestRole = models.TokenRole_Mint
-				if typeID == TokenTypeSC {
-					tokenToSave.LatestRole = models.TokenRole_Deploy
+				// Determine the correct role: if prevTxnID exists, explorer missed
+				// the genesis — this is actually a transfer, not a mint.
+				if info.PreviousTransactionID != "" {
+					// Missed genesis: record as transfer, flag for future sync
+					tokenToSave.NeedsSync = true
+					switch typeID {
+					case TokenTypeSC:
+						tokenToSave.LatestRole = models.TokenRole_Execute
+					default:
+						tokenToSave.LatestRole = models.TokenRole_Transfer
+					}
+				} else {
+					// Actual genesis/mint (no previous transaction)
+					switch typeID {
+					case TokenTypeSC:
+						tokenToSave.LatestRole = models.TokenRole_Deploy
+					default:
+						tokenToSave.LatestRole = models.TokenRole_Mint
+					}
 				}
 			} else {
 				prevOwner = existing.DID
