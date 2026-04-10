@@ -469,7 +469,26 @@ func GetDAGWithSearch(searchTxnID string, offset int) (model.DAGResponse, error)
 		spacerCount++
 	}
 
-	// [33+]: ancestors of the searched txn (searchOrdered[1:] skips the txn itself)
+	// build a pool of unlinked txns not yet used, for spacers
+	spacerPool := make([]model.DAGTxn, 0, len(unlinked))
+	for _, t := range unlinked {
+		if _, already := seen[t.TransactionID]; !already {
+			spacerPool = append(spacerPool, t)
+		}
+	}
+	spacerIdx := 0
+
+	insertSpacer := func() {
+		if spacerIdx >= len(spacerPool) {
+			return
+		}
+		t := spacerPool[spacerIdx]
+		spacerIdx++
+		merged = append(merged, t)
+		seen[t.TransactionID] = struct{}{}
+	}
+
+	// [33+]: ancestors of the searched txn, with 1 random unlinked txn between each
 	for _, id := range searchOrdered[1:] {
 		if _, already := seen[id]; already {
 			continue
@@ -479,6 +498,7 @@ func GetDAGWithSearch(searchTxnID string, offset int) (model.DAGResponse, error)
 			PreviousTransactionIDs: txnParents[id],
 		})
 		seen[id] = struct{}{}
+		insertSpacer() // 1 unlinked txn after each ancestor
 	}
 
 	// remainder: rest of base DAG not yet included
