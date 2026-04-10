@@ -167,37 +167,13 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 	tokensToUpsert := make([]models.Token, 0)
 	chainsToInsert := make([]models.TokenChain, 0)
 
-	// inferTokenType determines the asset type based on the ID format.
-	inferTokenType := func(id string) int16 {
-		if util.IsValidRBT(id) {
-			return TokenTypeRBT
-		}
-		if util.IsValidFT(id) {
-			return TokenTypeFT
-		}
-		if util.IsValidNFT(id) {
-			return TokenTypeNFT
-		}
-		if util.IsValidSC(id) {
-			return TokenTypeSC
-		}
-		// Fallback for cases where regex might be too strict
-		if strings.HasPrefix(id, "Qm") {
-			return TokenTypeNFT
-		}
-		if strings.Contains(id, "_bafy") {
-			return TokenTypeFT
-		}
-		return TokenTypeRBT // Final default
-	}
 
-	// ensureToken is a helper to get an existing token or create a skeleton record.
+	// 4. Helper closures
 	ensureToken := func(tokenID string) models.Token {
 		if t, ok := existingTokens[tokenID]; ok {
 			return t
 		}
-		typeID := inferTokenType(tokenID)
-		// Create Skeleton
+		typeID := inferTokenType(tokenID) // uses package-level function
 		t := models.Token{
 			TokenID:       tokenID,
 			TokenType:     typeID,
@@ -205,18 +181,16 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 			TokenStatus:   models.TokenStatus_Free,
 			NeedsSync:     true,
 		}
-		// Value Logic
-		switch typeID {
-		case TokenTypeRBT:
+		if typeID == TokenTypeRBT {
 			val, _ := util.GetTokenValueFromTokenID(tokenID)
 			t.TokenValue = val
-		default:
-			t.TokenValue = 1.0 // Default for FT/NFT/SC if missing
+		} else {
+			t.TokenValue = 1.0
 		}
 		return t
 	}
 
-	// Sub-function to generate models for a group of tokens
+	// prepareTokens closure (Phase 2: Model Prep)
 	prepareTokens := func(tokenInfos []*model.TokenInfo, tokenType string) error {
 		typeID := tokenTypeMap[tokenType]
 		for _, info := range tokenInfos {
@@ -424,41 +398,56 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 		}
 
 	// 8. FINAL BULK COMMIT
-	// Bulk Upsert Tokens
-	if len(tokensToUpsert) > 0 {
+
+	// 8a. Deduplicate tokensToUpsert: a token can appear multiple times because
+	// Unpledge Detection (step 7) may re-add a token that was already processed
+	// in Quorum Pledges (step 5). We keep the LAST entry per token_id because
+	// processing order is: Primary Tokens → Quorum Pledges → Burns → Unpledges,
+	// so the last entry reflects the token's final state after this transaction.
+	deduped := make(map[string]models.Token, len(tokensToUpsert))
+	dedupOrder := make([]string, 0, len(tokensToUpsert))
+	for _, t := range tokensToUpsert {
+		if _, seen := deduped[t.TokenID]; !seen {
+			dedupOrder = append(dedupOrder, t.TokenID)
+		}
+		deduped[t.TokenID] = t
+	}
+	finalTokens := make([]models.Token, 0, len(deduped))
+	for _, id := range dedupOrder {
+		finalTokens = append(finalTokens, deduped[id])
+	}
+
+	// Bulk Upsert Tokens (deduplicated)
+	if len(finalTokens) > 0 {
 		if err := tx.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "token_id"}},
 			UpdateAll: true,
-		}).CreateInBatches(tokensToUpsert, 1000).Error; err != nil {
+		}).CreateInBatches(finalTokens, 1000).Error; err != nil {
 			return err
 		}
 	}
 
-	// Bulk Insert History (With Conflict Handling to ensure Zero-Failure on duplicate processing)
-	if len(chainsToInsert) > 0 {
-		if err := tx.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "token_id"}, {Name: "transaction_id"}},
-			DoNothing: true,
-		}).CreateInBatches(chainsToInsert, 1000).Error; err != nil {
-			// Note: If the specific table doesn't have a unique index on (token_id, transaction_id),
-			// OnConflict might need an explicit index name or we rely on standard auto-inc uniqueness.
-			log.Printf("Warning: Potential conflict in TokenChain batch insert: %v", err)
+	// 8b. Insert TokenChain records ONE BY ONE to capture the real auto-increment ID,
+	// then immediately update the TokenChainArray with that ID.
+	for _, chain := range chainsToInsert {
+		// Insert and get the real ID back
+		if err := tx.Create(&chain).Error; err != nil {
+			log.Printf("Warning: Failed to insert TokenChain for token %s txn %s: %v", chain.TokenID, chain.TransactionID, err)
+			continue
+		}
+
+		// Now chain.ID is the real DB-assigned auto-increment value
+		if err := updateTokenChainArray(tx, chain.TokenID, chain.ID, chain.PreviousTransactionID); err != nil {
+			return err
 		}
 	}
 
-	// Bulk Update Balances (One update per unique DID/Asset)
+	// 8c. Bulk Update Balances (One update per unique DID/Asset)
 	for key, deltas := range balanceChanges {
 		if deltas.Balance == 0 && deltas.PledgedBalance == 0 {
 			continue
 		}
 		if err := updateBalances(tx, key.DID, key.AssetType, key.TokenName, key.CreatorDID, deltas.Balance, deltas.PledgedBalance); err != nil {
-			return err
-		}
-	}
-
-	// 9. Token Chain Array Sequence (Legacy helper, still needs to be called per-token for now)
-	for _, info := range chainsToInsert {
-		if err := updateTokenChainArray(tx, info.TokenID, info.ID, info.PreviousTransactionID); err != nil {
 			return err
 		}
 	}
@@ -638,4 +627,81 @@ func SyncPledgedBalances(db *gorm.DB) error {
 		}
 		return nil
 	})
+}
+// EnsureTokenSkeletons ensures every token mentioned in a transaction (even failed ones)
+// exists in the Tokens table as at least a skeleton record.
+func EnsureTokenSkeletons(txn *model.TransactionInfo, txnID string) error {
+	tokenIDs := make(map[string]struct{})
+	collect := func(infos []*model.TokenInfo) {
+		for _, info := range infos {
+			if info.TokenID != "" {
+				tokenIDs[info.TokenID] = struct{}{}
+			}
+		}
+	}
+
+	if txn.Tokens != nil {
+		collect(txn.Tokens.RBT)
+		collect(txn.Tokens.FT)
+		collect(txn.Tokens.NFT)
+		collect(txn.Tokens.SmartContract)
+	}
+	for _, q := range txn.Quorums {
+		collect(q.Tokens)
+	}
+	collect(txn.CommittedTokens)
+
+	if len(tokenIDs) == 0 {
+		return nil
+	}
+
+	return database.WriteDB.Transaction(func(tx *gorm.DB) error {
+		for id := range tokenIDs {
+			// Using Upsert with DoNothing to ensure we only create if it doesn't already exist.
+			// This avoids overwriting live state with skeleton data.
+			skeleton := models.Token{
+				TokenID:       id,
+				TokenType:     inferTokenType(id),
+				TransactionID: txnID,
+				TokenStatus:   models.TokenStatus_Free,
+				NeedsSync:     true,
+			}
+			// RBT Value extraction logic
+			if skeleton.TokenType == TokenTypeRBT {
+				val, _ := util.GetTokenValueFromTokenID(id)
+				skeleton.TokenValue = val
+			} else {
+				skeleton.TokenValue = 1.0
+			}
+
+			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&skeleton).Error; err != nil {
+				log.Printf("Warning: Failed to create token skeleton for %s: %v", id, err)
+			}
+		}
+		return nil
+	})
+}
+
+// inferTokenType determines the asset type based on the ID format.
+func inferTokenType(id string) int16 {
+	if util.IsValidRBT(id) {
+		return TokenTypeRBT
+	}
+	if util.IsValidFT(id) {
+		return TokenTypeFT
+	}
+	if util.IsValidNFT(id) {
+		return TokenTypeNFT
+	}
+	if util.IsValidSC(id) {
+		return TokenTypeSC
+	}
+	// Fallback for cases where regex might be too strict
+	if strings.HasPrefix(id, "Qm") {
+		return TokenTypeNFT
+	}
+	if strings.Contains(id, "_bafy") {
+		return TokenTypeFT
+	}
+	return TokenTypeRBT // Final default
 }

@@ -164,7 +164,7 @@ func ProcessDBTransaction(newEvent *model.EventTransaction, workerID int) {
 		log.Printf("[Worker %d] Step 3: TransactionInfo saved (Status: %v)", workerID, newEvent.Status)
 	}
 
-	// If consensus failed, stop here (don't update assets/balances)
+	// If consensus failed, stop here (don't update assets/balances/tokens)
 	if !newEvent.Status {
 		log.Printf("[Worker %d] Transaction %s failed consensus, skipping asset processing", workerID, txnID)
 		return
