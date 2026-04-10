@@ -316,12 +316,16 @@ func fetchParents(txnID string, maxParents int) []string {
 	return result
 }
 
-// walkTxn recursively saves parent IDs for txnID up to maxDepth levels.
+// parentsCapByLevel defines max parents to fetch per depth level.
+// level 0 = direct parents of anchor, level 4 = 5th generation.
+var parentsCapByLevel = []int{5, 4, 3, 2, 1}
+
+// walkTxn recursively saves parent IDs for txnID using per-level caps.
 // visited prevents processing the same txn twice across the whole DAG.
-func walkTxn(txnID string, level int, maxDepth int, maxParents int,
+func walkTxn(txnID string, level int,
 	txnParents map[string][]string, orderedIDs *[]string, visited map[string]struct{}) {
 
-	if level >= maxDepth {
+	if level >= len(parentsCapByLevel) {
 		return
 	}
 	if _, done := visited[txnID]; done {
@@ -329,15 +333,14 @@ func walkTxn(txnID string, level int, maxDepth int, maxParents int,
 	}
 	visited[txnID] = struct{}{}
 
-	parents := fetchParents(txnID, maxParents)
+	parents := fetchParents(txnID, parentsCapByLevel[level])
 	for _, p := range parents {
 		txnParents[txnID] = append(txnParents[txnID], p)
-		// Register parent node if new
 		if _, exists := txnParents[p]; !exists {
 			txnParents[p] = []string{}
 			*orderedIDs = append(*orderedIDs, p)
 		}
-		walkTxn(p, level+1, maxDepth, maxParents, txnParents, orderedIDs, visited)
+		walkTxn(p, level+1, txnParents, orderedIDs, visited)
 	}
 }
 
@@ -345,8 +348,6 @@ func walkTxn(txnID string, level int, maxDepth int, maxParents int,
 // then for each txn recursively walks parents up to 5 levels (max 5 parents per txn).
 func GetDAGTransactions(offset int) (model.DAGResponse, error) {
 	const anchorBatch = 60
-	const depth = 5
-	const maxParents = 7
 	const maxTxns = 500
 
 	// Step 1: fetch latest txns as primary nodes
@@ -379,7 +380,7 @@ func GetDAGTransactions(offset int) (model.DAGResponse, error) {
 
 	// Step 2: for each primary txn, recursively walk its parent chain
 	for _, a := range anchors {
-		walkTxn(a.TransactionID, 0, depth, maxParents, txnParents, &orderedIDs, visited)
+		walkTxn(a.TransactionID, 0, txnParents, &orderedIDs, visited)
 	}
 
 	// Step 3: build response (cap at maxTxns)
@@ -399,9 +400,6 @@ func GetDAGTransactions(offset int) (model.DAGResponse, error) {
 // GetDAGWithSearch prepends the searched txn (and its parent chain up to 5 levels)
 // to the normal DAG response. Use offset for pagination of the base DAG.
 func GetDAGWithSearch(searchTxnID string, offset int) (model.DAGResponse, error) {
-	const depth = 5
-	const maxParents = 7
-
 	// Step 1: walk the searched txn's parent chain
 	txnParents := make(map[string][]string)
 	orderedIDs := make([]string, 0)
@@ -410,7 +408,7 @@ func GetDAGWithSearch(searchTxnID string, offset int) (model.DAGResponse, error)
 	txnParents[searchTxnID] = []string{}
 	orderedIDs = append(orderedIDs, searchTxnID)
 
-	walkTxn(searchTxnID, 0, depth, maxParents, txnParents, &orderedIDs, visited)
+	walkTxn(searchTxnID, 0, txnParents, &orderedIDs, visited)
 
 	// Step 2: get normal DAG
 	baseDAG, err := GetDAGTransactions(offset)
