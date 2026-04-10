@@ -216,38 +216,19 @@ func fetchParents(txnID string, maxParents int) []string {
 	var rows []struct {
 		ParentTxnID string `gorm:"column:parent_txn_id"`
 	}
-	// Get all candidate parent IDs for this txn, then rank them by how many
-	// of their own tokens have a previousTransactionID (longer chain = higher rank).
-	// Parents with no chain (genesis/mint) are ranked last.
 	database.ReadDB.Raw(`
-		SELECT candidates.parent_txn_id
-		FROM (
-			SELECT DISTINCT val->>'previousTransactionID' AS parent_txn_id
-			FROM "TransactionInfo",
-			     jsonb_array_elements(
-			         COALESCE(tokens->'rbt', '[]'::jsonb) ||
-			         COALESCE(tokens->'ft', '[]'::jsonb) ||
-			         COALESCE(tokens->'nft', '[]'::jsonb) ||
-			         COALESCE(tokens->'smartContract', '[]'::jsonb)
-			     ) AS val
-			WHERE transaction_id = ?
-			  AND val->>'previousTransactionID' IS NOT NULL
-			  AND val->>'previousTransactionID' <> ''
-		) AS candidates
-		LEFT JOIN LATERAL (
-			SELECT COUNT(*) AS chain_depth
-			FROM "TransactionInfo" p,
-			     jsonb_array_elements(
-			         COALESCE(p.tokens->'rbt', '[]'::jsonb) ||
-			         COALESCE(p.tokens->'ft', '[]'::jsonb) ||
-			         COALESCE(p.tokens->'nft', '[]'::jsonb) ||
-			         COALESCE(p.tokens->'smartContract', '[]'::jsonb)
-			     ) AS pval
-			WHERE p.transaction_id = candidates.parent_txn_id
-			  AND pval->>'previousTransactionID' IS NOT NULL
-			  AND pval->>'previousTransactionID' <> ''
-		) AS depth ON true
-		ORDER BY depth.chain_depth DESC NULLS LAST
+		SELECT val->>'previousTransactionID' AS parent_txn_id
+		FROM "TransactionInfo",
+		     jsonb_array_elements(
+		         COALESCE(tokens->'rbt', '[]'::jsonb) ||
+		         COALESCE(tokens->'ft', '[]'::jsonb) ||
+		         COALESCE(tokens->'nft', '[]'::jsonb) ||
+		         COALESCE(tokens->'smartContract', '[]'::jsonb)
+		     ) WITH ORDINALITY AS t(val, idx)
+		WHERE transaction_id = ?
+		  AND val->>'previousTransactionID' IS NOT NULL
+		  AND val->>'previousTransactionID' <> ''
+		ORDER BY idx
 		LIMIT ?
 	`, txnID, maxParents).Scan(&rows)
 
