@@ -298,54 +298,40 @@ func GetDAGTransactions(offset int) (model.DAGResponse, error) {
 		}
 	}
 
-	// Step 4: JSONB fallback — batch-query TransactionInfo.tokens for any node
-	// that TokenChain returned zero parents for.
-	noParents := make([]string, 0)
-	for _, id := range orderedIDs {
-		if len(txnParents[id]) == 0 {
-			noParents = append(noParents, id)
-		}
+	// Filter orderedIDs to only those that exist in TransactionInfo
+	var existingIDs []struct {
+		TransactionID string `gorm:"column:transaction_id"`
 	}
-	if len(noParents) > 0 {
-		var fallbackRows []dagEdgeRow
-		if err := database.ReadDB.Raw(`
-			SELECT DISTINCT
-				transaction_id AS child_txn_id,
-				elem->>'previousTransactionID' AS parent_txn_id
-			FROM "TransactionInfo",
-			     jsonb_array_elements(
-			         COALESCE(tokens->'rbt', '[]'::jsonb) ||
-			         COALESCE(tokens->'ft', '[]'::jsonb) ||
-			         COALESCE(tokens->'nft', '[]'::jsonb) ||
-			         COALESCE(tokens->'smartContract', '[]'::jsonb)
-			     ) AS elem
-			WHERE transaction_id IN ?
-			  AND elem->>'previousTransactionID' IS NOT NULL
-			  AND elem->>'previousTransactionID' <> ''
-		`, noParents).Scan(&fallbackRows).Error; err == nil {
-			for _, row := range fallbackRows {
-				addNode(row.ChildTxnID)
-				addNode(row.ParentTxnID)
-				ps := parentSeen[row.ChildTxnID]
-				if _, exists := ps[row.ParentTxnID]; !exists && len(txnParents[row.ChildTxnID]) < maxParents {
-					txnParents[row.ChildTxnID] = append(txnParents[row.ChildTxnID], row.ParentTxnID)
-					ps[row.ParentTxnID] = struct{}{}
-				}
-			}
-		}
+	if err := database.ReadDB.Table("TransactionInfo").
+		Select("transaction_id").
+		Where("transaction_id IN ?", orderedIDs).
+		Scan(&existingIDs).Error; err != nil {
+		return model.DAGResponse{}, err
+	}
+	existingSet := make(map[string]struct{}, len(existingIDs))
+	for _, e := range existingIDs {
+		existingSet[e.TransactionID] = struct{}{}
 	}
 
 	const maxTxns = 300
-	if len(orderedIDs) > maxTxns {
-		orderedIDs = orderedIDs[:maxTxns]
-	}
-
 	txns := make([]model.DAGTxn, 0, len(orderedIDs))
 	for _, id := range orderedIDs {
+		if _, ok := existingSet[id]; !ok {
+			continue
+		}
+		filtered := make([]string, 0, len(txnParents[id]))
+		for _, p := range txnParents[id] {
+			if _, ok := existingSet[p]; ok {
+				filtered = append(filtered, p)
+			}
+		}
 		txns = append(txns, model.DAGTxn{
 			TransactionID:          id,
-			PreviousTransactionIDs: txnParents[id],
+			PreviousTransactionIDs: filtered,
 		})
+		if len(txns) >= maxTxns {
+			break
+		}
 	}
 	return model.DAGResponse{Transactions: txns}, nil
 }
@@ -411,42 +397,6 @@ func GetDAGWithSearch(searchTxnID string) (model.DAGResponse, error) {
 		if _, exists := ps[e.ParentTxnID]; !exists && len(searchParents[e.ChildTxnID]) < maxParents {
 			searchParents[e.ChildTxnID] = append(searchParents[e.ChildTxnID], e.ParentTxnID)
 			ps[e.ParentTxnID] = struct{}{}
-		}
-	}
-
-	// JSONB fallback for nodes with no TokenChain parents
-	noParents := make([]string, 0)
-	for _, id := range searchOrdered {
-		if len(searchParents[id]) == 0 {
-			noParents = append(noParents, id)
-		}
-	}
-	if len(noParents) > 0 {
-		var fallbackRows []dagEdgeRow
-		if err := database.ReadDB.Raw(`
-			SELECT DISTINCT
-				transaction_id AS child_txn_id,
-				elem->>'previousTransactionID' AS parent_txn_id
-			FROM "TransactionInfo",
-			     jsonb_array_elements(
-			         COALESCE(tokens->'rbt', '[]'::jsonb) ||
-			         COALESCE(tokens->'ft', '[]'::jsonb) ||
-			         COALESCE(tokens->'nft', '[]'::jsonb) ||
-			         COALESCE(tokens->'smartContract', '[]'::jsonb)
-			     ) AS elem
-			WHERE transaction_id IN ?
-			  AND elem->>'previousTransactionID' IS NOT NULL
-			  AND elem->>'previousTransactionID' <> ''
-		`, noParents).Scan(&fallbackRows).Error; err == nil {
-			for _, row := range fallbackRows {
-				addSearchNode(row.ChildTxnID)
-				addSearchNode(row.ParentTxnID)
-				ps := parentSeen[row.ChildTxnID]
-				if _, exists := ps[row.ParentTxnID]; !exists && len(searchParents[row.ChildTxnID]) < maxParents {
-					searchParents[row.ChildTxnID] = append(searchParents[row.ChildTxnID], row.ParentTxnID)
-					ps[row.ParentTxnID] = struct{}{}
-				}
-			}
 		}
 	}
 
