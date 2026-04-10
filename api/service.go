@@ -6,6 +6,7 @@ import (
 	"explorer-server/database/models"
 	"explorer-server/model"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -210,54 +211,94 @@ func buildDAGResponse(edges []dagEdgeRow) model.DAGResponse {
 	return model.DAGResponse{Transactions: txns}
 }
 
-// fetchParents returns up to maxParents previous txn IDs for a given txn,
-// read directly from TransactionInfo.tokens JSONB. Simple single-row query.
-func fetchParents(txnID string, maxParents int) []string {
+// getCandidateParents fetches all distinct previousTransactionID values from a txn's tokens JSONB.
+func getCandidateParents(txnID string) []string {
 	var rows []struct {
 		ParentTxnID string `gorm:"column:parent_txn_id"`
 	}
-	// Get all candidate parent IDs for this txn, then rank them by how many
-	// of their own tokens have a previousTransactionID (longer chain = higher rank).
-	// Parents with no chain (genesis/mint) are ranked last.
 	database.ReadDB.Raw(`
-		SELECT candidates.parent_txn_id
-		FROM (
-			SELECT DISTINCT val->>'previousTransactionID' AS parent_txn_id
+		SELECT DISTINCT elem->>'previousTransactionID' AS parent_txn_id
+		FROM "TransactionInfo",
+		     jsonb_array_elements(
+		         COALESCE(tokens->'rbt', '[]'::jsonb) ||
+		         COALESCE(tokens->'ft', '[]'::jsonb) ||
+		         COALESCE(tokens->'nft', '[]'::jsonb) ||
+		         COALESCE(tokens->'smartContract', '[]'::jsonb)
+		     ) AS elem
+		WHERE transaction_id = ?
+		  AND elem->>'previousTransactionID' IS NOT NULL
+		  AND elem->>'previousTransactionID' <> ''
+	`, txnID).Scan(&rows)
+	result := make([]string, 0, len(rows))
+	for _, r := range rows {
+		if r.ParentTxnID != "" {
+			result = append(result, r.ParentTxnID)
+		}
+	}
+	return result
+}
+
+// chainDepthScore follows a single parent chain (one branch) for up to maxDepth hops
+// and returns how many hops it could go. Used to rank candidates by chain length.
+func chainDepthScore(txnID string, maxDepth int) int {
+	current := txnID
+	for d := 0; d < maxDepth; d++ {
+		var row struct {
+			ParentTxnID string `gorm:"column:parent_txn_id"`
+		}
+		database.ReadDB.Raw(`
+			SELECT elem->>'previousTransactionID' AS parent_txn_id
 			FROM "TransactionInfo",
 			     jsonb_array_elements(
 			         COALESCE(tokens->'rbt', '[]'::jsonb) ||
 			         COALESCE(tokens->'ft', '[]'::jsonb) ||
 			         COALESCE(tokens->'nft', '[]'::jsonb) ||
 			         COALESCE(tokens->'smartContract', '[]'::jsonb)
-			     ) AS val
+			     ) AS elem
 			WHERE transaction_id = ?
-			  AND val->>'previousTransactionID' IS NOT NULL
-			  AND val->>'previousTransactionID' <> ''
-		) AS candidates
-		LEFT JOIN LATERAL (
-			SELECT COUNT(*) AS chain_depth
-			FROM "TransactionInfo" p,
-			     jsonb_array_elements(
-			         COALESCE(p.tokens->'rbt', '[]'::jsonb) ||
-			         COALESCE(p.tokens->'ft', '[]'::jsonb) ||
-			         COALESCE(p.tokens->'nft', '[]'::jsonb) ||
-			         COALESCE(p.tokens->'smartContract', '[]'::jsonb)
-			     ) AS pval
-			WHERE p.transaction_id = candidates.parent_txn_id
-			  AND pval->>'previousTransactionID' IS NOT NULL
-			  AND pval->>'previousTransactionID' <> ''
-		) AS depth ON true
-		ORDER BY depth.chain_depth DESC NULLS LAST
-		LIMIT ?
-	`, txnID, maxParents).Scan(&rows)
-
-	parents := make([]string, 0, len(rows))
-	for _, r := range rows {
-		if r.ParentTxnID != "" {
-			parents = append(parents, r.ParentTxnID)
+			  AND elem->>'previousTransactionID' IS NOT NULL
+			  AND elem->>'previousTransactionID' <> ''
+			LIMIT 1
+		`, current).Scan(&row)
+		if row.ParentTxnID == "" {
+			return d
 		}
+		current = row.ParentTxnID
 	}
-	return parents
+	return maxDepth
+}
+
+// fetchParents gets all candidate parent IDs for a txn, scores each by how deep
+// its chain goes (up to 5 levels), sorts deepest first, returns top maxParents.
+func fetchParents(txnID string, maxParents int) []string {
+	const scoreDepth = 5
+	candidates := getCandidateParents(txnID)
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	type scored struct {
+		id    string
+		score int
+	}
+	scoredList := make([]scored, len(candidates))
+	for i, c := range candidates {
+		scoredList[i] = scored{id: c, score: chainDepthScore(c, scoreDepth)}
+	}
+
+	// Sort by score descending (deepest chain first)
+	sort.Slice(scoredList, func(i, j int) bool {
+		return scoredList[i].score > scoredList[j].score
+	})
+
+	result := make([]string, 0, maxParents)
+	for _, s := range scoredList {
+		if len(result) >= maxParents {
+			break
+		}
+		result = append(result, s.id)
+	}
+	return result
 }
 
 // parentsCapByLevel defines how many parent txns to fetch at each depth level.
