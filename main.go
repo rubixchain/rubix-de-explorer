@@ -13,6 +13,7 @@ import (
 
 	"explorer-server/database"
 	"explorer-server/database/models"
+	"explorer-server/database/operations"
 	"explorer-server/ipfs"
 	"explorer-server/processor"
 	"explorer-server/pubsub"
@@ -51,6 +52,16 @@ func main() {
 
 	// Initialize PostgreSQL
 	database.ConnectAndMigrate(false)
+	log.Println("Database connection established and migrated")
+
+	// One-time pledged balance sync
+	log.Println("Migration: Starting one-time PledgedBalance synchronization...")
+	if err := operations.SyncPledgedBalances(database.WriteDB); err != nil {
+		log.Printf("Migration Warning: Failed to sync pledged balances: %v\n", err)
+	} else {
+		log.Println("Migration: PledgedBalance synchronization complete")
+	}
+
 	log.Printf("Explorer Server initialized with %d cores\n", totalCores)
 
 	// --------------------------------------------------

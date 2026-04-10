@@ -7,27 +7,37 @@ import (
 	"explorer-server/model"
 	"explorer-server/util"
 
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
 // SaveTransaction saves a transaction to the database
-func SaveTransaction(txn *models.Transactions) error {
-	return database.WriteDB.Clauses(clause.OnConflict{DoNothing: true}).Create(txn).Error
+func SaveTransaction(db *gorm.DB, txn *models.Transactions) error {
+	if db == nil {
+		db = database.WriteDB
+	}
+	return db.Clauses(clause.OnConflict{DoNothing: true}).Create(txn).Error
 }
 
 // SaveEventTransaction saves the PubSub event wrapper (status + error message for failed consensus)
-func SaveEventTransaction(txnID string, status bool, message string) error {
+func SaveEventTransaction(db *gorm.DB, txnID string, status bool, message string) error {
+	if db == nil {
+		db = database.WriteDB
+	}
 	event := &models.EventTransaction{
 		TransactionID: txnID,
 		Status:        status,
 		Message:       message,
 	}
-	return database.WriteDB.Clauses(clause.OnConflict{DoNothing: true}).Create(event).Error
+	return db.Clauses(clause.OnConflict{DoNothing: true}).Create(event).Error
 }
 
 // SaveTransactionDetails saves the flattened TransactionInfo fields for easy querying.
 // If status is false, it saves to FailedTransactionInfo table.
-func SaveTransactionDetails(txnID string, info *model.TransactionInfo, status bool) error {
+func SaveTransactionDetails(db *gorm.DB, txnID string, info *model.TransactionInfo, status bool) error {
+	if db == nil {
+		db = database.WriteDB
+	}
 	tokensJSON, _ := json.Marshal(info.Tokens)
 	committedJSON, _ := json.Marshal(info.CommittedTokens)
 	quorumsJSON, _ := json.Marshal(info.Quorums)
@@ -71,7 +81,7 @@ func SaveTransactionDetails(txnID string, info *model.TransactionInfo, status bo
 			Status:          true,
 			Amount:          finalAmount,
 		}
-		return database.WriteDB.Clauses(clause.OnConflict{DoNothing: true}).Create(details).Error
+		return db.Clauses(clause.OnConflict{DoNothing: true}).Create(details).Error
 	} else {
 		details := &models.FailedTransactionInfo{
 			TransactionID:   txnID,
@@ -86,6 +96,6 @@ func SaveTransactionDetails(txnID string, info *model.TransactionInfo, status bo
 			Status:          false,
 			Amount:          finalAmount,
 		}
-		return database.WriteDB.Clauses(clause.OnConflict{DoNothing: true}).Create(details).Error
+		return db.Clauses(clause.OnConflict{DoNothing: true}).Create(details).Error
 	}
 }

@@ -115,8 +115,8 @@ func GetDIDCountHandler(w http.ResponseWriter, r *http.Request) {
 //   3. Lists and Holders Handlers
 // ==========================================
 
-// GetLatestTransactionsListHandler returns a paginated list of latest transactions
-func GetLatestTransactionsListHandler(w http.ResponseWriter, r *http.Request) {
+// GetLatestTransactionsInfoListHandler returns a paginated list of latest transactions (FULL)
+func GetLatestTransactionsInfoListHandler(w http.ResponseWriter, r *http.Request) {
 	limit, page := getPagination(r)
 	data, total, err := api.GetTransactionInfoList(limit, page)
 	if err != nil {
@@ -125,6 +125,21 @@ func GetLatestTransactionsListHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if data == nil {
 		data = []models.TransactionInfo{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(model.NewPaginated(data, total, page, limit))
+}
+
+// GetLatestTransactionsHandler returns a lightweight list of latest transactions (Summary)
+func GetLatestTransactionsHandler(w http.ResponseWriter, r *http.Request) {
+	limit, page := getPagination(r)
+	data, total, err := api.GetTransactionSummaryList(limit, page)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if data == nil {
+		data = []models.TransactionSummary{}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(model.NewPaginated(data, total, page, limit))
@@ -258,7 +273,32 @@ func GetDAGTxnHandler(w http.ResponseWriter, r *http.Request) {
 // Fetches latest transactions in batches of 50, walks ancestors up to depth 7,
 // and keeps adding batches until 500 total nodes are collected.
 func GetDAGTransactionsHandler(w http.ResponseWriter, r *http.Request) {
-	data, err := api.GetDAGTransactions()
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+	data, err := api.GetDAGTransactions(offset)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(data)
+}
+
+// GetDAGWithSearchHandler returns the full DAG merged with the searched txn's ancestor chain.
+// Query param: txnID (required).
+func GetDAGWithSearchHandler(w http.ResponseWriter, r *http.Request) {
+	txnID := r.URL.Query().Get("txnID")
+	if txnID == "" {
+		http.Error(w, `{"error":"txnID parameter is required"}`, http.StatusBadRequest)
+		return
+	}
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+	data, err := api.GetDAGWithSearch(txnID, offset)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

@@ -6,6 +6,7 @@ import (
 	"explorer-server/database/models"
 	"explorer-server/model"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -106,6 +107,12 @@ func GetDIDCount() (int64, error) {
 // 3. Lists and Holders
 // -------------------------------------------------------------------
 
+// dagEdgeRow is a shared type for recursive CTE results used by DAG functions.
+type dagEdgeRow struct {
+	ChildTxnID  string `gorm:"column:child_txn_id"`
+	ParentTxnID string `gorm:"column:parent_txn_id"`
+}
+
 // GetDAGFromTxn returns the anchor transaction plus up to `depth` levels of ancestors,
 // traversing the TokenChain backwards via previous_transaction_id.
 // Nodes are all unique TransactionInfo records. Edges are directed child → parent links.
@@ -116,12 +123,7 @@ func GetDAGFromTxn(txnID string, depth int) (model.DAGResponse, error) {
 		depth = 100
 	}
 
-	type edgeRow struct {
-		ChildTxnID  string `gorm:"column:child_txn_id"`
-		ParentTxnID string `gorm:"column:parent_txn_id"`
-	}
-
-	var edges []edgeRow
+	var edges []dagEdgeRow
 	if err := database.ReadDB.Raw(`
 		WITH RECURSIVE dag_edges AS (
 
@@ -176,168 +178,264 @@ func GetDAGFromTxn(txnID string, depth int) (model.DAGResponse, error) {
 		seen[e.ParentTxnID] = struct{}{}
 	}
 
-	txnIDs := make([]string, 0, len(seen))
-	for id := range seen {
-		txnIDs = append(txnIDs, id)
-	}
-
-	var txns []models.TransactionInfo
-	if len(txnIDs) > 0 {
-		if err := database.ReadDB.Table("TransactionInfo").
-			Where("transaction_id IN ?", txnIDs).
-			Order("epoch DESC").
-			Find(&txns).Error; err != nil {
-			return model.DAGResponse{}, err
-		}
-	}
-
-	dagEdges := make([]model.DAGEdge, len(edges))
-	for i, e := range edges {
-		dagEdges[i] = model.DAGEdge{From: e.ChildTxnID, To: e.ParentTxnID}
-	}
-
-	if txns == nil {
-		txns = []models.TransactionInfo{}
-	}
-
-	return model.DAGResponse{
-		Transactions: txns,
-		Edges:        dagEdges,
-	}, nil
+	return buildDAGResponse(edges), nil
 }
 
-// GetDAGTransactions builds a DAG by fetching the latest transactions as anchors
-// and walking their ancestors up to the given depth. If the total node count is
-// below targetNodes, it fetches more anchors in batches and repeats until the
-// target is met or there are no more transactions to fetch.
-//
-// Fixed params: anchorBatch=50, depth=7, targetNodes=500.
-func GetDAGTransactions() (model.DAGResponse, error) {
-	const anchorBatch = 50
-	const depth = 7
-	const targetNodes = 500
+// buildDAGResponse converts edge rows into DAGTxn nodes, grouping parents per
+// child and capping at 20 unique parents per transaction.
+func buildDAGResponse(edges []dagEdgeRow) model.DAGResponse {
+	const maxParents = 6
+	// parentMap: child -> ordered unique parents (max 20)
+	parentMap := make(map[string][]string)
+	parentSeen := make(map[string]map[string]struct{})
 
-	type edgeRow struct {
-		ChildTxnID  string `gorm:"column:child_txn_id"`
-		ParentTxnID string `gorm:"column:parent_txn_id"`
-	}
-
-	seenNodes := make(map[string]struct{})
-	seenEdges := make(map[string]struct{})
-	var allEdges []edgeRow
-	offset := 0
-
-	for len(seenNodes) < targetNodes {
-		// Fetch next batch of anchor txn IDs
-		var anchors []struct {
-			TransactionID string `gorm:"column:transaction_id"`
+	for _, e := range edges {
+		if _, ok := parentSeen[e.ChildTxnID]; !ok {
+			parentSeen[e.ChildTxnID] = make(map[string]struct{})
 		}
-		if err := database.ReadDB.Table("TransactionInfo").
-			Select("transaction_id").
-			Order("epoch DESC").
-			Limit(anchorBatch).Offset(offset).
-			Scan(&anchors).Error; err != nil {
-			return model.DAGResponse{}, err
-		}
-		if len(anchors) == 0 {
-			break // no more txns
-		}
-		offset += len(anchors)
-
-		anchorIDs := make([]string, len(anchors))
-		for i, a := range anchors {
-			anchorIDs[i] = a.TransactionID
-			seenNodes[a.TransactionID] = struct{}{}
-		}
-
-		// Walk ancestors from this batch of anchors
-		var batchEdges []edgeRow
-		if err := database.ReadDB.Raw(`
-			WITH RECURSIVE dag_edges AS (
-
-	-- Base: limit parents per anchor
-	SELECT child_txn_id, parent_txn_id, depth FROM (
-		SELECT
-			transaction_id AS child_txn_id,
-			previous_transaction_id AS parent_txn_id,
-			1 AS depth,
-			ROW_NUMBER() OVER (
-				PARTITION BY transaction_id
-				ORDER BY transaction_id
-			) as rn
-		FROM "TokenChain"
-		WHERE transaction_id IN ?
-		  AND previous_transaction_id IS NOT NULL
-		  AND previous_transaction_id <> ''
-	) t
-	WHERE rn <= 20
-
-	UNION ALL
-
-	-- Recursive: limit parents per node
-	SELECT child_txn_id, parent_txn_id, depth FROM (
-		SELECT
-			tc.transaction_id AS child_txn_id,
-			tc.previous_transaction_id AS parent_txn_id,
-			de.depth + 1 AS depth,
-			ROW_NUMBER() OVER (
-				PARTITION BY tc.transaction_id
-				ORDER BY tc.transaction_id
-			) as rn
-		FROM "TokenChain" tc
-		INNER JOIN dag_edges de 
-			ON tc.transaction_id = de.parent_txn_id
-		WHERE de.depth < ?
-		  AND tc.previous_transaction_id IS NOT NULL
-		  AND tc.previous_transaction_id <> ''
-	) t
-	WHERE rn <= 20
-)
-
-SELECT DISTINCT child_txn_id, parent_txn_id FROM dag_edges;
-		`, anchorIDs, depth).Scan(&batchEdges).Error; err != nil {
-			return model.DAGResponse{}, err
-		}
-
-		for _, e := range batchEdges {
-			seenNodes[e.ChildTxnID] = struct{}{}
-			seenNodes[e.ParentTxnID] = struct{}{}
-			key := e.ChildTxnID + "|" + e.ParentTxnID
-			if _, exists := seenEdges[key]; !exists {
-				seenEdges[key] = struct{}{}
-				allEdges = append(allEdges, e)
+		if _, exists := parentSeen[e.ChildTxnID][e.ParentTxnID]; !exists {
+			if len(parentMap[e.ChildTxnID]) < maxParents {
+				parentMap[e.ChildTxnID] = append(parentMap[e.ChildTxnID], e.ParentTxnID)
+				parentSeen[e.ChildTxnID][e.ParentTxnID] = struct{}{}
 			}
 		}
 	}
 
-	// Fetch TransactionInfo for all collected node IDs
-	allIDs := make([]string, 0, len(seenNodes))
-	for id := range seenNodes {
-		allIDs = append(allIDs, id)
+	txns := make([]model.DAGTxn, 0, len(parentMap))
+	for childID, parents := range parentMap {
+		txns = append(txns, model.DAGTxn{
+			TransactionID:          childID,
+			PreviousTransactionIDs: parents,
+		})
+	}
+	return model.DAGResponse{Transactions: txns}
+}
+
+// hasParent checks if a txn has any previousTransactionID in its tokens JSONB.
+func hasParent(txnID string) bool {
+	var count int64
+	database.ReadDB.Raw(`
+		SELECT COUNT(*)
+		FROM "TransactionInfo",
+		     jsonb_array_elements(
+		         COALESCE(tokens->'rbt', '[]'::jsonb) ||
+		         COALESCE(tokens->'ft', '[]'::jsonb) ||
+		         COALESCE(tokens->'nft', '[]'::jsonb) ||
+		         COALESCE(tokens->'smartContract', '[]'::jsonb)
+		     ) AS elem
+		WHERE transaction_id = ?
+		  AND elem->>'previousTransactionID' IS NOT NULL
+		  AND elem->>'previousTransactionID' <> ''
+		LIMIT 1
+	`, txnID).Scan(&count)
+	return count > 0
+}
+
+// chainScore recursively counts how many ancestor levels exist behind txnID, up to maxDepth.
+func chainScore(txnID string, maxDepth int) int {
+	if maxDepth == 0 {
+		return 0
+	}
+	if !hasParent(txnID) {
+		return 0
+	}
+	// get one parent and recurse
+	var row struct {
+		ParentTxnID string `gorm:"column:parent_txn_id"`
+	}
+	database.ReadDB.Raw(`
+		SELECT elem->>'previousTransactionID' AS parent_txn_id
+		FROM "TransactionInfo",
+		     jsonb_array_elements(
+		         COALESCE(tokens->'rbt', '[]'::jsonb) ||
+		         COALESCE(tokens->'ft', '[]'::jsonb) ||
+		         COALESCE(tokens->'nft', '[]'::jsonb) ||
+		         COALESCE(tokens->'smartContract', '[]'::jsonb)
+		     ) AS elem
+		WHERE transaction_id = ?
+		  AND elem->>'previousTransactionID' IS NOT NULL
+		  AND elem->>'previousTransactionID' <> ''
+		LIMIT 1
+	`, txnID).Scan(&row)
+	if row.ParentTxnID == "" {
+		return 0
+	}
+	return 1 + chainScore(row.ParentTxnID, maxDepth-1)
+}
+
+// fetchParents gets all candidate parent IDs for a txn, scores each by chain depth
+// up to 5 levels, returns top maxParents sorted deepest-chain first.
+func fetchParents(txnID string, maxParents int) []string {
+	var rows []struct {
+		ParentTxnID string `gorm:"column:parent_txn_id"`
+	}
+	database.ReadDB.Raw(`
+		SELECT DISTINCT elem->>'previousTransactionID' AS parent_txn_id
+		FROM "TransactionInfo",
+		     jsonb_array_elements(
+		         COALESCE(tokens->'rbt', '[]'::jsonb) ||
+		         COALESCE(tokens->'ft', '[]'::jsonb) ||
+		         COALESCE(tokens->'nft', '[]'::jsonb) ||
+		         COALESCE(tokens->'smartContract', '[]'::jsonb)
+		     ) AS elem
+		WHERE transaction_id = ?
+		  AND elem->>'previousTransactionID' IS NOT NULL
+		  AND elem->>'previousTransactionID' <> ''
+	`, txnID).Scan(&rows)
+
+	candidates := make([]string, 0, len(rows))
+	for _, r := range rows {
+		if r.ParentTxnID != "" {
+			candidates = append(candidates, r.ParentTxnID)
+		}
+	}
+	if len(candidates) == 0 {
+		return nil
 	}
 
-	var txns []models.TransactionInfo
-	if len(allIDs) > 0 {
-		if err := database.ReadDB.Table("TransactionInfo").
-			Where("transaction_id IN ?", allIDs).
-			Order("epoch DESC").
-			Find(&txns).Error; err != nil {
-			return model.DAGResponse{}, err
+	// Score each candidate by how deep its chain goes (up to 5 levels)
+	type scored struct {
+		id    string
+		score int
+	}
+	list := make([]scored, len(candidates))
+	for i, c := range candidates {
+		list[i] = scored{id: c, score: chainScore(c, 5)}
+	}
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].score > list[j].score
+	})
+
+	result := make([]string, 0, maxParents)
+	for _, s := range list {
+		if len(result) >= maxParents {
+			break
+		}
+		result = append(result, s.id)
+	}
+	return result
+}
+
+// walkTxn recursively saves parent IDs for txnID up to maxDepth levels.
+// visited prevents processing the same txn twice across the whole DAG.
+func walkTxn(txnID string, level int, maxDepth int, maxParents int,
+	txnParents map[string][]string, orderedIDs *[]string, visited map[string]struct{}) {
+
+	if level >= maxDepth {
+		return
+	}
+	if _, done := visited[txnID]; done {
+		return
+	}
+	visited[txnID] = struct{}{}
+
+	parents := fetchParents(txnID, maxParents)
+	for _, p := range parents {
+		txnParents[txnID] = append(txnParents[txnID], p)
+		// Register parent node if new
+		if _, exists := txnParents[p]; !exists {
+			txnParents[p] = []string{}
+			*orderedIDs = append(*orderedIDs, p)
+		}
+		walkTxn(p, level+1, maxDepth, maxParents, txnParents, orderedIDs, visited)
+	}
+}
+
+// GetDAGTransactions fetches the latest `anchorBatch` txns by epoch DESC (with offset),
+// then for each txn recursively walks parents up to 5 levels (max 5 parents per txn).
+func GetDAGTransactions(offset int) (model.DAGResponse, error) {
+	const anchorBatch = 60
+	const depth = 5
+	const maxParents = 7
+	const maxTxns = 500
+
+	// Step 1: fetch latest txns as primary nodes
+	var anchors []struct {
+		TransactionID string `gorm:"column:transaction_id"`
+	}
+	if err := database.ReadDB.Table("TransactionInfo").
+		Select("transaction_id").
+		Order("epoch DESC").
+		Limit(anchorBatch).
+		Offset(offset).
+		Scan(&anchors).Error; err != nil {
+		return model.DAGResponse{}, err
+	}
+	if len(anchors) == 0 {
+		return model.DAGResponse{}, nil
+	}
+
+	txnParents := make(map[string][]string)
+	orderedIDs := make([]string, 0)
+	visited := make(map[string]struct{})
+
+	// Register all primary txns first (preserves epoch DESC order)
+	for _, a := range anchors {
+		if _, exists := txnParents[a.TransactionID]; !exists {
+			txnParents[a.TransactionID] = []string{}
+			orderedIDs = append(orderedIDs, a.TransactionID)
 		}
 	}
 
-	dagEdges := make([]model.DAGEdge, len(allEdges))
-	for i, e := range allEdges {
-		dagEdges[i] = model.DAGEdge{From: e.ChildTxnID, To: e.ParentTxnID}
+	// Step 2: for each primary txn, recursively walk its parent chain
+	for _, a := range anchors {
+		walkTxn(a.TransactionID, 0, depth, maxParents, txnParents, &orderedIDs, visited)
 	}
 
-	if txns == nil {
-		txns = []models.TransactionInfo{}
+	// Step 3: build response (cap at maxTxns)
+	txns := make([]model.DAGTxn, 0, len(orderedIDs))
+	for _, id := range orderedIDs {
+		txns = append(txns, model.DAGTxn{
+			TransactionID:          id,
+			PreviousTransactionIDs: txnParents[id],
+		})
+		if len(txns) >= maxTxns {
+			break
+		}
 	}
-	if dagEdges == nil {
-		dagEdges = []model.DAGEdge{}
+	return model.DAGResponse{Transactions: txns}, nil
+}
+
+// GetDAGWithSearch prepends the searched txn (and its parent chain up to 5 levels)
+// to the normal DAG response. Use offset for pagination of the base DAG.
+func GetDAGWithSearch(searchTxnID string, offset int) (model.DAGResponse, error) {
+	const depth = 5
+	const maxParents = 7
+
+	// Step 1: walk the searched txn's parent chain
+	txnParents := make(map[string][]string)
+	orderedIDs := make([]string, 0)
+	visited := make(map[string]struct{})
+
+	txnParents[searchTxnID] = []string{}
+	orderedIDs = append(orderedIDs, searchTxnID)
+
+	walkTxn(searchTxnID, 0, depth, maxParents, txnParents, &orderedIDs, visited)
+
+	// Step 2: get normal DAG
+	baseDAG, err := GetDAGTransactions(offset)
+	if err != nil {
+		return model.DAGResponse{}, err
 	}
-	return model.DAGResponse{Transactions: txns, Edges: dagEdges}, nil
+
+	// Step 3: merge — searched txn + its ancestors first, then base DAG (deduped)
+	seen := make(map[string]struct{}, len(orderedIDs)+len(baseDAG.Transactions))
+	merged := make([]model.DAGTxn, 0, len(orderedIDs)+len(baseDAG.Transactions))
+
+	for _, id := range orderedIDs {
+		merged = append(merged, model.DAGTxn{
+			TransactionID:          id,
+			PreviousTransactionIDs: txnParents[id],
+		})
+		seen[id] = struct{}{}
+	}
+	for _, t := range baseDAG.Transactions {
+		if _, exists := seen[t.TransactionID]; !exists {
+			merged = append(merged, t)
+		}
+	}
+
+	return model.DAGResponse{Transactions: merged}, nil
 }
 
 func GetTransactionInfoList(limit, page int) ([]models.TransactionInfo, int64, error) {
@@ -379,6 +477,51 @@ func GetTransactionInfoList(limit, page int) ([]models.TransactionInfo, int64, e
 
 	if result == nil {
 		result = make([]models.TransactionInfo, 0)
+	}
+
+	return result, total, nil
+}
+
+// GetTransactionSummaryList returns a lightweight list of transactions (no token details)
+func GetTransactionSummaryList(limit, page int) ([]models.TransactionSummary, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 10
+	}
+	offset := (page - 1) * limit
+
+	// 1. Calculate total count
+	var total int64
+	countQuery := `
+		SELECT COUNT(*) FROM (
+			SELECT transaction_id FROM "TransactionInfo" WHERE amount > 0
+			UNION ALL
+			SELECT transaction_id FROM "FailedTransactionInfo" WHERE amount > 0
+		) AS combined
+	`
+	if err := database.ReadDB.Raw(countQuery).Scan(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	// 2. Fetch paginated results (Summary ONLY)
+	var result []models.TransactionSummary
+	dataQuery := `
+		SELECT transaction_id, initiator, owner, epoch, network, status, amount, created_at FROM (
+			SELECT transaction_id, initiator, owner, epoch, network, status, amount, created_at FROM "TransactionInfo" WHERE amount > 0
+			UNION ALL
+			SELECT transaction_id, initiator, owner, epoch, network, status, amount, created_at FROM "FailedTransactionInfo" WHERE amount > 0
+		) AS combined
+		ORDER BY created_at DESC
+		LIMIT ? OFFSET ?
+	`
+	if err := database.ReadDB.Raw(dataQuery, limit, offset).Scan(&result).Error; err != nil {
+		return nil, 0, err
+	}
+
+	if result == nil {
+		result = make([]models.TransactionSummary, 0)
 	}
 
 	return result, total, nil

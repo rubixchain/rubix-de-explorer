@@ -33,5 +33,13 @@ NUL
 .DS_Store
 Thumbs.db
 
+# IPFS Data
+ipfs/.ipfs/
+.ipfs/
+
+# Logs
+*.txt
+*.log
+
 # Go build cache
 go.sum.backup

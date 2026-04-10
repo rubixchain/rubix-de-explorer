@@ -37,6 +37,7 @@ const (
 	TokenStatus_Orphaned         int16 = 13
 	TokenStatus_ChainSyncIssue   int16 = 14
 	TokenStatus_BeingDoubleSpent int16 = 15
+	TokenStatus_Unpledged        int16 = 16
 )
 
 // TokenRole represents a role definition
