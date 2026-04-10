@@ -217,17 +217,18 @@ func fetchParents(txnID string, maxParents int) []string {
 		ParentTxnID string `gorm:"column:parent_txn_id"`
 	}
 	database.ReadDB.Raw(`
-		SELECT DISTINCT elem->>'previousTransactionID' AS parent_txn_id
+		SELECT val->>'previousTransactionID' AS parent_txn_id
 		FROM "TransactionInfo",
 		     jsonb_array_elements(
 		         COALESCE(tokens->'rbt', '[]'::jsonb) ||
 		         COALESCE(tokens->'ft', '[]'::jsonb) ||
 		         COALESCE(tokens->'nft', '[]'::jsonb) ||
 		         COALESCE(tokens->'smartContract', '[]'::jsonb)
-		     ) AS elem
+		     ) WITH ORDINALITY AS t(val, idx)
 		WHERE transaction_id = ?
-		  AND elem->>'previousTransactionID' IS NOT NULL
-		  AND elem->>'previousTransactionID' <> ''
+		  AND val->>'previousTransactionID' IS NOT NULL
+		  AND val->>'previousTransactionID' <> ''
+		ORDER BY idx
 		LIMIT ?
 	`, txnID, maxParents).Scan(&rows)
 
@@ -270,7 +271,7 @@ func walkTxn(txnID string, level int, maxDepth int, maxParents int,
 func GetDAGTransactions(offset int) (model.DAGResponse, error) {
 	const anchorBatch = 60
 	const depth = 5
-	const maxParents = 5
+	const maxParents = 7
 	const maxTxns = 500
 
 	// Step 1: fetch latest txns as primary nodes
@@ -324,7 +325,7 @@ func GetDAGTransactions(offset int) (model.DAGResponse, error) {
 // to the normal DAG response. Use offset for pagination of the base DAG.
 func GetDAGWithSearch(searchTxnID string, offset int) (model.DAGResponse, error) {
 	const depth = 5
-	const maxParents = 5
+	const maxParents = 7
 
 	// Step 1: walk the searched txn's parent chain
 	txnParents := make(map[string][]string)
