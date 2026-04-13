@@ -1,6 +1,7 @@
 package processor
 
 import (
+	"encoding/json"
 	"explorer-server/database"
 	"explorer-server/database/models"
 	"explorer-server/database/operations"
@@ -143,6 +144,18 @@ func ProcessDBTransaction(newEvent *model.EventTransaction, workerID int) {
 	if txnInfo == nil {
 		log.Printf("[Worker %d] Transaction %s has no TransactionInfo, skipping details", workerID, txnID)
 		return
+	}
+
+	// Debug: pretty-print the parsed TransactionInfo
+	if infoBytes, err := json.MarshalIndent(txnInfo, "", "  "); err == nil {
+		log.Printf("[Worker %d] Parsed TransactionInfo for %s:\n%s", workerID, txnID, string(infoBytes))
+	}
+
+	// Debug: pretty-print parsed Signature (if present)
+	if sig, _ := newEvent.Transaction.ParseSignature(); sig != nil {
+		if sigBytes, err := json.MarshalIndent(sig, "", "  "); err == nil {
+			log.Printf("[Worker %d] Parsed Signature for %s:\n%s", workerID, txnID, string(sigBytes))
+		}
 	}
 
 	// 2. Save Transaction as JSON (always) — pass raw bytes directly

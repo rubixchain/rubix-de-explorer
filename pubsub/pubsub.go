@@ -49,7 +49,8 @@ func (ps *PubSub) receivePub(topic string, p *ipfsnode.PubSubSubscription) {
 			time.Sleep(1 * time.Second) // Prevent tight loop crash
 			continue
 		}
-		log.Printf("Received PubSub message from peer: %s", m.From.String())
+		// Include topic and payload size for better visibility (debug/logging only)
+		log.Printf("Received PubSub message from peer: %s (topic=%s, len=%d)", m.From.String(), topic, len(m.Data))
 		if cb, exists := ps.sub[topic]; exists {
 			go cb(m.From.String(), topic, m.Data)
 		}

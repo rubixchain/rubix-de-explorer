@@ -17,6 +17,16 @@ func TxnCallBack(peerID string, topic string, data []byte) {
 		decodedData = data
 	}
 
+	// Debug: log the raw incoming payload (truncated to avoid flooding logs)
+	if len(decodedData) > 0 {
+		const maxLog = 4096
+		if len(decodedData) <= maxLog {
+			log.Printf("[PubSub][%s] Raw payload from %s (len=%d): %s", topic, peerID, len(decodedData), string(decodedData))
+		} else {
+			log.Printf("[PubSub][%s] Raw payload from %s (len=%d) (truncated): %s...", topic, peerID, len(decodedData), string(decodedData[:maxLog]))
+		}
+	}
+
 	switch topic {
 	case models.Event_RubixTxns:
 		var newEvent model.EventTransaction
@@ -24,6 +34,23 @@ func TxnCallBack(peerID string, topic string, data []byte) {
 		if err != nil {
 			log.Printf("Warning: Failed to parse published Transaction event: %v", err)
 			return
+		}
+		// Debug: pretty-print the unmarshaled EventTransaction for visibility
+		if b, err := json.MarshalIndent(newEvent, "", "  "); err == nil {
+			log.Printf("[PubSub][%s] Parsed EventTransaction (from %s): %s", topic, peerID, string(b))
+		}
+
+		// Debug: try to pretty-print the inner Transaction.Info (raw JSON) if present
+		if newEvent.Transaction != nil && newEvent.Transaction.Info != nil {
+			var prettyInfo interface{}
+			if err := json.Unmarshal(newEvent.Transaction.Info, &prettyInfo); err == nil {
+				if ib, err := json.MarshalIndent(prettyInfo, "", "  "); err == nil {
+					log.Printf("[PubSub][%s] Inner Transaction.Info (pretty): %s", topic, string(ib))
+				}
+			} else {
+				// Fallback: raw bytes
+				log.Printf("[PubSub][%s] Inner Transaction.Info (raw): %s", topic, string(newEvent.Transaction.Info))
+			}
 		}
 		// Hand off to the transaction processor
 		HandleIncomingTxn(&newEvent)
