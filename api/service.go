@@ -698,7 +698,15 @@ func GetSCList(limit, page int) ([]models.Token, int64, error) {
 
 func GetTransactionInfo(txnID string) (models.TransactionInfo, error) {
 	var transaction models.TransactionInfo
-	if err := database.ReadDB.Table("TransactionInfo").Where("transaction_id = ?", txnID).First(&transaction).Error; err != nil {
+	query := `
+		SELECT transaction_id, initiator,
+			COALESCE(NULLIF(owner, ''), tokens->'rbt'->0->>'tokenId', tokens->'ft'->0->>'tokenId', tokens->'nft'->0->>'tokenId', tokens->'smartContract'->0->>'tokenId') AS owner,
+			epoch, network, tokens, committed_tokens, quorums, memo, status, amount, created_at, updated_at
+		FROM "TransactionInfo"
+		WHERE transaction_id = ?
+		LIMIT 1
+	`
+	if err := database.ReadDB.Raw(query, txnID).Scan(&transaction).Error; err != nil {
 		return transaction, err
 	}
 	return transaction, nil
