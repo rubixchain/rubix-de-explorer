@@ -67,10 +67,17 @@ func SaveTransactionDetails(db *gorm.DB, txnID string, info *model.TransactionIn
 		}
 	}
 
-	// For smart contract transactions, owner = the SC token ID (not the receiver DID).
+	// Derive owner based on transaction type:
+	// - SC transactions:        owner = SC token ID
+	// - RBT mint/split (no owner set by node): owner = token's DID field
+	// - All other cases:        owner = info.Owner as received
 	owner := info.Owner
-	if info.Tokens != nil && len(info.Tokens.SmartContract) > 0 {
-		owner = info.Tokens.SmartContract[0].TokenID
+	if info.Tokens != nil {
+		if len(info.Tokens.SmartContract) > 0 {
+			owner = info.Tokens.SmartContract[0].TokenID
+		} else if owner == "" && len(info.Tokens.RBT) > 0 {
+			owner = info.Tokens.RBT[0].DID
+		}
 	}
 
 	if status {
