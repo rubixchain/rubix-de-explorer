@@ -67,11 +67,17 @@ func SaveTransactionDetails(db *gorm.DB, txnID string, info *model.TransactionIn
 		}
 	}
 
+	// For smart contract transactions, owner = the SC token ID (not the receiver DID).
+	owner := info.Owner
+	if info.Tokens != nil && len(info.Tokens.SmartContract) > 0 {
+		owner = info.Tokens.SmartContract[0].TokenID
+	}
+
 	if status {
 		details := &models.TransactionInfo{
 			TransactionID:   txnID,
 			Initiator:       info.Initiator,
-			Owner:           info.Owner,
+			Owner:           owner,
 			Epoch:           info.Epoch,
 			Network:         info.Network,
 			Tokens:          tokensJSON,
@@ -86,7 +92,7 @@ func SaveTransactionDetails(db *gorm.DB, txnID string, info *model.TransactionIn
 		details := &models.FailedTransactionInfo{
 			TransactionID:   txnID,
 			Initiator:       info.Initiator,
-			Owner:           info.Owner,
+			Owner:           owner,
 			Epoch:           info.Epoch,
 			Network:         info.Network,
 			Tokens:          tokensJSON,
