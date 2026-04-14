@@ -505,11 +505,7 @@ func GetTransactionInfoList(limit, page int) ([]models.TransactionInfo, int64, e
 	var result []models.TransactionInfo
 	dataQuery := `
 		SELECT transaction_id, initiator,
-			CASE WHEN owner != '' THEN owner
-			     WHEN jsonb_typeof(tokens->'rbt') = 'array' AND jsonb_array_length(tokens->'rbt') > 0
-			          THEN tokens->'rbt'->0->>'tokenId'
-			     ELSE owner
-			END AS owner,
+			COALESCE(NULLIF(owner, ''), tokens->'rbt'->0->>'tokenId', tokens->'ft'->0->>'tokenId', tokens->'nft'->0->>'tokenId', tokens->'smartContract'->0->>'tokenId') AS owner,
 			epoch, network, tokens, committed_tokens, quorums, memo, status, amount, created_at, updated_at
 		FROM (
 			SELECT transaction_id, initiator, owner, tokens, epoch, network, committed_tokens, quorums, memo, status, amount, created_at, updated_at FROM "TransactionInfo" WHERE amount > 0
@@ -559,11 +555,7 @@ func GetTransactionSummaryList(limit, page int) ([]models.TransactionSummary, in
 	var result []models.TransactionSummary
 	dataQuery := `
 		SELECT transaction_id, initiator,
-			CASE WHEN owner != '' THEN owner
-			     WHEN jsonb_typeof(tokens->'rbt') = 'array' AND jsonb_array_length(tokens->'rbt') > 0
-			          THEN tokens->'rbt'->0->>'tokenId'
-			     ELSE owner
-			END AS owner,
+			COALESCE(NULLIF(owner, ''), tokens->'rbt'->0->>'tokenId', tokens->'ft'->0->>'tokenId', tokens->'nft'->0->>'tokenId', tokens->'smartContract'->0->>'tokenId') AS owner,
 			epoch, network, status, amount, created_at
 		FROM (
 			SELECT transaction_id, initiator, owner, tokens, epoch, network, status, amount, created_at FROM "TransactionInfo" WHERE amount > 0
