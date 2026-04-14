@@ -506,7 +506,7 @@ func GetTransactionInfoList(limit, page int) ([]models.TransactionInfo, int64, e
 	dataQuery := `
 		SELECT transaction_id, initiator,
 			CASE WHEN owner != '' THEN owner
-			     WHEN tokens->'rbt' IS NOT NULL AND jsonb_array_length(tokens->'rbt') > 0
+			     WHEN jsonb_typeof(tokens->'rbt') = 'array' AND jsonb_array_length(tokens->'rbt') > 0
 			          THEN tokens->'rbt'->0->>'tokenId'
 			     ELSE owner
 			END AS owner,
@@ -560,7 +560,7 @@ func GetTransactionSummaryList(limit, page int) ([]models.TransactionSummary, in
 	dataQuery := `
 		SELECT transaction_id, initiator,
 			CASE WHEN owner != '' THEN owner
-			     WHEN tokens->'rbt' IS NOT NULL AND jsonb_array_length(tokens->'rbt') > 0
+			     WHEN jsonb_typeof(tokens->'rbt') = 'array' AND jsonb_array_length(tokens->'rbt') > 0
 			          THEN tokens->'rbt'->0->>'tokenId'
 			     ELSE owner
 			END AS owner,
