@@ -500,12 +500,21 @@ func GetTransactionInfoList(limit, page int) ([]models.TransactionInfo, int64, e
 	}
 
 	// 2. Fetch paginated results
+	// If owner is empty, fall back to the first RBT token ID (covers mint transactions
+	// where the node does not populate the owner field).
 	var result []models.TransactionInfo
 	dataQuery := `
-		SELECT * FROM (
-			SELECT transaction_id, initiator, owner, epoch, network, tokens, committed_tokens, quorums, memo, status, amount, created_at, updated_at FROM "TransactionInfo" WHERE amount > 0
+		SELECT transaction_id, initiator,
+			CASE WHEN owner != '' THEN owner
+			     WHEN tokens->'rbt' IS NOT NULL AND jsonb_array_length(tokens->'rbt') > 0
+			          THEN tokens->'rbt'->0->>'tokenId'
+			     ELSE owner
+			END AS owner,
+			epoch, network, tokens, committed_tokens, quorums, memo, status, amount, created_at, updated_at
+		FROM (
+			SELECT transaction_id, initiator, owner, tokens, epoch, network, committed_tokens, quorums, memo, status, amount, created_at, updated_at FROM "TransactionInfo" WHERE amount > 0
 			UNION ALL
-			SELECT transaction_id, initiator, owner, epoch, network, tokens, committed_tokens, quorums, memo, status, amount, created_at, updated_at FROM "FailedTransactionInfo" WHERE amount > 0
+			SELECT transaction_id, initiator, owner, tokens, epoch, network, committed_tokens, quorums, memo, status, amount, created_at, updated_at FROM "FailedTransactionInfo" WHERE amount > 0
 		) AS combined
 		ORDER BY created_at DESC
 		LIMIT ? OFFSET ?
@@ -545,12 +554,21 @@ func GetTransactionSummaryList(limit, page int) ([]models.TransactionSummary, in
 	}
 
 	// 2. Fetch paginated results (Summary ONLY)
+	// If owner is empty, fall back to the first RBT token ID (covers mint transactions
+	// where the node does not populate the owner field).
 	var result []models.TransactionSummary
 	dataQuery := `
-		SELECT transaction_id, initiator, owner, epoch, network, status, amount, created_at FROM (
-			SELECT transaction_id, initiator, owner, epoch, network, status, amount, created_at FROM "TransactionInfo" WHERE amount > 0
+		SELECT transaction_id, initiator,
+			CASE WHEN owner != '' THEN owner
+			     WHEN tokens->'rbt' IS NOT NULL AND jsonb_array_length(tokens->'rbt') > 0
+			          THEN tokens->'rbt'->0->>'tokenId'
+			     ELSE owner
+			END AS owner,
+			epoch, network, status, amount, created_at
+		FROM (
+			SELECT transaction_id, initiator, owner, tokens, epoch, network, status, amount, created_at FROM "TransactionInfo" WHERE amount > 0
 			UNION ALL
-			SELECT transaction_id, initiator, owner, epoch, network, status, amount, created_at FROM "FailedTransactionInfo" WHERE amount > 0
+			SELECT transaction_id, initiator, owner, tokens, epoch, network, status, amount, created_at FROM "FailedTransactionInfo" WHERE amount > 0
 		) AS combined
 		ORDER BY created_at DESC
 		LIMIT ? OFFSET ?
