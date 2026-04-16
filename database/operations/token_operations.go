@@ -13,11 +13,11 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// Token type constants (aligned with Rubix node's token_type IDs)
+// Token type constants (aligned with Rubix Core's lookup.go: [RBT, NFT, FT, SC])
 const (
 	TokenTypeRBT int16 = 1
-	TokenTypeFT  int16 = 2
-	TokenTypeNFT int16 = 3
+	TokenTypeNFT int16 = 2
+	TokenTypeFT  int16 = 3
 	TokenTypeSC  int16 = 4
 )
 
@@ -331,22 +331,22 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 		}
 	}
 
-	// 6. Committed Tokens Processing (Burn)
+	// 6. Committed Tokens Processing (Commit — aligned with Core's TokenRole_Commit)
 	for _, info := range txn.CommittedTokens {
 		t := ensureToken(info.TokenID)
 		prevDID := t.DID
-		t.LatestRole = models.TokenRole_Burn
+		t.LatestRole = models.TokenRole_Commit
 		t.TransactionID = txnID
-		t.TokenStatus = models.TokenStatus_Burnt
+		t.TokenStatus = models.TokenStatus_Committed
 		tokensToUpsert = append(tokensToUpsert, t)
 		chainsToInsert = append(chainsToInsert, models.TokenChain{
 			TokenID:               info.TokenID,
 			TransactionID:         txnID,
 			PreviousTransactionID: info.PreviousTransactionID,
-			Role:                  models.TokenRole_Burn,
+			Role:                  models.TokenRole_Commit,
 		})
 		if prevDID != "" && t.TokenType != TokenTypeSC {
-			// Deduct from Regular balance (Burned tokens are gone)
+			// Deduct from Regular balance (Committed tokens are locked for FT minting)
 			addBalanceChange(prevDID, &t, -1, 0)
 		}
 	}
