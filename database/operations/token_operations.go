@@ -6,6 +6,7 @@ import (
 	"explorer-server/database/models"
 	"explorer-server/model"
 	"explorer-server/util"
+	"sort"
 	"strings"
 
 	"gorm.io/gorm"
@@ -389,7 +390,26 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 	}
 
 	// Bulk Update Balances (One update per unique DID/Asset)
-	for key, deltas := range balanceChanges {
+	// Sort keys to prevent Postgres deadlocks caused by concurrent non-deterministic locking order
+	var balanceKeys []balanceKey
+	for key := range balanceChanges {
+		balanceKeys = append(balanceKeys, key)
+	}
+	sort.Slice(balanceKeys, func(i, j int) bool {
+		if balanceKeys[i].DID != balanceKeys[j].DID {
+			return balanceKeys[i].DID < balanceKeys[j].DID
+		}
+		if balanceKeys[i].AssetType != balanceKeys[j].AssetType {
+			return balanceKeys[i].AssetType < balanceKeys[j].AssetType
+		}
+		if balanceKeys[i].TokenName != balanceKeys[j].TokenName {
+			return balanceKeys[i].TokenName < balanceKeys[j].TokenName
+		}
+		return balanceKeys[i].CreatorDID < balanceKeys[j].CreatorDID
+	})
+
+	for _, key := range balanceKeys {
+		deltas := balanceChanges[key]
 		if deltas.Balance == 0 && deltas.PledgedBalance == 0 {
 			continue
 		}
