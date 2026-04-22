@@ -215,9 +215,25 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 						tokenToSave.TokenValue = burnedSum
 					}
 				}
-				tokenToSave.LatestRole = models.TokenRole_Mint
-				if typeID == TokenTypeSC {
-					tokenToSave.LatestRole = models.TokenRole_Deploy
+				// Determine the correct role: if prevTxnID exists, explorer missed
+				// the genesis — this is actually a transfer, not a mint.
+				if info.PreviousTransactionID != "" {
+					// Missed genesis: record as transfer, flag for future sync
+					tokenToSave.NeedsSync = true
+					switch typeID {
+					case TokenTypeSC:
+						tokenToSave.LatestRole = models.TokenRole_Execute
+					default:
+						tokenToSave.LatestRole = models.TokenRole_Transfer
+					}
+				} else {
+					// Actual genesis/mint (no previous transaction)
+					switch typeID {
+					case TokenTypeSC:
+						tokenToSave.LatestRole = models.TokenRole_Deploy
+					default:
+						tokenToSave.LatestRole = models.TokenRole_Mint
+					}
 				}
 			} else {
 				prevOwner = existing.DID
@@ -314,67 +330,7 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 		}
 	}
 
-	// 7. Unpledge Detection logic integrated into bulk...
-	// (Keeping the logic of Restoring balance to quorum DIDs if their pledged token is used)
-	prevTxIDs := make([]string, 0)
-	collectPrevIDs := func(tokenInfos []*model.TokenInfo) {
-		for _, info := range tokenInfos {
-			if info.PreviousTransactionID != "" && info.PreviousTransactionID != "0" {
-				prevTxIDs = append(prevTxIDs, info.PreviousTransactionID)
-			}
-		}
-	}
-	if txn.Tokens != nil {
-		collectPrevIDs(txn.Tokens.RBT)
-		collectPrevIDs(txn.Tokens.FT)
-		collectPrevIDs(txn.Tokens.NFT)
-		collectPrevIDs(txn.Tokens.SmartContract)
-	}
-
-	if len(prevTxIDs) > 0 {
-		var prevTxns []models.TransactionInfo
-		if err := tx.Where("transaction_id IN ?", prevTxIDs).Find(&prevTxns).Error; err == nil {
-			for _, pTx := range prevTxns {
-				var quorums []*model.QuorumInfo
-				if err := json.Unmarshal(pTx.Quorums, &quorums); err == nil {
-					for _, q := range quorums {
-						for _, qToken := range q.Tokens {
-							// Determine if we have this token in our current batch or need to fetch it
-							var t models.Token
-							found := false
-							if cached, ok := existingTokens[qToken.TokenID]; ok {
-								t = cached
-								found = true
-							} else {
-								// Fetch from DB if not in current transaction set
-								if err := tx.Where("token_id = ?", qToken.TokenID).First(&t).Error; err == nil {
-									found = true
-								}
-							}
-
-							if found {
-								if t.TokenStatus == models.TokenStatus_Pledged || t.TokenStatus == models.TokenStatus_QuorumPledged {
-									t.LatestRole = models.TokenRole_Unpledge
-									t.TransactionID = txnID
-									t.TokenStatus = models.TokenStatus_Unpledged
-
-									// Add to bulk upsert list
-									tokensToUpsert = append(tokensToUpsert, t)
-
-									if q.Did != "" && t.TokenType != TokenTypeSC {
-										// Restore to Regular balance, deduct from Pledged balance
-										addBalanceChange(q.Did, &t, 1, -1)
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// 8. FINAL BULK COMMIT
+	// 7. FINAL BULK COMMIT
 	// Bulk Upsert Tokens
 	if len(tokensToUpsert) > 0 {
 		if err := tx.Clauses(clause.OnConflict{
@@ -402,7 +358,7 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 		}
 	}
 
-	// 9. Token Chain Array Sequence (Legacy helper, still needs to be called per-token for now)
+	// 8. Token Chain Array Sequence (Legacy helper, still needs to be called per-token for now)
 	for _, info := range chainsToInsert {
 		if err := updateTokenChainArray(tx, info.TokenID, info.ID, info.PreviousTransactionID); err != nil {
 			return err
