@@ -384,7 +384,7 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 
 	// Bulk Insert History
 	if len(chainsToInsert) > 0 {
-		if err := tx.CreateInBatches(chainsToInsert, 1000).Error; err != nil {
+		if err := tx.CreateInBatches(&chainsToInsert, 1000).Error; err != nil {
 			return err
 		}
 	}
@@ -418,10 +418,126 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 		}
 	}
 
-	// 8. Token Chain Array Sequence (Legacy helper, still needs to be called per-token for now)
-	for _, info := range chainsToInsert {
-		if err := updateTokenChainArray(tx, info.TokenID, info.ID, info.PreviousTransactionID); err != nil {
-			return err
+	// 8. Token Chain Array Sequence (Bulk Upsert for High Volume)
+	if len(chainsToInsert) > 0 {
+		// A. Collect unique TokenIDs and non-empty PrevTxnIDs
+		tcaTokenIDs := make(map[string]struct{})
+		prevTxnIDs := make(map[string]struct{})
+		for _, info := range chainsToInsert {
+			tcaTokenIDs[info.TokenID] = struct{}{}
+			if info.PreviousTransactionID != "" {
+				prevTxnIDs[info.PreviousTransactionID] = struct{}{}
+			}
+		}
+
+		uniqueTcaIDs := make([]string, 0, len(tcaTokenIDs))
+		for id := range tcaTokenIDs {
+			uniqueTcaIDs = append(uniqueTcaIDs, id)
+		}
+
+		// B. Bulk fetch existing TokenChainArrays
+		existingTCA := make(map[string][]uint64)
+		if len(uniqueTcaIDs) > 0 {
+			batchSize := 10000
+			for start := 0; start < len(uniqueTcaIDs); start += batchSize {
+				end := start + batchSize
+				if end > len(uniqueTcaIDs) {
+					end = len(uniqueTcaIDs)
+				}
+				var tcaBatch []models.TokenChainArray
+				if err := tx.Where("token_id IN ?", uniqueTcaIDs[start:end]).Find(&tcaBatch).Error; err != nil {
+					return err
+				}
+				for _, tca := range tcaBatch {
+					var chain []uint64
+					if len(tca.Index) > 0 {
+						_ = json.Unmarshal(tca.Index, &chain)
+					}
+					existingTCA[tca.TokenID] = chain
+				}
+			}
+		}
+
+		// C. Bulk fetch Parent TokenChain IDs for topological insertion
+		parentTxnIDMap := make(map[string]map[string]uint64) // tokenID -> txnID -> ChainID
+		if len(prevTxnIDs) > 0 {
+			uniquePrevTxnIDs := make([]string, 0, len(prevTxnIDs))
+			for pid := range prevTxnIDs {
+				uniquePrevTxnIDs = append(uniquePrevTxnIDs, pid)
+			}
+			
+			batchSize := 10000
+			for start := 0; start < len(uniquePrevTxnIDs); start += batchSize {
+				end := start + batchSize
+				if end > len(uniquePrevTxnIDs) {
+					end = len(uniquePrevTxnIDs)
+				}
+				var parentChains []models.TokenChain
+				if err := tx.Where("transaction_id IN ?", uniquePrevTxnIDs[start:end]).Select("id, token_id, transaction_id").Find(&parentChains).Error; err != nil {
+					return err
+				}
+				for _, ptc := range parentChains {
+					if parentTxnIDMap[ptc.TokenID] == nil {
+						parentTxnIDMap[ptc.TokenID] = make(map[string]uint64)
+					}
+					parentTxnIDMap[ptc.TokenID][ptc.TransactionID] = ptc.ID
+				}
+			}
+		}
+
+		// D. In-Memory Topological Array Mutation
+		for _, info := range chainsToInsert {
+			chain := existingTCA[info.TokenID]
+			newID := info.ID
+			inserted := false
+
+			if info.PreviousTransactionID != "" {
+				if tmap, ok := parentTxnIDMap[info.TokenID]; ok {
+					if parentID, ok2 := tmap[info.PreviousTransactionID]; ok2 {
+						// Find parent position
+						for i, id := range chain {
+							if id == parentID {
+								// Insert after parent
+								chain = append(chain[:i+1], append([]uint64{newID}, chain[i+1:]...)...)
+								inserted = true
+								break
+							}
+						}
+					}
+				}
+			}
+
+			if !inserted {
+				if info.PreviousTransactionID == "" {
+					if len(chain) == 0 {
+						chain = []uint64{newID}
+					} else {
+						chain = append([]uint64{newID}, chain...)
+					}
+				} else {
+					chain = append(chain, newID)
+				}
+			}
+			existingTCA[info.TokenID] = chain
+		}
+
+		// E. Bulk Upsert Updated TokenChainArrays
+		var tcaUpserts []models.TokenChainArray
+		for tokenID, chain := range existingTCA {
+			b, _ := json.Marshal(chain)
+			tcaUpserts = append(tcaUpserts, models.TokenChainArray{
+				TokenID: tokenID,
+				Index:   b,
+			})
+		}
+
+		if len(tcaUpserts) > 0 {
+			if err := tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "token_id"}},
+				UpdateAll: true,
+			}).CreateInBatches(tcaUpserts, 1000).Error; err != nil {
+				return err
+			}
 		}
 	}
 
@@ -479,68 +595,7 @@ func updateBalances(tx *gorm.DB, did, assetType, tokenName, creatorDID string, b
 		Updates(updates).Error
 }
 
-// updateTokenChainArray updates the TokenChainArray index for a token that already has a new history entry ID.
-func updateTokenChainArray(tx *gorm.DB, tokenID string, historyID uint64, prevTxnID string) error {
-	// 1. Load existing TokenChainArray
-	var tca models.TokenChainArray
-	err := tx.Where("token_id = ?", tokenID).First(&tca).Error
 
-	var chain []uint64
-	if err == nil {
-		json.Unmarshal(tca.Index, &chain)
-	} else if err != gorm.ErrRecordNotFound {
-		return err
-	}
-
-	// 2. Determine logical position
-	newID := historyID
-	inserted := false
-
-	if prevTxnID != "" {
-		// Find the ID of the parent record in TokenChain
-		var parent models.TokenChain
-		if tx.Where("token_id = ? AND transaction_id = ?", tokenID, prevTxnID).Select("id").First(&parent).Error == nil {
-			// Find parent position in current array
-			for i, id := range chain {
-				if id == parent.ID {
-					// Insert after parent
-					chain = append(chain[:i+1], append([]uint64{newID}, chain[i+1:]...)...)
-					inserted = true
-					break
-				}
-			}
-		}
-	}
-
-	// If not inserted (root token, parent not yet in DB, or prevTxnID empty), append to end
-	if !inserted {
-		if prevTxnID == "" {
-			// Root/Genesis: Put at start if empty, else append (should be first anyway)
-			if len(chain) == 0 {
-				chain = []uint64{newID}
-			} else {
-				// Insert at beginning for genesis
-				chain = append([]uint64{newID}, chain...)
-			}
-		} else {
-			// Out-of-order or unknown parent: just append for now
-			chain = append(chain, newID)
-		}
-	}
-
-	chainJSON, _ := json.Marshal(chain)
-
-	// 3. Upsert TokenChainArray
-	if err == gorm.ErrRecordNotFound {
-		tca = models.TokenChainArray{
-			TokenID: tokenID,
-			Index:   chainJSON,
-		}
-		return tx.Create(&tca).Error
-	}
-
-	return tx.Model(&tca).Update("index", chainJSON).Error
-}
 
 // SyncPledgedBalances is a one-time migration helper to populate the pledged_balance column
 // for existing DIDs by scanning the Tokens table.
