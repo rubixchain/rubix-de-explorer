@@ -47,7 +47,6 @@ type TokenInfo struct {
 	PreviousTransactionID string  `json:"previousTransactionID"`
 	Data                  string  `json:"data"`
 	TokenValue            float64 `json:"tokenValue"`
-	DID                   string  `json:"did"`
 }
 
 type QuorumInfo struct {
@@ -69,9 +68,9 @@ type Signature struct {
 // Core uses `db:` tags (no `json:` tags), so Go defaults to uppercase field names.
 // Info and Signature are json.RawMessage in the Core, parsed separately.
 type Transactions struct {
-	ID        string          `json:"ID"`
-	Info      json.RawMessage `json:"Info"`
-	Signature json.RawMessage `json:"Signature"`
+	ID        string          `json:"id"`
+	Info      json.RawMessage `json:"info"`
+	Signature json.RawMessage `json:"signature"`
 }
 
 // ParseInfo deserializes the raw Info bytes into a structured TransactionInfo.

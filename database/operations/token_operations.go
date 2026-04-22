@@ -6,6 +6,7 @@ import (
 	"explorer-server/database/models"
 	"explorer-server/model"
 	"explorer-server/util"
+	"sort"
 	"strings"
 
 	"gorm.io/gorm"
@@ -166,6 +167,17 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 	tokensToUpsert := make([]models.Token, 0)
 	chainsToInsert := make([]models.TokenChain, 0)
 
+	// Check if this transaction has an SC deployment
+	hasSCDeploy := false
+	if txn.Tokens != nil && len(txn.Tokens.SmartContract) > 0 {
+		for _, sc := range txn.Tokens.SmartContract {
+			if sc.PreviousTransactionID == "" {
+				hasSCDeploy = true
+				break
+			}
+		}
+	}
+
 	// Sub-function to generate models for a group of tokens
 	prepareTokens := func(tokenInfos []*model.TokenInfo, tokenType string) error {
 		typeID := tokenTypeMap[tokenType]
@@ -180,7 +192,6 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 					TokenID:       info.TokenID,
 					TokenType:     typeID,
 					TransactionID: txnID,
-					TokenStatus:   models.TokenStatus_Free,
 					NeedsSync:     true,
 				}
 				if typeID == TokenTypeSC {
@@ -223,13 +234,20 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 					switch typeID {
 					case TokenTypeSC:
 						tokenToSave.LatestRole = models.TokenRole_Execute
+					case TokenTypeNFT:
+						// NFT execution without ownership change vs transfer
+						if tokenToSave.DID == txn.Initiator {
+							tokenToSave.LatestRole = models.TokenRole_Execute
+						} else {
+							tokenToSave.LatestRole = models.TokenRole_Transfer
+						}
 					default:
 						tokenToSave.LatestRole = models.TokenRole_Transfer
 					}
 				} else {
 					// Actual genesis/mint (no previous transaction)
 					switch typeID {
-					case TokenTypeSC:
+					case TokenTypeSC, TokenTypeNFT:
 						tokenToSave.LatestRole = models.TokenRole_Deploy
 					default:
 						tokenToSave.LatestRole = models.TokenRole_Mint
@@ -247,15 +265,30 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 				}
 				tokenToSave.DID = targetOwner
 				tokenToSave.TransactionID = txnID
-				tokenToSave.TokenStatus = models.TokenStatus_Free
 				if info.Data != "" {
 					tokenToSave.Data = info.Data
 				}
+				
 				inferredRole := models.TokenRole_Transfer
 				if typeID == TokenTypeSC {
 					inferredRole = models.TokenRole_Execute
+				} else if typeID == TokenTypeNFT {
+					if targetOwner == prevOwner {
+						inferredRole = models.TokenRole_Execute
+					} else {
+						inferredRole = models.TokenRole_Transfer
+					}
 				}
 				tokenToSave.LatestRole = inferredRole
+			}
+
+			// Assign TokenStatus based on the role (following Core)
+			if tokenToSave.LatestRole == models.TokenRole_Deploy {
+				tokenToSave.TokenStatus = models.TokenStatus_Deployed
+			} else if tokenToSave.LatestRole == models.TokenRole_Execute {
+				tokenToSave.TokenStatus = models.TokenStatus_Executed
+			} else {
+				tokenToSave.TokenStatus = models.TokenStatus_Free
 			}
 
 			tokensToUpsert = append(tokensToUpsert, tokenToSave)
@@ -309,22 +342,30 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 		}
 	}
 
-	// 6. Committed Tokens Processing (Burn)
+	// 6. Committed Tokens Processing (Commit or Burn)
 	for _, info := range txn.CommittedTokens {
 		if t, exists := existingTokens[info.TokenID]; exists {
 			prevDID := t.DID
-			t.LatestRole = models.TokenRole_Burn
+			
+			if hasSCDeploy {
+				t.LatestRole = models.TokenRole_Commit
+				t.TokenStatus = models.TokenStatus_Committed
+			} else {
+				t.LatestRole = models.TokenRole_Burn
+				t.TokenStatus = models.TokenStatus_Burnt
+			}
+			
 			t.TransactionID = txnID
-			t.TokenStatus = models.TokenStatus_Burnt
+			
 			tokensToUpsert = append(tokensToUpsert, t)
 			chainsToInsert = append(chainsToInsert, models.TokenChain{
 				TokenID:               info.TokenID,
 				TransactionID:         txnID,
 				PreviousTransactionID: info.PreviousTransactionID,
-				Role:                  models.TokenRole_Burn,
+				Role:                  t.LatestRole,
 			})
 			if prevDID != "" && t.TokenType != TokenTypeSC {
-				// Deduct from Regular balance (Burned tokens are gone)
+				// Deduct from Regular balance (Burned/Committed tokens are no longer Free)
 				addBalanceChange(prevDID, &t, -1, 0)
 			}
 		}
@@ -349,7 +390,26 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 	}
 
 	// Bulk Update Balances (One update per unique DID/Asset)
-	for key, deltas := range balanceChanges {
+	// Sort keys to prevent Postgres deadlocks caused by concurrent non-deterministic locking order
+	var balanceKeys []balanceKey
+	for key := range balanceChanges {
+		balanceKeys = append(balanceKeys, key)
+	}
+	sort.Slice(balanceKeys, func(i, j int) bool {
+		if balanceKeys[i].DID != balanceKeys[j].DID {
+			return balanceKeys[i].DID < balanceKeys[j].DID
+		}
+		if balanceKeys[i].AssetType != balanceKeys[j].AssetType {
+			return balanceKeys[i].AssetType < balanceKeys[j].AssetType
+		}
+		if balanceKeys[i].TokenName != balanceKeys[j].TokenName {
+			return balanceKeys[i].TokenName < balanceKeys[j].TokenName
+		}
+		return balanceKeys[i].CreatorDID < balanceKeys[j].CreatorDID
+	})
+
+	for _, key := range balanceKeys {
+		deltas := balanceChanges[key]
 		if deltas.Balance == 0 && deltas.PledgedBalance == 0 {
 			continue
 		}
