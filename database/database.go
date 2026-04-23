@@ -42,8 +42,8 @@ func ConnectAndMigrate(drop bool) {
 		log.Fatalf("Failed to connect WriteDB: %v", err)
 	}
 	if sqlDB, err := WriteDB.DB(); err == nil {
-		sqlDB.SetMaxOpenConns(20)
-		sqlDB.SetMaxIdleConns(5)
+		sqlDB.SetMaxOpenConns(100)
+		sqlDB.SetMaxIdleConns(20)
 		sqlDB.SetConnMaxLifetime(5 * time.Minute)
 	}
 

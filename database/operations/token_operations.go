@@ -6,8 +6,10 @@ import (
 	"explorer-server/database/models"
 	"explorer-server/model"
 	"explorer-server/util"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -485,40 +487,85 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 			}
 		}
 
-		// D. In-Memory Topological Array Mutation
+		// D. In-Memory Topological Array Mutation (Parallelized)
+		tokenGroups := make(map[string][]models.TokenChain)
 		for _, info := range chainsToInsert {
-			chain := existingTCA[info.TokenID]
-			newID := info.ID
-			inserted := false
+			tokenGroups[info.TokenID] = append(tokenGroups[info.TokenID], info)
+		}
 
-			if info.PreviousTransactionID != "" {
-				if tmap, ok := parentTxnIDMap[info.TokenID]; ok {
-					if parentID, ok2 := tmap[info.PreviousTransactionID]; ok2 {
-						// Find parent position
-						for i, id := range chain {
-							if id == parentID {
-								// Insert after parent
-								chain = append(chain[:i+1], append([]uint64{newID}, chain[i+1:]...)...)
-								inserted = true
-								break
+		numWorkers := runtime.NumCPU()
+		if numWorkers < 1 {
+			numWorkers = 1
+		}
+
+		type tokenWork struct {
+			TokenID string
+			Chains  []models.TokenChain
+		}
+
+		type tokenResult struct {
+			TokenID string
+			Chain   []uint64
+		}
+
+		workChan := make(chan tokenWork, len(tokenGroups))
+		resultChan := make(chan tokenResult, len(tokenGroups))
+
+		for tid, chains := range tokenGroups {
+			workChan <- tokenWork{TokenID: tid, Chains: chains}
+		}
+		close(workChan)
+
+		var wg sync.WaitGroup
+		wg.Add(numWorkers)
+
+		for i := 0; i < numWorkers; i++ {
+			go func() {
+				defer wg.Done()
+				for work := range workChan {
+					chain := existingTCA[work.TokenID]
+					tmap := parentTxnIDMap[work.TokenID]
+
+					for _, info := range work.Chains {
+						newID := info.ID
+						inserted := false
+
+						if info.PreviousTransactionID != "" && tmap != nil {
+							if parentID, ok := tmap[info.PreviousTransactionID]; ok {
+								for j, id := range chain {
+									if id == parentID {
+										chain = append(chain[:j+1], append([]uint64{newID}, chain[j+1:]...)...)
+										inserted = true
+										break
+									}
+								}
+							}
+						}
+
+						if !inserted {
+							if info.PreviousTransactionID == "" {
+								if len(chain) == 0 {
+									chain = []uint64{newID}
+								} else {
+									chain = append([]uint64{newID}, chain...)
+								}
+							} else {
+								chain = append(chain, newID)
 							}
 						}
 					}
+					resultChan <- tokenResult{TokenID: work.TokenID, Chain: chain}
 				}
-			}
+			}()
+		}
 
-			if !inserted {
-				if info.PreviousTransactionID == "" {
-					if len(chain) == 0 {
-						chain = []uint64{newID}
-					} else {
-						chain = append([]uint64{newID}, chain...)
-					}
-				} else {
-					chain = append(chain, newID)
-				}
-			}
-			existingTCA[info.TokenID] = chain
+		go func() {
+			wg.Wait()
+			close(resultChan)
+		}()
+
+		for res := range resultChan {
+			existingTCA[res.TokenID] = res.Chain
 		}
 
 		// E. Bulk Upsert Updated TokenChainArrays

@@ -1,10 +1,14 @@
 package processor
 
 import (
+	"bufio"
 	"context"
 	"explorer-server/model"
 	"log"
+	"os"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -54,14 +58,18 @@ func InitDynamicWorkerPool() {
 
 	numCPU := runtime.NumCPU()
 
-	// Determine max workers.
-	maxW := numCPU - 1
+	// Determine max workers. Because workload is heavily DB I/O bound,
+	// we can safely exceed physical CPU cores. Cap at 80 (since MaxOpenConns is 100).
+	maxW := numCPU * 4
+	if maxW > 80 {
+		maxW = 80
+	}
 	if maxW < 1 {
 		maxW = 1
 	}
 
 	GlobalWorkerPool = &DynamicWorkerPool{
-		txnQueue:        make(chan *model.EventTransaction, 2000),
+		txnQueue:        make(chan *model.EventTransaction, 5000),
 		ctx:             ctx,
 		cancel:          cancel,
 		minWorkers:      mathMax(1, numCPU/4),
@@ -95,7 +103,7 @@ func (p *DynamicWorkerPool) EnqueueTransaction(txnEvent *model.EventTransaction)
 	case p.txnQueue <- txnEvent:
 		// Successfully queued
 
-	case <-time.After(5 * time.Second):
+	case <-time.After(15 * time.Second):
 		log.Printf("Warning: Failed to queue transaction %s - queue full (length=%d)\n",
 			txnEvent.Transaction.ID, len(p.txnQueue))
 		return
@@ -123,16 +131,7 @@ func (p *DynamicWorkerPool) systemMonitor() {
 
 // Evaluate system conditions and decide on scaling
 func (p *DynamicWorkerPool) evaluateAndScale() {
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-
-	usedMB := float64(m.Alloc) / 1024 / 1024
-	sysMB := float64(m.Sys) / 1024 / 1024
-
-	var memoryUsagePercent float64
-	if sysMB > 0 {
-		memoryUsagePercent = (usedMB / sysMB) * 100.0
-	}
+	memoryUsagePercent := getSystemMemoryUsage()
 
 	queueLen := int64(len(p.txnQueue))
 
@@ -148,6 +147,55 @@ func (p *DynamicWorkerPool) evaluateAndScale() {
 	case "scale_down":
 		p.scaleDown()
 	}
+}
+
+// getSystemMemoryUsage returns the VM's active memory usage percentage.
+// On Linux, it reads /proc/meminfo to get true system metrics.
+// On other OSes, it falls back to Go runtime stats.
+func getSystemMemoryUsage() float64 {
+	if runtime.GOOS == "linux" {
+		file, err := os.Open("/proc/meminfo")
+		if err == nil {
+			defer file.Close()
+			scanner := bufio.NewScanner(file)
+			var memTotal, memAvailable float64
+			for scanner.Scan() {
+				line := scanner.Text()
+				if strings.HasPrefix(line, "MemTotal:") {
+					fields := strings.Fields(line)
+					if len(fields) >= 2 {
+						if val, err := strconv.ParseFloat(fields[1], 64); err == nil {
+							memTotal = val
+						}
+					}
+				} else if strings.HasPrefix(line, "MemAvailable:") {
+					fields := strings.Fields(line)
+					if len(fields) >= 2 {
+						if val, err := strconv.ParseFloat(fields[1], 64); err == nil {
+							memAvailable = val
+						}
+					}
+				}
+				if memTotal > 0 && memAvailable > 0 {
+					break
+				}
+			}
+			if memTotal > 0 && memAvailable > 0 {
+				used := memTotal - memAvailable
+				return (used / memTotal) * 100.0
+			}
+		}
+	}
+
+	// Fallback for Windows/Mac (local testing)
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	usedMB := float64(m.Alloc) / 1024 / 1024
+	sysMB := float64(m.Sys) / 1024 / 1024
+	if sysMB > 0 {
+		return (usedMB / sysMB) * 100.0
+	}
+	return 0.0
 }
 
 func (p *DynamicWorkerPool) determineScalingAction(memoryPercent float64, queueLen int64, currentWorkers int) string {
