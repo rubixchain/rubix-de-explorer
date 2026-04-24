@@ -85,6 +85,9 @@ func ConnectAndMigrate(drop bool) {
 
 	// Ensure unique constraints (manual fix for SQLSTATE 42P10)
 	ensureUniqueConstraints(WriteDB, allModels)
+
+	// Add performance indexes for the dashboard queries
+	ensurePerformanceIndexes(WriteDB)
 }
 
 // ensureUniqueConstraints adds primary keys if they are missing, dynamically extracted from models
@@ -122,6 +125,24 @@ func ensureUniqueConstraints(db *gorm.DB, models []interface{}) {
 		}
 	}
 	log.Println("All primary key constraints verified")
+}
+
+// ensurePerformanceIndexes adds indexes to high-traffic columns for faster API responses.
+func ensurePerformanceIndexes(db *gorm.DB) {
+	queries := []string{
+		// Index for "Latest Transactions" dashboard query
+		`CREATE INDEX IF NOT EXISTS idx_txn_info_created_amount ON "TransactionInfo" (created_at DESC, amount);`,
+		`CREATE INDEX IF NOT EXISTS idx_failed_txn_info_created_amount ON "FailedTransactionInfo" (created_at DESC, amount);`,
+		// Index for DID Balance lookups
+		`CREATE INDEX IF NOT EXISTS idx_did_balances_did_asset ON "DIDBalances" (did, asset_type);`,
+	}
+
+	for _, q := range queries {
+		if err := db.Exec(q).Error; err != nil {
+			log.Printf("Warning: Could not create performance index: %v", err)
+		}
+	}
+	log.Println("Performance indexes verified")
 }
 
 // getEnv fetches environment variable or returns fallback

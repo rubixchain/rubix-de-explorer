@@ -37,13 +37,17 @@ func main() {
 	startTime := time.Now()
 	logFileName := fmt.Sprintf("explorer_%s.log", startTime.Format("2006-01-02_15-04-05"))
 	
-	logFile, err := os.OpenFile(filepath.Join(logDir, logFileName), os.O_CREATE|os.O_WRONLY, 0644)
+	logFile, err := os.OpenFile(filepath.Join(logDir, logFileName), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
-		log.Printf("Warning: Could not open log file: %v", err)
+		fmt.Fprintf(os.Stderr, "Warning: Could not open log file: %v\n", err)
 	} else {
-		// MultiWriter redirects log output to both Stdout and the log file
+		// Use MultiWriter for the standard log package (Go's log.Printf etc)
 		mw := io.MultiWriter(os.Stdout, logFile)
 		log.SetOutput(mw)
+
+		// On Linux, also redirect the OS-level file descriptors 1 (stdout) and 2 (stderr).
+		// This ensures that "fatal error: concurrent map write" or panics are caught in the log file.
+		RedirectStderr(logFile)
 	}
 
 	log.Println("----------------------------------------------------------------")
