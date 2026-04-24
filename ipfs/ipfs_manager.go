@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -108,6 +109,9 @@ func (m *IPFSManager) EnsureInitialized(testNet bool, customSwarmKeyPath string)
 	// 0. Force private network mode (same as Rubix node)
 	os.Setenv("LIBP2P_FORCE_PNET", "1")
 	log.Println("LIBP2P_FORCE_PNET=1 (private network mode enforced)")
+
+	// 0.1 Force Cleanup of stale repo locks or zombie processes
+	m.forceCleanup()
 
 	// 1. Find ipfs executable
 	ipfsPath, err := findIPFSExecutable()
@@ -292,7 +296,7 @@ func (m *IPFSManager) StartDaemon() error {
 	case <-daemonReady:
 		log.Println("IPFS daemon is ready")
 	case <-time.After(30 * time.Second):
-		log.Println("Warning: Timed out waiting for IPFS daemon ready signal, proceeding anyway...")
+		return fmt.Errorf("timed out waiting for IPFS daemon ready signal. Check [IPFS ERROR] logs above")
 	}
 
 	return nil
@@ -317,5 +321,51 @@ func (m *IPFSManager) Stop() {
 		case <-done:
 			log.Println("IPFS daemon stopped")
 		}
+	}
+}
+
+// forceCleanup kills ONLY the ipfs process holding a lock on our specific repo
+func (m *IPFSManager) forceCleanup() {
+	repo, err := getIPFSRepoPath()
+	if err != nil {
+		return
+	}
+
+	lockFile := filepath.Join(repo, "repo.lock")
+	apiFile := filepath.Join(repo, "api")
+
+	// 1. Target only the process holding OUR repo lock
+	if _, err := os.Stat(lockFile); err == nil {
+		log.Printf("Detected stale lock on %s. Identifying blocker...", lockFile)
+		
+		// Attempt to read PID from lock file (IPFS usually writes it there)
+		data, err := os.ReadFile(lockFile)
+		if err == nil && len(data) > 0 {
+			pidStr := strings.TrimSpace(string(data))
+			if pid, err := strconv.Atoi(pidStr); err == nil && pid > 0 {
+				log.Printf("Killing IPFS blocker PID: %d", pid)
+				if runtime.GOOS == "windows" {
+					_ = exec.Command("taskkill", "/F", "/PID", pidStr, "/T").Run()
+				} else {
+					_ = exec.Command("kill", "-9", pidStr).Run()
+				}
+				time.Sleep(1 * time.Second)
+			}
+		}
+
+		// Fallback: Use fuser on Linux if the file didn't contain a valid PID
+		if runtime.GOOS != "windows" {
+			// fuser -k -9 kills any process using the file
+			_ = exec.Command("fuser", "-k", "-9", lockFile).Run()
+		} else {
+			_ = exec.Command("taskkill", "/F", "/IM", "ipfs-windows.exe", "/T").Run()
+		}
+		
+		time.Sleep(1 * time.Second)
+		os.Remove(lockFile)
+	}
+
+	if _, err := os.Stat(apiFile); err == nil {
+		os.Remove(apiFile)
 	}
 }
