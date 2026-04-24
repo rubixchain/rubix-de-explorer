@@ -571,20 +571,25 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 				}()
 			}
 
-			// F. Collect results and update the shared map (Safe: Wait for all workers)
+			// F. Collect results into a SEPARATE map to avoid R/W race with active workers
+			finalResults := make(map[string][]uint64)
+			resultsDone := make(chan bool)
 			go func() {
-				wg.Wait()
-				close(resultChan)
+				for res := range resultChan {
+					finalResults[res.TokenID] = res.Chain
+				}
+				resultsDone <- true
 			}()
 
-			for res := range resultChan {
-				existingTCA[res.TokenID] = res.Chain
-			}
+			// Wait for all workers to finish reading from existingTCA
+			wg.Wait()
+			close(resultChan)
+			<-resultsDone // Ensure all results are collected
 
 			// G. Bulk Upsert results for this batch
 			var tcaUpserts []models.TokenChainArray
 			for _, tid := range batchTokenIDs {
-				chain := existingTCA[tid]
+				chain := finalResults[tid]
 				b, _ := json.Marshal(chain)
 				tcaUpserts = append(tcaUpserts, models.TokenChainArray{
 					TokenID: tid,
