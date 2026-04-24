@@ -6,6 +6,7 @@ import (
 	"explorer-server/database/models"
 	"explorer-server/model"
 	"explorer-server/util"
+	"log"
 	"runtime"
 	"sort"
 	"strings"
@@ -422,60 +423,58 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 
 	// 8. Token Chain Array Sequence (Bulk Upsert for High Volume)
 	if len(chainsToInsert) > 0 {
-		// A. Collect unique TokenIDs and non-empty PrevTxnIDs
-		tcaTokenIDs := make(map[string]struct{})
-		prevTxnIDs := make(map[string]struct{})
+		// A. Collect unique TokenIDs 
+		tcaTokenIDsMap := make(map[string][]models.TokenChain)
+		uniqueTcaIDs := []string{}
 		for _, info := range chainsToInsert {
-			tcaTokenIDs[info.TokenID] = struct{}{}
-			if info.PreviousTransactionID != "" {
-				prevTxnIDs[info.PreviousTransactionID] = struct{}{}
+			if len(tcaTokenIDsMap[info.TokenID]) == 0 {
+				uniqueTcaIDs = append(uniqueTcaIDs, info.TokenID)
 			}
+			tcaTokenIDsMap[info.TokenID] = append(tcaTokenIDsMap[info.TokenID], info)
 		}
 
-		uniqueTcaIDs := make([]string, 0, len(tcaTokenIDs))
-		for id := range tcaTokenIDs {
-			uniqueTcaIDs = append(uniqueTcaIDs, id)
-		}
+		// B. Process in batches to prevent Memory Overflow (OOM)
+		const assetBatchSize = 5000 
+		for bStart := 0; bStart < len(uniqueTcaIDs); bStart += assetBatchSize {
+			bEnd := bStart + assetBatchSize
+			if bEnd > len(uniqueTcaIDs) {
+				bEnd = len(uniqueTcaIDs)
+			}
+			batchTokenIDs := uniqueTcaIDs[bStart:bEnd]
 
-		// B. Bulk fetch existing TokenChainArrays
-		existingTCA := make(map[string][]uint64)
-		if len(uniqueTcaIDs) > 0 {
-			batchSize := 10000
-			for start := 0; start < len(uniqueTcaIDs); start += batchSize {
-				end := start + batchSize
-				if end > len(uniqueTcaIDs) {
-					end = len(uniqueTcaIDs)
+			// C. Bulk fetch existing TokenChainArrays for this batch
+			existingTCA := make(map[string][]uint64)
+			var tcaBatch []models.TokenChainArray
+			if err := tx.Where("token_id IN ?", batchTokenIDs).Find(&tcaBatch).Error; err != nil {
+				return err
+			}
+			for _, tca := range tcaBatch {
+				var chain []uint64
+				if len(tca.Index) > 0 {
+					_ = json.Unmarshal(tca.Index, &chain)
 				}
-				var tcaBatch []models.TokenChainArray
-				if err := tx.Where("token_id IN ?", uniqueTcaIDs[start:end]).Find(&tcaBatch).Error; err != nil {
-					return err
-				}
-				for _, tca := range tcaBatch {
-					var chain []uint64
-					if len(tca.Index) > 0 {
-						_ = json.Unmarshal(tca.Index, &chain)
+				existingTCA[tca.TokenID] = chain
+			}
+
+			// D. Bulk fetch Parent TokenChain IDs for this batch
+			parentTxnIDMap := make(map[string]map[string]uint64)
+			prevTxnIDs := make(map[string]struct{})
+			for _, tid := range batchTokenIDs {
+				for _, info := range tcaTokenIDsMap[tid] {
+					if info.PreviousTransactionID != "" {
+						prevTxnIDs[info.PreviousTransactionID] = struct{}{}
 					}
-					existingTCA[tca.TokenID] = chain
 				}
 			}
-		}
 
-		// C. Bulk fetch Parent TokenChain IDs for topological insertion
-		parentTxnIDMap := make(map[string]map[string]uint64) // tokenID -> txnID -> ChainID
-		if len(prevTxnIDs) > 0 {
-			uniquePrevTxnIDs := make([]string, 0, len(prevTxnIDs))
-			for pid := range prevTxnIDs {
-				uniquePrevTxnIDs = append(uniquePrevTxnIDs, pid)
-			}
-			
-			batchSize := 10000
-			for start := 0; start < len(uniquePrevTxnIDs); start += batchSize {
-				end := start + batchSize
-				if end > len(uniquePrevTxnIDs) {
-					end = len(uniquePrevTxnIDs)
+			if len(prevTxnIDs) > 0 {
+				uniquePrevTxnIDs := make([]string, 0, len(prevTxnIDs))
+				for pid := range prevTxnIDs {
+					uniquePrevTxnIDs = append(uniquePrevTxnIDs, pid)
 				}
+				
 				var parentChains []models.TokenChain
-				if err := tx.Where("transaction_id IN ?", uniquePrevTxnIDs[start:end]).Select("id, token_id, transaction_id").Find(&parentChains).Error; err != nil {
+				if err := tx.Where("transaction_id IN ?", uniquePrevTxnIDs).Select("id, token_id, transaction_id").Find(&parentChains).Error; err != nil {
 					return err
 				}
 				for _, ptc := range parentChains {
@@ -485,105 +484,96 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 					parentTxnIDMap[ptc.TokenID][ptc.TransactionID] = ptc.ID
 				}
 			}
-		}
 
-		// D. In-Memory Topological Array Mutation (Parallelized)
-		tokenGroups := make(map[string][]models.TokenChain)
-		for _, info := range chainsToInsert {
-			tokenGroups[info.TokenID] = append(tokenGroups[info.TokenID], info)
-		}
+			// E. Parallel In-Memory Mutation for this batch
+			numWorkers := runtime.NumCPU()
+			if numWorkers < 1 { numWorkers = 1 }
 
-		numWorkers := runtime.NumCPU()
-		if numWorkers < 1 {
-			numWorkers = 1
-		}
+			type tokenWork struct {
+				TokenID string
+				Chains  []models.TokenChain
+			}
+			type tokenResult struct {
+				TokenID string
+				Chain   []uint64
+			}
 
-		type tokenWork struct {
-			TokenID string
-			Chains  []models.TokenChain
-		}
+			workChan := make(chan tokenWork, len(batchTokenIDs))
+			resultChan := make(chan tokenResult, len(batchTokenIDs))
 
-		type tokenResult struct {
-			TokenID string
-			Chain   []uint64
-		}
+			for _, tid := range batchTokenIDs {
+				workChan <- tokenWork{TokenID: tid, Chains: tcaTokenIDsMap[tid]}
+			}
+			close(workChan)
 
-		workChan := make(chan tokenWork, len(tokenGroups))
-		resultChan := make(chan tokenResult, len(tokenGroups))
+			var wg sync.WaitGroup
+			wg.Add(numWorkers)
 
-		for tid, chains := range tokenGroups {
-			workChan <- tokenWork{TokenID: tid, Chains: chains}
-		}
-		close(workChan)
+			for i := 0; i < numWorkers; i++ {
+				go func() {
+					defer wg.Done()
+					defer func() {
+						if r := recover(); r != nil {
+							log.Printf("[Asset Processor] recovered from panic: %v", r)
+						}
+					}()
 
-		var wg sync.WaitGroup
-		wg.Add(numWorkers)
+					for work := range workChan {
+						chain := append([]uint64{}, existingTCA[work.TokenID]...)
+						tmap := parentTxnIDMap[work.TokenID]
 
-		for i := 0; i < numWorkers; i++ {
-			go func() {
-				defer wg.Done()
-				for work := range workChan {
-					chain := existingTCA[work.TokenID]
-					tmap := parentTxnIDMap[work.TokenID]
-
-					for _, info := range work.Chains {
-						newID := info.ID
-						inserted := false
-
-						if info.PreviousTransactionID != "" && tmap != nil {
-							if parentID, ok := tmap[info.PreviousTransactionID]; ok {
-								for j, id := range chain {
-									if id == parentID {
-										chain = append(chain[:j+1], append([]uint64{newID}, chain[j+1:]...)...)
-										inserted = true
-										break
+						for _, info := range work.Chains {
+							newID := info.ID
+							inserted := false
+							if info.PreviousTransactionID != "" && tmap != nil {
+								if parentID, ok := tmap[info.PreviousTransactionID]; ok {
+									for j, id := range chain {
+										if id == parentID {
+											chain = append(chain[:j+1], append([]uint64{newID}, chain[j+1:]...)...)
+											inserted = true
+											break
+										}
 									}
 								}
 							}
-						}
-
-						if !inserted {
-							if info.PreviousTransactionID == "" {
-								if len(chain) == 0 {
-									chain = []uint64{newID}
+							if !inserted {
+								if info.PreviousTransactionID == "" {
+									if len(chain) == 0 { chain = []uint64{newID} } else { chain = append([]uint64{newID}, chain...) }
 								} else {
-									chain = append([]uint64{newID}, chain...)
+									chain = append(chain, newID)
 								}
-							} else {
-								chain = append(chain, newID)
 							}
 						}
+						resultChan <- tokenResult{TokenID: work.TokenID, Chain: chain}
 					}
-					resultChan <- tokenResult{TokenID: work.TokenID, Chain: chain}
-				}
-			}()
-		}
+				}()
+			}
 
-		go func() {
 			wg.Wait()
 			close(resultChan)
-		}()
+			
+			for res := range resultChan {
+				existingTCA[res.TokenID] = res.Chain
+			}
 
-		for res := range resultChan {
-			existingTCA[res.TokenID] = res.Chain
-		}
+			// F. Bulk Upsert results for this batch
+			var tcaUpserts []models.TokenChainArray
+			for _, tid := range batchTokenIDs {
+				chain := existingTCA[tid]
+				b, _ := json.Marshal(chain)
+				tcaUpserts = append(tcaUpserts, models.TokenChainArray{
+					TokenID: tid,
+					Index:   b,
+				})
+			}
 
-		// E. Bulk Upsert Updated TokenChainArrays
-		var tcaUpserts []models.TokenChainArray
-		for tokenID, chain := range existingTCA {
-			b, _ := json.Marshal(chain)
-			tcaUpserts = append(tcaUpserts, models.TokenChainArray{
-				TokenID: tokenID,
-				Index:   b,
-			})
-		}
-
-		if len(tcaUpserts) > 0 {
-			if err := tx.Clauses(clause.OnConflict{
-				Columns:   []clause.Column{{Name: "token_id"}},
-				UpdateAll: true,
-			}).CreateInBatches(tcaUpserts, 1000).Error; err != nil {
-				return err
+			if len(tcaUpserts) > 0 {
+				if err := tx.Clauses(clause.OnConflict{
+					Columns:   []clause.Column{{Name: "token_id"}},
+					UpdateAll: true,
+				}).CreateInBatches(tcaUpserts, 1000).Error; err != nil {
+					return err
+				}
 			}
 		}
 	}

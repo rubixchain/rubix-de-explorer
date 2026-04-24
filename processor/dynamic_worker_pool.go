@@ -293,14 +293,22 @@ func (p *DynamicWorkerPool) dynamicWorker(workerID int, stopChan chan struct{}) 
 	for {
 		select {
 		case txnEvent := <-p.txnQueue:
-			startTime := time.Now()
+			// Layer 3: Recovery protection for the top-level worker thread
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("[Worker %d] CRITICAL RECOVERY: Rescued from panic during transaction %s: %v", workerID, txnEvent.TransactionID, r)
+					}
+				}()
+				startTime := time.Now()
 
-			// Handle the actual DB processing
-			ProcessDBTransaction(txnEvent, workerID)
+				// Handle the actual DB processing
+				ProcessDBTransaction(txnEvent, workerID)
 
-			atomic.AddInt64(&p.processedTxnCount, 1)
-			processingTime := time.Since(startTime)
-			p.updateProcessingMetrics(processingTime)
+				atomic.AddInt64(&p.processedTxnCount, 1)
+				processingTime := time.Since(startTime)
+				p.updateProcessingMetrics(processingTime)
+			}()
 
 		case <-stopChan:
 			return
