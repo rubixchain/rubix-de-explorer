@@ -86,12 +86,6 @@ func ValidateTransactionFormat(newEvent *model.EventTransaction) bool {
 			log.Printf("ID-FORMAT-ERR: Invalid Quorum DID format: %s", q.Did)
 			return false
 		}
-		for _, t := range q.Tokens {
-			if !util.IsValidRBT(t.TokenID) {
-				log.Printf("ID-FORMAT-ERR: Invalid Quorum RBT TokenID format: %s", t.TokenID)
-				return false
-			}
-		}
 	}
 
 	// Committed Tokens Validation (Must be RBTs)
@@ -102,17 +96,6 @@ func ValidateTransactionFormat(newEvent *model.EventTransaction) bool {
 		}
 	}
 
-	// Quorum Signatures DID Validation
-	sig, _ := newEvent.Transaction.ParseSignature()
-	if sig != nil {
-		for _, qs := range sig.Quorums {
-			if !util.IsValidDID(qs.Did) {
-				log.Printf("ID-FORMAT-ERR: Invalid Quorum Signature DID format: %s", qs.Did)
-				return false
-			}
-		}
-	}
-
 	return true
 }
 
@@ -120,68 +103,40 @@ func ValidateTransactionFormat(newEvent *model.EventTransaction) bool {
 // Called by workers in the DynamicWorkerPool
 func ProcessDBTransaction(newEvent *model.EventTransaction, workerID int) {
 	txnID := newEvent.Transaction.ID
-	log.Printf("[Worker %d] Processing transaction: %s (Status: %v)", workerID, txnID, newEvent.Status)
 
-	// 1. Save EventTransaction (always — captures both success and failed consensus)
-	if err := operations.SaveEventTransaction(
-		nil, // Use default DB
-		txnID,
-		newEvent.Status,
-		newEvent.Message,
-	); err != nil {
-		log.Printf("[Worker %d] Error saving event transaction: %v", workerID, err)
-	} else {
-		log.Printf("[Worker %d] Step 1: EventTransaction saved", workerID)
+	// 1. Save EventTransaction (captures consensus result)
+	if err := operations.SaveEventTransaction(nil, txnID, newEvent.Status, newEvent.Message); err != nil {
+		log.Printf("[Worker %d] ERROR: Transaction %s - Failed to save event: %v", workerID, txnID, err)
 	}
 
-	// Parse the raw Info JSON into structured TransactionInfo
+	// Parse Info
 	txnInfo, err := newEvent.Transaction.ParseInfo()
-	if err != nil {
-		log.Printf("[Worker %d] Error parsing transaction info: %v", workerID, err)
-		return
-	}
-	if txnInfo == nil {
-		log.Printf("[Worker %d] Transaction %s has no TransactionInfo, skipping details", workerID, txnID)
+	if err != nil || txnInfo == nil {
+		log.Printf("[Worker %d] ERROR: Transaction %s - Failed to parse info: %v", workerID, txnID, err)
 		return
 	}
 
-	// 2. Save Transaction as JSON (always) — pass raw bytes directly
-	dbTxn := &models.Transactions{
-		ID:        txnID,
-		Info:      newEvent.Transaction.Info,
-		Signature: newEvent.Transaction.Signature,
-	}
-	if err := operations.SaveTransaction(nil, dbTxn); err != nil {
-		log.Printf("[Worker %d] Error saving raw transaction: %v", workerID, err)
-	} else {
-		log.Printf("[Worker %d] Step 2: raw Transaction saved", workerID)
+	// 2. Save Raw Transaction
+	if err := operations.SaveTransaction(nil, &models.Transactions{ID: txnID, Info: newEvent.Transaction.Info, Signature: newEvent.Transaction.Signature}); err != nil {
+		log.Printf("[Worker %d] ERROR: Transaction %s - Failed to save raw txn: %v", workerID, txnID, err)
 	}
 
-	// 3. Save flattened TransactionInfo (to success or failure table)
+	// 3. Save Flattened Details
 	if err := operations.SaveTransactionDetails(nil, txnID, txnInfo, newEvent.Status); err != nil {
-		log.Printf("[Worker %d] Error saving transaction details: %v", workerID, err)
-	} else {
-		log.Printf("[Worker %d] Step 3: TransactionInfo saved (Status: %v)", workerID, newEvent.Status)
+		log.Printf("[Worker %d] ERROR: Transaction %s - Failed to save details: %v", workerID, txnID, err)
 	}
 
-	// If consensus failed, stop here (don't update assets/balances)
-	if !newEvent.Status {
-		log.Printf("[Worker %d] Transaction %s failed consensus, skipping asset processing", workerID, txnID)
-		return
+	// 4. Atomic Asset Processing (only for successful consensus)
+	if newEvent.Status {
+		err = database.WriteDB.Transaction(func(tx *gorm.DB) error {
+			return operations.ProcessTransactionAssets(tx, txnInfo, txnID)
+		})
+		if err != nil {
+			log.Printf("[Worker %d] ERROR: Transaction %s - Asset processing failed: %v", workerID, txnID, err)
+			return
+		}
 	}
 
-	// 4. Process Assets (Tokens, Balances, Provenance) — ONLY for successful transactions
-	// This block is ATOMIC: either all assets update or none.
-	log.Printf("[Worker %d] Step 4: Starting Atomic Asset Processing...", workerID)
-	err = database.WriteDB.Transaction(func(tx *gorm.DB) error {
-		return operations.ProcessTransactionAssets(tx, txnInfo, txnID)
-	})
-
-	if err != nil {
-		log.Printf("[Worker %d] Error in atomic asset processing: %v", workerID, err)
-	} else {
-		log.Printf("[Worker %d] Step 4: Asset Processing completed successfully", workerID)
-	}
-
-	log.Printf("[Worker %d] Transaction %s finished successfully", workerID, txnID)
+	// ONE SUMMARY LOG: Success
+	log.Printf("[Worker %d] SUCCESS: Transaction %s processed (Status: %v)", workerID, txnID, newEvent.Status)
 }

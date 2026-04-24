@@ -1,14 +1,12 @@
 package processor
 
 import (
-	"bufio"
 	"context"
 	"explorer-server/model"
+	"explorer-server/util"
 	"log"
-	"os"
 	"runtime"
-	"strconv"
-	"strings"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -42,6 +40,7 @@ type DynamicWorkerPool struct {
 	queueLength        int64
 	averageProcessTime time.Duration
 	processedTxnCount  int64
+	metricsMu          sync.Mutex
 
 	// Worker management
 	workerChannels  map[int]chan struct{}
@@ -96,8 +95,7 @@ func InitDynamicWorkerPool() {
 
 // EnqueueTransaction adds a transaction to the processing queue
 func (p *DynamicWorkerPool) EnqueueTransaction(txnEvent *model.EventTransaction) {
-	currentQueueLen := int64(len(p.txnQueue))
-	p.queueLength = currentQueueLen
+	atomic.StoreInt64(&p.queueLength, int64(len(p.txnQueue)))
 
 	select {
 	case p.txnQueue <- txnEvent:
@@ -131,8 +129,7 @@ func (p *DynamicWorkerPool) systemMonitor() {
 
 // Evaluate system conditions and decide on scaling
 func (p *DynamicWorkerPool) evaluateAndScale() {
-	memoryUsagePercent := getSystemMemoryUsage()
-
+	memoryUsagePercent := util.GetSystemMemoryUsage()
 	queueLen := int64(len(p.txnQueue))
 
 	p.workersMutex.RLock()
@@ -147,55 +144,6 @@ func (p *DynamicWorkerPool) evaluateAndScale() {
 	case "scale_down":
 		p.scaleDown()
 	}
-}
-
-// getSystemMemoryUsage returns the VM's active memory usage percentage.
-// On Linux, it reads /proc/meminfo to get true system metrics.
-// On other OSes, it falls back to Go runtime stats.
-func getSystemMemoryUsage() float64 {
-	if runtime.GOOS == "linux" {
-		file, err := os.Open("/proc/meminfo")
-		if err == nil {
-			defer file.Close()
-			scanner := bufio.NewScanner(file)
-			var memTotal, memAvailable float64
-			for scanner.Scan() {
-				line := scanner.Text()
-				if strings.HasPrefix(line, "MemTotal:") {
-					fields := strings.Fields(line)
-					if len(fields) >= 2 {
-						if val, err := strconv.ParseFloat(fields[1], 64); err == nil {
-							memTotal = val
-						}
-					}
-				} else if strings.HasPrefix(line, "MemAvailable:") {
-					fields := strings.Fields(line)
-					if len(fields) >= 2 {
-						if val, err := strconv.ParseFloat(fields[1], 64); err == nil {
-							memAvailable = val
-						}
-					}
-				}
-				if memTotal > 0 && memAvailable > 0 {
-					break
-				}
-			}
-			if memTotal > 0 && memAvailable > 0 {
-				used := memTotal - memAvailable
-				return (used / memTotal) * 100.0
-			}
-		}
-	}
-
-	// Fallback for Windows/Mac (local testing)
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	usedMB := float64(m.Alloc) / 1024 / 1024
-	sysMB := float64(m.Sys) / 1024 / 1024
-	if sysMB > 0 {
-		return (usedMB / sysMB) * 100.0
-	}
-	return 0.0
 }
 
 func (p *DynamicWorkerPool) determineScalingAction(memoryPercent float64, queueLen int64, currentWorkers int) string {
@@ -261,18 +209,28 @@ func (p *DynamicWorkerPool) scaleDown() {
 	removeWorkers = mathMin(removeWorkers, p.currentWorkers-p.minWorkers)
 
 	p.workerChanMutex.Lock()
-	workersToStop := make([]int, 0, removeWorkers)
+	// Robust scaling: collect and sort live IDs to ensure we stop the newest ones first
+	liveIDs := make([]int, 0, len(p.workerChannels))
+	for id := range p.workerChannels {
+		liveIDs = append(liveIDs, id)
+	}
+	sort.Ints(liveIDs)
 
-	for workerID := p.currentWorkers - 1; len(workersToStop) < removeWorkers && workerID >= p.minWorkers; workerID-- {
-		if stopChan, exists := p.workerChannels[workerID]; exists {
+	stopped := 0
+	for i := len(liveIDs) - 1; i >= 0 && stopped < removeWorkers; i-- {
+		id := liveIDs[i]
+		if id < p.minWorkers {
+			break
+		}
+		if stopChan, exists := p.workerChannels[id]; exists {
 			close(stopChan)
-			delete(p.workerChannels, workerID)
-			workersToStop = append(workersToStop, workerID)
+			delete(p.workerChannels, id)
+			stopped++
 		}
 	}
 	p.workerChanMutex.Unlock()
 
-	p.currentWorkers -= len(workersToStop)
+	p.currentWorkers -= stopped
 	p.lastScaleAction = time.Now()
 }
 
@@ -293,14 +251,28 @@ func (p *DynamicWorkerPool) dynamicWorker(workerID int, stopChan chan struct{}) 
 	for {
 		select {
 		case txnEvent := <-p.txnQueue:
-			startTime := time.Now()
+			// Safety: If RAM is critical, don't start new work to prevent OOM
+			for util.GetSystemMemoryUsage() > 85 {
+				log.Printf("[Worker %d] CRITICAL RAM (>85%%). Pausing ingestion to prevent crash...", workerID)
+				time.Sleep(2 * time.Second)
+			}
 
-			// Handle the actual DB processing
-			ProcessDBTransaction(txnEvent, workerID)
+			// Layer 3: Recovery protection for the top-level worker thread
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("[Worker %d] CRITICAL RECOVERY: Rescued from panic during transaction %s: %v", workerID, txnEvent.TransactionID, r)
+					}
+				}()
+				startTime := time.Now()
 
-			atomic.AddInt64(&p.processedTxnCount, 1)
-			processingTime := time.Since(startTime)
-			p.updateProcessingMetrics(processingTime)
+				// Handle the actual DB processing
+				ProcessDBTransaction(txnEvent, workerID)
+
+				atomic.AddInt64(&p.processedTxnCount, 1)
+				processingTime := time.Since(startTime)
+				p.updateProcessingMetrics(processingTime)
+			}()
 
 		case <-stopChan:
 			return
@@ -312,6 +284,8 @@ func (p *DynamicWorkerPool) dynamicWorker(workerID int, stopChan chan struct{}) 
 }
 
 func (p *DynamicWorkerPool) updateProcessingMetrics(processingTime time.Duration) {
+	p.metricsMu.Lock()
+	defer p.metricsMu.Unlock()
 	if p.averageProcessTime == 0 {
 		p.averageProcessTime = processingTime
 	} else {

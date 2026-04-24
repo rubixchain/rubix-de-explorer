@@ -42,3 +42,8 @@ func IsValidNFT(tokenID string) bool {
 func IsValidSC(tokenID string) bool {
 	return ipfsRegex.MatchString(tokenID)
 }
+
+// IsValidTransactionID checks whether transaction IDs are in accepted Rubix formats.
+func IsValidTransactionID(txnID string) bool {
+	return len(txnID) == 64
+}
