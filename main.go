@@ -21,6 +21,7 @@ import (
 	"explorer-server/processor"
 	"explorer-server/pubsub"
 	"explorer-server/router"
+	"explorer-server/util"
 
 	"github.com/joho/godotenv"
 	"github.com/rs/cors"
@@ -47,7 +48,7 @@ func main() {
 
 		// On Linux, also redirect the OS-level file descriptors 1 (stdout) and 2 (stderr).
 		// This ensures that "fatal error: concurrent map write" or panics are caught in the log file.
-		RedirectStderr(logFile)
+		util.RedirectStderr(logFile)
 	}
 
 	log.Println("----------------------------------------------------------------")
