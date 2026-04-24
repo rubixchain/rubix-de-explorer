@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"syscall"
 	"time"
@@ -24,13 +27,36 @@ import (
 )
 
 func main() {
+	// 1. Setup Logging (Unique File per Restart + Console)
+	logDir := "logs"
+	if _, err := os.Stat(logDir); os.IsNotExist(err) {
+		_ = os.Mkdir(logDir, 0755)
+	}
+	
+	// Create a unique filename based on the current time (e.g., explorer_2026-01-02_15-04-05.log)
+	startTime := time.Now()
+	logFileName := fmt.Sprintf("explorer_%s.log", startTime.Format("2006-01-02_15-04-05"))
+	
+	logFile, err := os.OpenFile(filepath.Join(logDir, logFileName), os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Printf("Warning: Could not open log file: %v", err)
+	} else {
+		// MultiWriter redirects log output to both Stdout and the log file
+		mw := io.MultiWriter(os.Stdout, logFile)
+		log.SetOutput(mw)
+	}
+
+	log.Println("----------------------------------------------------------------")
+	log.Printf(">>> EXPLORER RESTART - %s", time.Now().Format("2006-01-02 15:04:05"))
+	log.Println("----------------------------------------------------------------")
+
 	// CLI Flags
 	testNet := flag.Bool("testnet", false, "Connect to Rubix TestNet (default: MainNet)")
 	swarmKeyPath := flag.String("swarmkey", "", "Path to a custom swarm.key file (overrides built-in keys)")
 	publishDummy := flag.Bool("publish-dummy", false, "TODO: DELETE LATER - Publish a dummy transaction for testing")
 	flag.Parse()
 
-	startTime := time.Now()
+	startTime = time.Now()
 
 	// Log which network we're connecting to
 	if *swarmKeyPath != "" {
