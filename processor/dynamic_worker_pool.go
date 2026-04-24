@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,10 +39,12 @@ type DynamicWorkerPool struct {
 	scaleDownDelay  time.Duration
 	lastScaleAction time.Time
 
-	// Metrics
+	// Metrics — queueLength and processedTxnCount use atomics,
+	// averageProcessTime is protected by metricsMu
 	queueLength        int64
 	averageProcessTime time.Duration
 	processedTxnCount  int64
+	metricsMu          sync.Mutex
 
 	// Worker management
 	workerChannels  map[int]chan struct{}
@@ -96,8 +99,7 @@ func InitDynamicWorkerPool() {
 
 // EnqueueTransaction adds a transaction to the processing queue
 func (p *DynamicWorkerPool) EnqueueTransaction(txnEvent *model.EventTransaction) {
-	currentQueueLen := int64(len(p.txnQueue))
-	p.queueLength = currentQueueLen
+	atomic.StoreInt64(&p.queueLength, int64(len(p.txnQueue)))
 
 	select {
 	case p.txnQueue <- txnEvent:
@@ -261,18 +263,28 @@ func (p *DynamicWorkerPool) scaleDown() {
 	removeWorkers = mathMin(removeWorkers, p.currentWorkers-p.minWorkers)
 
 	p.workerChanMutex.Lock()
-	workersToStop := make([]int, 0, removeWorkers)
 
-	for workerID := p.currentWorkers - 1; len(workersToStop) < removeWorkers && workerID >= p.minWorkers; workerID-- {
-		if stopChan, exists := p.workerChannels[workerID]; exists {
-			close(stopChan)
-			delete(p.workerChannels, workerID)
-			workersToStop = append(workersToStop, workerID)
-		}
+	// Collect live IDs directly from the map — never derive from currentWorkers count
+	liveIDs := make([]int, 0, len(p.workerChannels))
+	for id := range p.workerChannels {
+		liveIDs = append(liveIDs, id)
 	}
+	sort.Ints(liveIDs)
+
+	stopped := 0
+	for i := len(liveIDs) - 1; i >= 0 && stopped < removeWorkers; i-- {
+		id := liveIDs[i]
+		if id < p.minWorkers {
+			break
+		}
+		close(p.workerChannels[id])
+		delete(p.workerChannels, id)
+		stopped++
+	}
+
 	p.workerChanMutex.Unlock()
 
-	p.currentWorkers -= len(workersToStop)
+	p.currentWorkers -= stopped
 	p.lastScaleAction = time.Now()
 }
 
@@ -292,8 +304,11 @@ func (p *DynamicWorkerPool) dynamicWorker(workerID int, stopChan chan struct{}) 
 
 	for {
 		select {
-		case txnEvent := <-p.txnQueue:
-			// Layer 3: Recovery protection for the top-level worker thread
+		case txnEvent, ok := <-p.txnQueue:
+			// Channel closed or nil sentinel during shutdown — exit cleanly
+			if !ok || txnEvent == nil {
+				return
+			}
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
@@ -301,10 +316,7 @@ func (p *DynamicWorkerPool) dynamicWorker(workerID int, stopChan chan struct{}) 
 					}
 				}()
 				startTime := time.Now()
-
-				// Handle the actual DB processing
 				ProcessDBTransaction(txnEvent, workerID)
-
 				atomic.AddInt64(&p.processedTxnCount, 1)
 				processingTime := time.Since(startTime)
 				p.updateProcessingMetrics(processingTime)
@@ -320,10 +332,12 @@ func (p *DynamicWorkerPool) dynamicWorker(workerID int, stopChan chan struct{}) 
 }
 
 func (p *DynamicWorkerPool) updateProcessingMetrics(processingTime time.Duration) {
+	p.metricsMu.Lock()
+	defer p.metricsMu.Unlock()
 	if p.averageProcessTime == 0 {
 		p.averageProcessTime = processingTime
 	} else {
-		alpha := 0.1
+		const alpha = 0.1
 		p.averageProcessTime = time.Duration(
 			float64(p.averageProcessTime)*(1-alpha) +
 				float64(processingTime)*alpha,

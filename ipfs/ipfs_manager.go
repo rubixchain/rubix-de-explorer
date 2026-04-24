@@ -135,6 +135,16 @@ func (m *IPFSManager) EnsureInitialized(testNet bool, customSwarmKeyPath string)
 			return fmt.Errorf("failed to initialize IPFS: %w\nOutput: %s", err, string(output))
 		}
 		log.Println("IPFS initialized successfully")
+	} else {
+		// 2.5 Clean up any stale repo lock from a previous crash or improper shutdown
+		lockFile := filepath.Join(ipfsRepo, "repo.lock")
+		if _, err := os.Stat(lockFile); err == nil {
+			log.Printf("Stale IPFS repo lock found at %s. Removing for restart...", lockFile)
+			// We remove it because the Explorer is the exclusive owner of this bundled IPFS repo
+			if err := os.Remove(lockFile); err != nil {
+				log.Printf("Warning: Failed to remove stale IPFS lock: %v", err)
+			}
+		}
 	}
 
 	// 3. Configure mDNS discovery
