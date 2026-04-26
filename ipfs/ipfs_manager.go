@@ -184,6 +184,17 @@ func (m *IPFSManager) EnsureInitialized(testNet bool, customSwarmKeyPath string)
 		return fmt.Errorf("failed to write swarm key: %w", err)
 	}
 
+	// Log a preview of the swarm key (usually the last line of the PSK file)
+	keyLines := strings.Split(strings.TrimSpace(string(swarmKeyData)), "\n")
+	if len(keyLines) > 0 {
+		key := keyLines[len(keyLines)-1]
+		if len(key) > 10 {
+			log.Printf("Swarm Key Loaded: %s...%s (length: %d)", key[:5], key[len(key)-5:], len(key))
+		} else {
+			log.Printf("Swarm Key Loaded: %s", key)
+		}
+	}
+
 	// 4. Remove all default public bootstrap nodes
 	log.Println("Removing default IPFS bootstrap nodes...")
 	exec.Command(m.ipfsPath, "bootstrap", "rm", "--all").Run()
@@ -239,6 +250,12 @@ func (m *IPFSManager) EnsureInitialized(testNet bool, customSwarmKeyPath string)
 	// 9. Allow API access from the local client module
 	exec.Command(m.ipfsPath, "config", "--json", "API.HTTPHeaders.Access-Control-Allow-Origin", `["*"]`).Run()
 	exec.Command(m.ipfsPath, "config", "--json", "API.HTTPHeaders.Access-Control-Allow-Methods", `["PUT", "POST", "GET"]`).Run()
+
+	// 10. Log the PeerID for verification
+	idCmd := exec.Command(m.ipfsPath, "id", "--format", "<id>")
+	if output, err := idCmd.Output(); err == nil {
+		log.Printf("IPFS PeerID: %s", strings.TrimSpace(string(output)))
+	}
 
 	return nil
 }
