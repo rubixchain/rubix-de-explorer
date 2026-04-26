@@ -451,13 +451,13 @@ func GetTransactionInfoList(limit, page int) ([]models.TransactionInfo, int64, e
 	}
 	offset := (page - 1) * limit
 
-	// 1. Calculate total count (where amount > 0 across both success and failure tables)
+	// 1. Calculate total count
 	var total int64
 	countQuery := `
-		SELECT COUNT(*) FROM (
-			SELECT transaction_id FROM "TransactionInfo" WHERE amount > 0
+		SELECT SUM(c) FROM (
+			SELECT COUNT(*) as c FROM "TransactionInfo" WHERE amount > 0
 			UNION ALL
-			SELECT transaction_id FROM "FailedTransactionInfo" WHERE amount > 0
+			SELECT COUNT(*) as c FROM "FailedTransactionInfo" WHERE amount > 0
 		) AS combined
 	`
 	if err := database.ReadDB.Raw(countQuery).Scan(&total).Error; err != nil {
@@ -465,22 +465,24 @@ func GetTransactionInfoList(limit, page int) ([]models.TransactionInfo, int64, e
 	}
 
 	// 2. Fetch paginated results
-	// If owner is empty, fall back to the first RBT token ID (covers mint transactions
-	// where the node does not populate the owner field).
+	// Optimization: Sort individual tables before union to allow Postgres to use indexes.
+	// This reduces the 'Slow SQL' overhead significantly on large datasets.
 	var result []models.TransactionInfo
 	dataQuery := `
 		SELECT transaction_id, initiator,
 			COALESCE(NULLIF(owner, ''), tokens->'rbt'->0->>'tokenId', tokens->'ft'->0->>'tokenId', tokens->'nft'->0->>'tokenId', tokens->'smartContract'->0->>'tokenId') AS owner,
 			epoch, network, tokens, committed_tokens, quorums, memo, status, amount, created_at, updated_at
 		FROM (
-			SELECT transaction_id, initiator, owner, tokens, epoch, network, committed_tokens, quorums, memo, status, amount, created_at, updated_at FROM "TransactionInfo" WHERE amount > 0
+			(SELECT transaction_id, initiator, owner, tokens, epoch, network, committed_tokens, quorums, memo, status, amount, created_at, updated_at FROM "TransactionInfo" WHERE amount > 0 ORDER BY created_at DESC LIMIT ?)
 			UNION ALL
-			SELECT transaction_id, initiator, owner, tokens, epoch, network, committed_tokens, quorums, memo, status, amount, created_at, updated_at FROM "FailedTransactionInfo" WHERE amount > 0
+			(SELECT transaction_id, initiator, owner, tokens, epoch, network, committed_tokens, quorums, memo, status, amount, created_at, updated_at FROM "FailedTransactionInfo" WHERE amount > 0 ORDER BY created_at DESC LIMIT ?)
 		) AS combined
 		ORDER BY created_at DESC
 		LIMIT ? OFFSET ?
 	`
-	if err := database.ReadDB.Raw(dataQuery, limit, offset).Scan(&result).Error; err != nil {
+	// We use limit + offset for the subqueries to ensure the global top N is captured.
+	subLimit := limit + offset
+	if err := database.ReadDB.Raw(dataQuery, subLimit, subLimit, limit, offset).Scan(&result).Error; err != nil {
 		return nil, 0, err
 	}
 
@@ -504,10 +506,10 @@ func GetTransactionSummaryList(limit, page int) ([]models.TransactionSummary, in
 	// 1. Calculate total count
 	var total int64
 	countQuery := `
-		SELECT COUNT(*) FROM (
-			SELECT transaction_id FROM "TransactionInfo" WHERE amount > 0
+		SELECT SUM(c) FROM (
+			SELECT COUNT(*) as c FROM "TransactionInfo" WHERE amount > 0
 			UNION ALL
-			SELECT transaction_id FROM "FailedTransactionInfo" WHERE amount > 0
+			SELECT COUNT(*) as c FROM "FailedTransactionInfo" WHERE amount > 0
 		) AS combined
 	`
 	if err := database.ReadDB.Raw(countQuery).Scan(&total).Error; err != nil {
@@ -515,22 +517,21 @@ func GetTransactionSummaryList(limit, page int) ([]models.TransactionSummary, in
 	}
 
 	// 2. Fetch paginated results (Summary ONLY)
-	// If owner is empty, fall back to the first RBT token ID (covers mint transactions
-	// where the node does not populate the owner field).
 	var result []models.TransactionSummary
 	dataQuery := `
 		SELECT transaction_id, initiator,
 			COALESCE(NULLIF(owner, ''), tokens->'rbt'->0->>'tokenId', tokens->'ft'->0->>'tokenId', tokens->'nft'->0->>'tokenId', tokens->'smartContract'->0->>'tokenId') AS owner,
 			epoch, network, status, amount, created_at
 		FROM (
-			SELECT transaction_id, initiator, owner, tokens, epoch, network, status, amount, created_at FROM "TransactionInfo" WHERE amount > 0
+			(SELECT transaction_id, initiator, owner, tokens, epoch, network, status, amount, created_at FROM "TransactionInfo" WHERE amount > 0 ORDER BY created_at DESC LIMIT ?)
 			UNION ALL
-			SELECT transaction_id, initiator, owner, tokens, epoch, network, status, amount, created_at FROM "FailedTransactionInfo" WHERE amount > 0
+			(SELECT transaction_id, initiator, owner, tokens, epoch, network, status, amount, created_at FROM "FailedTransactionInfo" WHERE amount > 0 ORDER BY created_at DESC LIMIT ?)
 		) AS combined
 		ORDER BY created_at DESC
 		LIMIT ? OFFSET ?
 	`
-	if err := database.ReadDB.Raw(dataQuery, limit, offset).Scan(&result).Error; err != nil {
+	subLimit := limit + offset
+	if err := database.ReadDB.Raw(dataQuery, subLimit, subLimit, limit, offset).Scan(&result).Error; err != nil {
 		return nil, 0, err
 	}
 
@@ -586,41 +587,40 @@ func GetRBTList(limit, page int) ([]models.Token, int64, error) {
 }
 
 func GetFTGroupList(limit, page int) ([]model.FTGroup, int64, error) {
-	var tokens []models.Token
-	if err := database.ReadDB.Model(&models.Token{}).Where("token_type = ?", 2).Find(&tokens).Error; err != nil {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 10
+	}
+	offset := (page - 1) * limit
+
+	// Use DIDBalances table for pre-aggregated grouping to prevent OOM
+	var total int64
+	if err := database.ReadDB.Table("DIDBalances").
+		Where("asset_type = ?", "FT").
+		Select("COUNT(DISTINCT (token_name, creator_did))").
+		Scan(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	groupsMap := make(map[string]*model.FTGroup)
-	for _, t := range tokens {
-		parts := strings.Split(t.TokenID, "_")
-		if len(parts) >= 3 {
-			ftName := parts[0]
-			creatorDID := parts[len(parts)-1]
-			key := ftName + "_" + creatorDID
-			if g, ok := groupsMap[key]; ok {
-				g.Count++
-			} else {
-				groupsMap[key] = &model.FTGroup{FTName: ftName, Count: 1, CreatorDID: creatorDID}
-			}
-		}
+	var groups []model.FTGroup
+	if err := database.ReadDB.Raw(`
+		SELECT token_name as ft_name, creator_did, SUM(balance) as count
+		FROM "DIDBalances"
+		WHERE asset_type = 'FT'
+		GROUP BY token_name, creator_did
+		ORDER BY count DESC
+		LIMIT ? OFFSET ?
+	`, limit, offset).Scan(&groups).Error; err != nil {
+		return nil, 0, err
 	}
 
-	var allGroups []model.FTGroup
-	for _, g := range groupsMap {
-		allGroups = append(allGroups, *g)
+	if groups == nil {
+		groups = make([]model.FTGroup, 0)
 	}
 
-	total := int64(len(allGroups))
-	start := (page - 1) * limit
-	if start > len(allGroups) {
-		start = len(allGroups)
-	}
-	end := start + limit
-	if end > len(allGroups) {
-		end = len(allGroups)
-	}
-	return allGroups[start:end], total, nil
+	return groups, total, nil
 }
 
 func GetFTListByFTName(ftName string, creatorDID string, limit, page int) ([]models.Token, int64, error) {
