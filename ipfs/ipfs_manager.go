@@ -247,6 +247,16 @@ func (m *IPFSManager) EnsureInitialized(testNet bool, customSwarmKeyPath string)
 		log.Println("IPFS API address set to /ip4/127.0.0.1/tcp/5001")
 	}
 
+	// 8. High-Throughput Performance Tuning (Optimized for 400k+ token bursts)
+	log.Println("Applying High-Throughput IPFS optimizations...")
+	exec.Command(m.ipfsPath, "config", "--json", "Pubsub.Router", `"gossipsub"`).Run()
+	exec.Command(m.ipfsPath, "config", "--json", "Swarm.ConnMgr.HighWater", "1000").Run()
+	// Increase Resource Manager limits to prevent dropping packets during bursts
+	exec.Command(m.ipfsPath, "config", "--json", "Swarm.ResourceMgr.Limits.System.Streams", "16384").Run()
+	exec.Command(m.ipfsPath, "config", "--json", "Swarm.ResourceMgr.Limits.System.StreamsInbound", "8192").Run()
+	exec.Command(m.ipfsPath, "config", "--json", "Swarm.ResourceMgr.Limits.System.Conns", "1000").Run()
+	exec.Command(m.ipfsPath, "config", "--json", "Swarm.ResourceMgr.Limits.System.ConnsInbound", "500").Run()
+
 	// 9. Allow API access from the local client module
 	exec.Command(m.ipfsPath, "config", "--json", "API.HTTPHeaders.Access-Control-Allow-Origin", `["*"]`).Run()
 	exec.Command(m.ipfsPath, "config", "--json", "API.HTTPHeaders.Access-Control-Allow-Methods", `["PUT", "POST", "GET"]`).Run()

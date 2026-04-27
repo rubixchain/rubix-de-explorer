@@ -68,7 +68,7 @@ func InitDynamicWorkerPool() {
 	}
 
 	GlobalWorkerPool = &DynamicWorkerPool{
-		txnQueue:        make(chan *model.EventTransaction, 5000),
+		txnQueue:        make(chan *model.EventTransaction, 20000),
 		ctx:             ctx,
 		cancel:          cancel,
 		minWorkers:      mathMax(1, numCPU/4),
@@ -101,7 +101,7 @@ func (p *DynamicWorkerPool) EnqueueTransaction(txnEvent *model.EventTransaction)
 	case p.txnQueue <- txnEvent:
 		// Successfully queued
 
-	case <-time.After(15 * time.Second):
+	case <-time.After(20 * time.Second):
 		log.Printf("Warning: Failed to queue transaction %s - queue full (length=%d)\n",
 			txnEvent.Transaction.ID, len(p.txnQueue))
 		return
