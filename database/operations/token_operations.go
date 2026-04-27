@@ -163,8 +163,8 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 		if _, ok := balanceChanges[key]; !ok {
 			balanceChanges[key] = &balanceChange{}
 		}
-		balanceChanges[key].Balance += (val * balanceDelta)
-		balanceChanges[key].PledgedBalance += (val * pledgeDelta)
+		balanceChanges[key].Balance = util.RoundToMaxDecimals(balanceChanges[key].Balance + (val * balanceDelta))
+		balanceChanges[key].PledgedBalance = util.RoundToMaxDecimals(balanceChanges[key].PledgedBalance + (val * pledgeDelta))
 	}
 
 	tokensToUpsert := make([]models.Token, 0)
@@ -327,6 +327,9 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 	for _, q := range txn.Quorums {
 		for _, info := range q.Tokens {
 			if t, exists := existingTokens[info.TokenID]; exists {
+				// Check if the token is already pledged (prevents double-counting pledge balance)
+				alreadyPledged := t.TokenStatus == models.TokenStatus_Pledged
+
 				t.LatestRole = models.TokenRole_Pledge
 				t.TransactionID = txnID
 				t.TokenStatus = models.TokenStatus_Pledged
@@ -337,8 +340,8 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 					PreviousTransactionID: info.PreviousTransactionID,
 					Role:                  models.TokenRole_Pledge,
 				})
-				if q.Did != "" && t.TokenType != TokenTypeSC {
-					// Deduct from Regular balance, add to Pledged balance
+				if q.Did != "" && t.TokenType != TokenTypeSC && !alreadyPledged {
+					// Only adjust balance when transitioning Free → Pledged (not re-pledge)
 					addBalanceChange(q.Did, &t, -1, 1)
 				}
 			}
@@ -653,8 +656,8 @@ func updateBalances(tx *gorm.DB, did, assetType, tokenName, creatorDID string, b
 			{Name: "creator_did"},
 		},
 		DoUpdates: clause.Assignments(map[string]interface{}{
-			"balance":         gorm.Expr("GREATEST(0, \"DIDBalances\".balance + ?)", balanceDelta),
-			"pledged_balance": gorm.Expr("GREATEST(0, \"DIDBalances\".pledged_balance + ?)", pledgedDelta),
+			"balance":         gorm.Expr("ROUND(GREATEST(0, \"DIDBalances\".balance + ?), 3)", balanceDelta),
+			"pledged_balance": gorm.Expr("ROUND(GREATEST(0, \"DIDBalances\".pledged_balance + ?), 3)", pledgedDelta),
 			"peer_id":         gorm.Expr("COALESCE(\"DIDBalances\".peer_id, EXCLUDED.peer_id)"),
 			"did_algo":        gorm.Expr("COALESCE(\"DIDBalances\".did_algo, EXCLUDED.did_algo)"),
 		}),
