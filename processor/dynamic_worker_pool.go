@@ -39,6 +39,7 @@ type DynamicWorkerPool struct {
 	// Metrics
 	queueLength        int64
 	averageProcessTime time.Duration
+	receivedTxnCount   int64
 	processedTxnCount  int64
 	metricsMu          sync.Mutex
 
@@ -95,6 +96,7 @@ func InitDynamicWorkerPool() {
 
 // EnqueueTransaction adds a transaction to the processing queue
 func (p *DynamicWorkerPool) EnqueueTransaction(txnEvent *model.EventTransaction) {
+	atomic.AddInt64(&p.receivedTxnCount, 1)
 	atomic.StoreInt64(&p.queueLength, int64(len(p.txnQueue)))
 
 	select {
@@ -340,8 +342,11 @@ func (p *DynamicWorkerPool) GetStats() map[string]interface{} {
 	p.workersMutex.RUnlock()
 
 	return map[string]interface{}{
-		"workers":      currentWorkers,
-		"queue_length": len(p.txnQueue),
-		"queue_cap":    cap(p.txnQueue),
+		"workers":           currentWorkers,
+		"queue_length":      len(p.txnQueue),
+		"queue_cap":         cap(p.txnQueue),
+		"received_txns":     atomic.LoadInt64(&p.receivedTxnCount),
+		"processed_txns":    atomic.LoadInt64(&p.processedTxnCount),
+		"avg_process_time":  p.averageProcessTime.String(),
 	}
 }
