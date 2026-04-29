@@ -694,19 +694,20 @@ func SyncAllBalances(db *gorm.DB) error {
 			TotalPledged float64 `gorm:"column:total_pledged"`
 		}
 		var results []balanceResult
-		err := tx.Table("Tokens").
-			Select(`did, 
-					SUM(CASE WHEN token_status IN (?, ?) THEN token_value ELSE 0 END) as total_free,
-					SUM(CASE WHEN token_status IN (?, ?) THEN token_value ELSE 0 END) as total_pledged`).
-			Where("token_type = ? AND token_status IN (?, ?, ?, ?)", 
-				models.TokenStatus_Free, models.TokenStatus_Locked,
-				models.TokenStatus_Pledged, models.TokenStatus_QuorumPledged,
-				TokenTypeRBT, 
-				models.TokenStatus_Free, models.TokenStatus_Locked, 
-				models.TokenStatus_Pledged, models.TokenStatus_QuorumPledged,
-			).
-			Group("did").
-			Scan(&results).Error
+		err := tx.Raw(`
+			SELECT did, 
+			       SUM(CASE WHEN token_status IN (?, ?) THEN token_value ELSE 0 END) as total_free,
+			       SUM(CASE WHEN token_status IN (?, ?) THEN token_value ELSE 0 END) as total_pledged
+			FROM "Tokens"
+			WHERE token_type = ? AND token_status IN (?, ?, ?, ?)
+			GROUP BY did
+		`, 
+			models.TokenStatus_Free, models.TokenStatus_Locked,
+			models.TokenStatus_Pledged, models.TokenStatus_QuorumPledged,
+			TokenTypeRBT, 
+			models.TokenStatus_Free, models.TokenStatus_Locked, 
+			models.TokenStatus_Pledged, models.TokenStatus_QuorumPledged,
+		).Scan(&results).Error
 		if err != nil {
 			return err
 		}
