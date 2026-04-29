@@ -85,12 +85,12 @@ func main() {
 	database.ConnectAndMigrate(false)
 	log.Println("Database connection established and migrated")
 
-	// One-time pledged balance sync
-	log.Println("Migration: Starting one-time PledgedBalance synchronization...")
-	if err := operations.SyncPledgedBalances(database.WriteDB); err != nil {
-		log.Printf("Migration Warning: Failed to sync pledged balances: %v\n", err)
+	// One-time balance sync
+	log.Println("Migration: Starting one-time Balance synchronization...")
+	if err := operations.SyncAllBalances(database.WriteDB); err != nil {
+		log.Printf("Migration Warning: Failed to sync balances: %v\n", err)
 	} else {
-		log.Println("Migration: PledgedBalance synchronization complete")
+		log.Println("Migration: Balance synchronization complete")
 	}
 
 	log.Printf("Explorer Server initialized with %d cores\n", totalCores)
