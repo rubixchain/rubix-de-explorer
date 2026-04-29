@@ -6,7 +6,9 @@ import (
 	"explorer-server/database/models"
 	"explorer-server/model"
 	"fmt"
+	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -105,6 +107,88 @@ func GetDIDCount() (int64, error) {
 		return 0, err
 	}
 	return count, nil
+}
+
+type RBTSupplyStats struct {
+	CirculatingSupply float64 `json:"circulating_supply"`
+	TotalSupply       int64   `json:"total_supply"`
+	FTCount           int64   `json:"ft_count"`
+	NFTCount          int64   `json:"nft_count"`
+	SCCount           int64   `json:"sc_count"`
+	RBTPrice          float64 `json:"rbt_price"`
+	TVL               float64 `json:"tvl"`
+}
+
+type kpiResponse struct {
+	Data struct {
+		RBTPrice string `json:"rbtPrice"`
+	} `json:"data"`
+}
+
+func fetchRBTPrice() (float64, error) {
+	resp, err := http.Get("https://rexplorerapi.azurewebsites.net/api/Analytics/GetKPIDetails")
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	var kpi kpiResponse
+	if err := json.NewDecoder(resp.Body).Decode(&kpi); err != nil {
+		return 0, err
+	}
+
+	// rbtPrice comes as "$123.27" — strip the leading "$" before parsing
+	priceStr := strings.TrimPrefix(strings.TrimSpace(kpi.Data.RBTPrice), "$")
+	price, err := strconv.ParseFloat(priceStr, 64)
+	if err != nil {
+		return 0, err
+	}
+	return price, nil
+}
+
+func GetRBTSupplyStats() (RBTSupplyStats, error) {
+	var stats RBTSupplyStats
+
+	// Circulating supply = sum of all RBT balances held by DIDs
+	if err := database.ReadDB.Table("DIDBalances").
+		Where("asset_type = ?", "RBT").
+		Select("COALESCE(SUM(balance), 0)").
+		Scan(&stats.CirculatingSupply).Error; err != nil {
+		return stats, err
+	}
+
+	// Total supply = count of RBT mint transactions (RBT tokens with no previousTransactionID), each worth 1 RBT
+	if err := database.ReadDB.Raw(`
+		SELECT COUNT(*) FROM "TransactionInfo"
+		WHERE jsonb_typeof(tokens->'rbt') = 'array'
+		  AND jsonb_array_length(tokens->'rbt') > 0
+		  AND NOT EXISTS (
+			SELECT 1 FROM jsonb_array_elements(tokens->'rbt') AS tok
+			WHERE tok->>'previousTransactionID' IS NOT NULL AND tok->>'previousTransactionID' != ''
+		  )
+	`).Scan(&stats.TotalSupply).Error; err != nil {
+		return stats, err
+	}
+
+	// FT, NFT, SC counts from the Tokens table by token_type
+	if err := database.ReadDB.Model(&models.Token{}).Where("token_type = ?", 2).Count(&stats.FTCount).Error; err != nil {
+		return stats, err
+	}
+	if err := database.ReadDB.Model(&models.Token{}).Where("token_type = ?", 3).Count(&stats.NFTCount).Error; err != nil {
+		return stats, err
+	}
+	if err := database.ReadDB.Model(&models.Token{}).Where("token_type = ?", 4).Count(&stats.SCCount).Error; err != nil {
+		return stats, err
+	}
+
+	// Price from external API; TVL = (total_supply - circulating_supply) * price
+	price, err := fetchRBTPrice()
+	if err == nil {
+		stats.RBTPrice = price
+		stats.TVL = float64(stats.TotalSupply-int64(stats.CirculatingSupply)) * price
+	}
+
+	return stats, nil
 }
 
 // -------------------------------------------------------------------

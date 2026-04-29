@@ -112,6 +112,17 @@ func GetDIDCountHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+// GetRBTSupplyStatsHandler returns circulating supply and total supply of RBT
+func GetRBTSupplyStatsHandler(w http.ResponseWriter, r *http.Request) {
+	stats, err := api.GetRBTSupplyStats()
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{"status": false, "data": nil})
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": true, "data": stats})
+}
+
 // GetExplorerStatsHandler returns internal worker pool metrics (received vs processed)
 func GetExplorerStatsHandler(w http.ResponseWriter, r *http.Request) {
 	if processor.GlobalWorkerPool == nil {
