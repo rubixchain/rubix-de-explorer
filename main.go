@@ -131,7 +131,15 @@ func main() {
 		err = psClient.SubscribeTopic(topicDID, processor.TxnCallBack)
 		if err != nil {
 			log.Printf("Warning: Failed to subscribe to PubSub topic %s: %v\n", topicDID, err)
-		} else if *publishDummy {
+		}
+
+		topicUnpledge := models.Event_RubixUnpledge
+		err = psClient.SubscribeTopic(topicUnpledge, processor.TxnCallBack)
+		if err != nil {
+			log.Printf("Warning: Failed to subscribe to PubSub topic %s: %v\n", topicUnpledge, err)
+		}
+
+		if *publishDummy {
 			// TODO: DELETE LATER - Dummy Publisher for testing the new EventTransaction struct
 			go func() {
 				time.Sleep(5 * time.Second) // Delay to ensure explorer is fully ready

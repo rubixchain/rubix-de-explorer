@@ -2,8 +2,9 @@ package models
 
 // PubSub Topics
 const (
-	Event_RubixTxns = "rubix_txn"
-	Event_RubixDID  = "rubix_did"
+	Event_RubixTxns     = "rubix_txn"
+	Event_RubixDID      = "rubix_did"
+	Event_RubixUnpledge = "rubix_unpledge"
 )
 
 // Token Roles (Aligned with Rubix Core: index + 1)

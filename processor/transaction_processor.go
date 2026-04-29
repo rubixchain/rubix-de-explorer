@@ -86,6 +86,25 @@ func ValidateTransactionFormat(newEvent *model.EventTransaction) bool {
 			log.Printf("ID-FORMAT-ERR: Invalid Quorum DID format: %s", q.Did)
 			return false
 		}
+		if q.Tokens != nil {
+			for _, t := range q.Tokens {
+				if !util.IsValidRBT(t.TokenID) {
+					log.Printf("ID-FORMAT-ERR: Invalid Quorum RBT TokenID format: %s", t.TokenID)
+					return false
+				}
+			}
+		}
+	}
+
+	// Quorum Signature DID Validation
+	sig, err := newEvent.Transaction.ParseSignature()
+	if err == nil && sig != nil {
+		for _, q := range sig.Quorums {
+			if !util.IsValidDID(q.Did) {
+				log.Printf("ID-FORMAT-ERR: Invalid Quorum Signature DID format: %s", q.Did)
+				return false
+			}
+		}
 	}
 
 	// Committed Tokens Validation (Must be RBTs)

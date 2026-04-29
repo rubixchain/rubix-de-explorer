@@ -44,6 +44,16 @@ func TxnCallBack(peerID string, topic string, data []byte) {
 		// Hand off to the PeerID-DID processor
 		HandleIncomingDIDInfo(&didInfo)
 
+	case models.Event_RubixUnpledge:
+		var unpledgeEvent model.UnpledgeEvent
+		err := json.Unmarshal(decodedData, &unpledgeEvent)
+		if err != nil {
+			log.Printf("Warning: Failed to parse published Unpledge event: %v", err)
+			return
+		}
+		// Hand off to the unpledge processor
+		HandleIncomingUnpledge(&unpledgeEvent)
+
 	default:
 		log.Printf("Warning: Received message for unknown topic: %s", topic)
 	}

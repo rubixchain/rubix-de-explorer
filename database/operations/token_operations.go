@@ -734,3 +734,185 @@ func SyncPledgedBalances(db *gorm.DB) error {
 		return nil
 	})
 }
+
+// ProcessUnpledgeTokens handles the unpledge event from quorum nodes.
+// It transitions Pledged/QuorumPledged tokens to Free, inserts TokenChain
+// entries, updates the TokenChainArray sequence, and adjusts DIDBalances.
+func ProcessUnpledgeTokens(event *model.UnpledgeEvent) error {
+	if len(event.UnpledgeInfo) == 0 {
+		return nil
+	}
+
+	unpledgeTxnID := event.UnpledgeTransactionID
+	pledgeTxnID := event.PledgeTransactionID
+
+	return database.WriteDB.Transaction(func(tx *gorm.DB) error {
+		// Collect all incoming token IDs
+		tokenIDs := make([]string, 0, len(event.UnpledgeInfo))
+		for _, info := range event.UnpledgeInfo {
+			tokenIDs = append(tokenIDs, info.TokenID)
+		}
+
+		// 1. Fetch tokens that are currently pledged
+		var pledgedTokens []models.Token
+		if err := tx.Where("token_id IN ? AND token_status IN (?, ?)",
+			tokenIDs,
+			models.TokenStatus_Pledged,
+			models.TokenStatus_QuorumPledged,
+		).Find(&pledgedTokens).Error; err != nil {
+			return err
+		}
+
+		if len(pledgedTokens) == 0 {
+			log.Printf("[Unpledge] No pledged tokens found for %d incoming IDs, skipping", len(tokenIDs))
+			return nil
+		}
+
+		log.Printf("[Unpledge] Processing %d pledged tokens (out of %d received)", len(pledgedTokens), len(tokenIDs))
+
+		// 2. Aggregate balance deltas per DID
+		type balanceDelta struct {
+			FreeDelta   float64
+			PledgeDelta float64
+		}
+		didDeltas := make(map[string]*balanceDelta)
+
+		tokenIDsToUpdate := make([]string, 0, len(pledgedTokens))
+		for _, t := range pledgedTokens {
+			tokenIDsToUpdate = append(tokenIDsToUpdate, t.TokenID)
+
+			if t.DID == "" || t.DID == "0" {
+				continue
+			}
+
+			val := t.TokenValue
+			if t.TokenType != TokenTypeRBT {
+				val = 1.0
+			}
+
+			if _, ok := didDeltas[t.DID]; !ok {
+				didDeltas[t.DID] = &balanceDelta{}
+			}
+			didDeltas[t.DID].FreeDelta = util.RoundToMaxDecimals(didDeltas[t.DID].FreeDelta + val)
+			didDeltas[t.DID].PledgeDelta = util.RoundToMaxDecimals(didDeltas[t.DID].PledgeDelta - val)
+		}
+
+		// 3. Bulk update tokens: Pledged → Free, role → Unpledge
+		if err := tx.Model(&models.Token{}).
+			Where("token_id IN ?", tokenIDsToUpdate).
+			Updates(map[string]interface{}{
+				"token_status":   models.TokenStatus_Free,
+				"latest_role":    models.TokenRole_Unpledge,
+				"transaction_id": unpledgeTxnID,
+			}).Error; err != nil {
+			return err
+		}
+
+		// 4. Insert TokenChain entries for each unpledged token
+		// All tokens share the same pledgeTransactionID as their previous transaction
+		chainsToInsert := make([]models.TokenChain, 0, len(tokenIDsToUpdate))
+		for _, tid := range tokenIDsToUpdate {
+			chainsToInsert = append(chainsToInsert, models.TokenChain{
+				TokenID:               tid,
+				TransactionID:         unpledgeTxnID,
+				PreviousTransactionID: pledgeTxnID,
+				Role:                  models.TokenRole_Unpledge,
+			})
+		}
+
+		if err := tx.CreateInBatches(&chainsToInsert, 1000).Error; err != nil {
+			return err
+		}
+
+		// 5. Update TokenChainArray — single query since all tokens share the same parent txnID
+		// 5a. Fetch parent TokenChain IDs for the shared pledgeTransactionID
+		parentChainIDMap := make(map[string]uint64) // tokenID -> parent chainID
+		if pledgeTxnID != "" {
+			var parentChains []models.TokenChain
+			if err := tx.Where("transaction_id = ? AND token_id IN ?", pledgeTxnID, tokenIDsToUpdate).
+				Select("id, token_id").
+				Find(&parentChains).Error; err != nil {
+				return err
+			}
+			for _, ptc := range parentChains {
+				parentChainIDMap[ptc.TokenID] = ptc.ID
+			}
+		}
+
+		// 5b. Bulk fetch existing TokenChainArrays
+		existingTCA := make(map[string][]uint64)
+		var tcaBatch []models.TokenChainArray
+		if err := tx.Where("token_id IN ?", tokenIDsToUpdate).Find(&tcaBatch).Error; err != nil {
+			return err
+		}
+		for _, tca := range tcaBatch {
+			var chain []uint64
+			if len(tca.Index) > 0 {
+				_ = json.Unmarshal(tca.Index, &chain)
+			}
+			existingTCA[tca.TokenID] = chain
+		}
+
+		// 5c. Build new chain sequences (insert after parent position)
+		var tcaUpserts []models.TokenChainArray
+		for i, tid := range tokenIDsToUpdate {
+			newID := chainsToInsert[i].ID
+			chain := append([]uint64{}, existingTCA[tid]...)
+
+			inserted := false
+			if parentID, ok := parentChainIDMap[tid]; ok {
+				for j, id := range chain {
+					if id == parentID {
+						// Insert newID right after parentID
+						chain = append(chain[:j+1], append([]uint64{newID}, chain[j+1:]...)...)
+						inserted = true
+						break
+					}
+				}
+			}
+			if !inserted {
+				// Append at the end (fallback: parent not found)
+				chain = append(chain, newID)
+			}
+
+			b, _ := json.Marshal(chain)
+			tcaUpserts = append(tcaUpserts, models.TokenChainArray{
+				TokenID: tid,
+				Index:   b,
+			})
+		}
+
+		if len(tcaUpserts) > 0 {
+			if err := tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "token_id"}},
+				UpdateAll: true,
+			}).CreateInBatches(tcaUpserts, 1000).Error; err != nil {
+				return err
+			}
+		}
+
+		// 6. Apply balance adjustments (increment free, decrement pledged)
+		// Sort keys to prevent Postgres deadlocks from concurrent non-deterministic locking order
+		sortedDIDs := make([]string, 0, len(didDeltas))
+		for did := range didDeltas {
+			sortedDIDs = append(sortedDIDs, did)
+		}
+		sort.Strings(sortedDIDs)
+
+		for _, did := range sortedDIDs {
+			delta := didDeltas[did]
+			if delta.FreeDelta == 0 && delta.PledgeDelta == 0 {
+				continue
+			}
+			if err := updateBalances(tx, did, "RBT", "", "", delta.FreeDelta, delta.PledgeDelta); err != nil {
+				return err
+			}
+		}
+
+		log.Printf("[Unpledge] Successfully unpledged %d tokens across %d DIDs (txn=%s, pledgeTxn=%s)",
+			len(tokenIDsToUpdate), len(didDeltas), unpledgeTxnID, pledgeTxnID)
+		return nil
+	})
+}
+
+
