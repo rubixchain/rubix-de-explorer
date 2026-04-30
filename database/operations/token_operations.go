@@ -675,33 +675,46 @@ func updateBalances(tx *gorm.DB, did, assetType, tokenName, creatorDID string, b
 
 
 
-// SyncPledgedBalances is a one-time migration helper to populate the pledged_balance column
-// for existing DIDs by scanning the Tokens table.
-func SyncPledgedBalances(db *gorm.DB) error {
+// SyncAllBalances is a startup migration helper to populate both the balance and pledged_balance columns
+// for existing DIDs by dynamically calculating them from the Tokens table.
+func SyncAllBalances(db *gorm.DB) error {
 	return db.Transaction(func(tx *gorm.DB) error {
-		// 1. Reset all pledged balances to 0
-		if err := tx.Model(&models.DIDBalance{}).Where("asset_type = ?", "RBT").Update("pledged_balance", 0).Error; err != nil {
+		// 1. Reset all balances to 0
+		if err := tx.Model(&models.DIDBalance{}).Where("asset_type = ?", "RBT").Updates(map[string]interface{}{
+			"balance": 0, 
+			"pledged_balance": 0,
+		}).Error; err != nil {
 			return err
 		}
 
-		// 2. Aggregate RBT pledged tokens per DID
-		type pledgedResult struct {
+		// 2. Aggregate RBT tokens per DID
+		type balanceResult struct {
 			DID          string  `gorm:"column:did"`
+			TotalFree    float64 `gorm:"column:total_free"`
 			TotalPledged float64 `gorm:"column:total_pledged"`
 		}
-		var results []pledgedResult
-		err := tx.Table("Tokens").
-			Select("did, SUM(token_value) as total_pledged").
-			Where("token_type = ? AND token_status IN (?, ?)", TokenTypeRBT, models.TokenStatus_Pledged, models.TokenStatus_QuorumPledged).
-			Group("did").
-			Scan(&results).Error
+		var results []balanceResult
+		err := tx.Raw(`
+			SELECT did, 
+			       SUM(CASE WHEN token_status IN (?, ?) THEN token_value ELSE 0 END) as total_free,
+			       SUM(CASE WHEN token_status IN (?, ?) THEN token_value ELSE 0 END) as total_pledged
+			FROM "Tokens"
+			WHERE token_type = ? AND token_status IN (?, ?, ?, ?)
+			GROUP BY did
+		`, 
+			models.TokenStatus_Free, models.TokenStatus_Locked,
+			models.TokenStatus_Pledged, models.TokenStatus_QuorumPledged,
+			TokenTypeRBT, 
+			models.TokenStatus_Free, models.TokenStatus_Locked, 
+			models.TokenStatus_Pledged, models.TokenStatus_QuorumPledged,
+		).Scan(&results).Error
 		if err != nil {
 			return err
 		}
 
 		// 3. Update or Create entries in DIDBalances table
 		for _, res := range results {
-			if res.TotalPledged <= 0 {
+			if res.TotalFree <= 0 && res.TotalPledged <= 0 {
 				continue
 			}
 
@@ -711,6 +724,7 @@ func SyncPledgedBalances(db *gorm.DB) error {
 				// Create new record for DIDs that had no balance row
 				balance.DID = res.DID
 				balance.AssetType = "RBT"
+				balance.Balance = res.TotalFree
 				balance.PledgedBalance = res.TotalPledged
 				// Try to fetch peer_id/algo if possible
 				var meta models.DIDBalance
@@ -726,7 +740,10 @@ func SyncPledgedBalances(db *gorm.DB) error {
 				return err
 			} else {
 				// Update existing
-				if err := tx.Model(&balance).Update("pledged_balance", res.TotalPledged).Error; err != nil {
+				if err := tx.Model(&balance).Updates(map[string]interface{}{
+					"balance": res.TotalFree,
+					"pledged_balance": res.TotalPledged,
+				}).Error; err != nil {
 					return err
 				}
 			}
