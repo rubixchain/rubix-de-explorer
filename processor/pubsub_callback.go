@@ -10,6 +10,12 @@ import (
 
 // TxnCallBack processes incoming PubSub events (transactions or DID maps).
 func TxnCallBack(peerID string, topic string, data []byte) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[PubSub Callback] CRITICAL: recovered from unexpected panic: %v", r)
+		}
+	}()
+
 	// The IPFS pubsub HTTP API streams data as Base64 encoded payload
 	decodedData, b64Err := base64.StdEncoding.DecodeString(string(data))
 	if b64Err != nil {
@@ -37,6 +43,16 @@ func TxnCallBack(peerID string, topic string, data []byte) {
 		}
 		// Hand off to the PeerID-DID processor
 		HandleIncomingDIDInfo(&didInfo)
+
+	case models.Event_RubixUnpledge:
+		var unpledgeEvent model.UnpledgeEvent
+		err := json.Unmarshal(decodedData, &unpledgeEvent)
+		if err != nil {
+			log.Printf("Warning: Failed to parse published Unpledge event: %v", err)
+			return
+		}
+		// Hand off to the unpledge processor
+		HandleIncomingUnpledge(&unpledgeEvent)
 
 	default:
 		log.Printf("Warning: Received message for unknown topic: %s", topic)

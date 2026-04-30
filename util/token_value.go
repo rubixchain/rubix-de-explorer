@@ -10,6 +10,15 @@ import (
 // MaxSupportedDecimalPlaces matches rubixgoplatform/constants
 const MaxSupportedDecimalPlaces = 3
 
+// roundingFactor is pre-computed: 10^MaxSupportedDecimalPlaces = 1000
+var roundingFactor = math.Pow(10, float64(MaxSupportedDecimalPlaces))
+
+// RoundToMaxDecimals rounds a float64 to MaxSupportedDecimalPlaces (3) decimal places.
+// This eliminates floating-point drift (e.g. 5.8420000000000005 → 5.842).
+func RoundToMaxDecimals(val float64) float64 {
+	return math.Round(val*roundingFactor) / roundingFactor
+}
+
 // treeLevelRanges holds [min, max] part-index range for each tree level.
 // Computed once at init time.
 var treeLevelRanges [][2]int

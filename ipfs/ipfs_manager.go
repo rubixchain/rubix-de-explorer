@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -109,6 +110,9 @@ func (m *IPFSManager) EnsureInitialized(testNet bool, customSwarmKeyPath string)
 	os.Setenv("LIBP2P_FORCE_PNET", "1")
 	log.Println("LIBP2P_FORCE_PNET=1 (private network mode enforced)")
 
+	// 0.1 Force Cleanup of stale repo locks or zombie processes
+	m.forceCleanup()
+
 	// 1. Find ipfs executable
 	ipfsPath, err := findIPFSExecutable()
 	if err != nil {
@@ -180,6 +184,17 @@ func (m *IPFSManager) EnsureInitialized(testNet bool, customSwarmKeyPath string)
 		return fmt.Errorf("failed to write swarm key: %w", err)
 	}
 
+	// Log a preview of the swarm key (usually the last line of the PSK file)
+	keyLines := strings.Split(strings.TrimSpace(string(swarmKeyData)), "\n")
+	if len(keyLines) > 0 {
+		key := keyLines[len(keyLines)-1]
+		if len(key) > 10 {
+			log.Printf("Swarm Key Loaded: %s...%s (length: %d)", key[:5], key[len(key)-5:], len(key))
+		} else {
+			log.Printf("Swarm Key Loaded: %s", key)
+		}
+	}
+
 	// 4. Remove all default public bootstrap nodes
 	log.Println("Removing default IPFS bootstrap nodes...")
 	exec.Command(m.ipfsPath, "bootstrap", "rm", "--all").Run()
@@ -232,9 +247,25 @@ func (m *IPFSManager) EnsureInitialized(testNet bool, customSwarmKeyPath string)
 		log.Println("IPFS API address set to /ip4/127.0.0.1/tcp/5001")
 	}
 
+	// 8. High-Throughput Performance Tuning (Optimized for 400k+ token bursts)
+	log.Println("Applying High-Throughput IPFS optimizations...")
+	exec.Command(m.ipfsPath, "config", "--json", "Pubsub.Router", `"gossipsub"`).Run()
+	exec.Command(m.ipfsPath, "config", "--json", "Swarm.ConnMgr.HighWater", "1000").Run()
+	// Increase Resource Manager limits to prevent dropping packets during bursts
+	exec.Command(m.ipfsPath, "config", "--json", "Swarm.ResourceMgr.Limits.System.Streams", "16384").Run()
+	exec.Command(m.ipfsPath, "config", "--json", "Swarm.ResourceMgr.Limits.System.StreamsInbound", "8192").Run()
+	exec.Command(m.ipfsPath, "config", "--json", "Swarm.ResourceMgr.Limits.System.Conns", "1000").Run()
+	exec.Command(m.ipfsPath, "config", "--json", "Swarm.ResourceMgr.Limits.System.ConnsInbound", "500").Run()
+
 	// 9. Allow API access from the local client module
 	exec.Command(m.ipfsPath, "config", "--json", "API.HTTPHeaders.Access-Control-Allow-Origin", `["*"]`).Run()
 	exec.Command(m.ipfsPath, "config", "--json", "API.HTTPHeaders.Access-Control-Allow-Methods", `["PUT", "POST", "GET"]`).Run()
+
+	// 10. Log the PeerID for verification
+	idCmd := exec.Command(m.ipfsPath, "id", "--format", "<id>")
+	if output, err := idCmd.Output(); err == nil {
+		log.Printf("IPFS PeerID: %s", strings.TrimSpace(string(output)))
+	}
 
 	return nil
 }
@@ -292,7 +323,7 @@ func (m *IPFSManager) StartDaemon() error {
 	case <-daemonReady:
 		log.Println("IPFS daemon is ready")
 	case <-time.After(30 * time.Second):
-		log.Println("Warning: Timed out waiting for IPFS daemon ready signal, proceeding anyway...")
+		return fmt.Errorf("timed out waiting for IPFS daemon ready signal. Check [IPFS ERROR] logs above")
 	}
 
 	return nil
@@ -317,5 +348,51 @@ func (m *IPFSManager) Stop() {
 		case <-done:
 			log.Println("IPFS daemon stopped")
 		}
+	}
+}
+
+// forceCleanup kills ONLY the ipfs process holding a lock on our specific repo
+func (m *IPFSManager) forceCleanup() {
+	repo, err := getIPFSRepoPath()
+	if err != nil {
+		return
+	}
+
+	lockFile := filepath.Join(repo, "repo.lock")
+	apiFile := filepath.Join(repo, "api")
+
+	// 1. Target only the process holding OUR repo lock
+	if _, err := os.Stat(lockFile); err == nil {
+		log.Printf("Detected stale lock on %s. Identifying blocker...", lockFile)
+		
+		// Attempt to read PID from lock file (IPFS usually writes it there)
+		data, err := os.ReadFile(lockFile)
+		if err == nil && len(data) > 0 {
+			pidStr := strings.TrimSpace(string(data))
+			if pid, err := strconv.Atoi(pidStr); err == nil && pid > 0 {
+				log.Printf("Killing IPFS blocker PID: %d", pid)
+				if runtime.GOOS == "windows" {
+					_ = exec.Command("taskkill", "/F", "/PID", pidStr, "/T").Run()
+				} else {
+					_ = exec.Command("kill", "-9", pidStr).Run()
+				}
+				time.Sleep(1 * time.Second)
+			}
+		}
+
+		// Fallback: Use fuser on Linux if the file didn't contain a valid PID
+		if runtime.GOOS != "windows" {
+			// fuser -k -9 kills any process using the file
+			_ = exec.Command("fuser", "-k", "-9", lockFile).Run()
+		} else {
+			_ = exec.Command("taskkill", "/F", "/IM", "ipfs-windows.exe", "/T").Run()
+		}
+		
+		time.Sleep(1 * time.Second)
+		os.Remove(lockFile)
+	}
+
+	if _, err := os.Stat(apiFile); err == nil {
+		os.Remove(apiFile)
 	}
 }

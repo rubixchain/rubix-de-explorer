@@ -5,6 +5,7 @@ import (
 	"explorer-server/api"
 	"explorer-server/database/models"
 	"explorer-server/model"
+	"explorer-server/processor"
 	"net/http"
 	"strconv"
 
@@ -109,6 +110,28 @@ func GetDIDCountHandler(w http.ResponseWriter, r *http.Request) {
 	response := map[string]int64{"all_did_count": count}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+}
+
+// GetRBTSupplyStatsHandler returns circulating supply and total supply of RBT
+func GetRBTSupplyStatsHandler(w http.ResponseWriter, r *http.Request) {
+	stats, err := api.GetRBTSupplyStats()
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{"status": false, "data": nil})
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": true, "data": stats})
+}
+
+// GetExplorerStatsHandler returns internal worker pool metrics (received vs processed)
+func GetExplorerStatsHandler(w http.ResponseWriter, r *http.Request) {
+	if processor.GlobalWorkerPool == nil {
+		http.Error(w, "Worker pool not initialized", http.StatusServiceUnavailable)
+		return
+	}
+	stats := processor.GlobalWorkerPool.GetStats()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
 }
 
 // ==========================================

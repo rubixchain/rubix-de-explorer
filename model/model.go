@@ -164,3 +164,16 @@ type DIDInfo struct {
 	Signature string `json:"signature"`
 	Time      string `json:"time"`
 }
+
+// UnpledgeEvent is the PubSub payload published by quorum nodes after unpledging tokens.
+type UnpledgeEvent struct {
+	UnpledgeInfo          []UnpledgeTokenInfo `json:"unpledgeInfo"`
+	PledgeTransactionID   string              `json:"pledgeTransactionID"`
+	UnpledgeTransactionID string              `json:"unpledgeTransactionID"`
+}
+
+// UnpledgeTokenInfo describes a single token being unpledged.
+type UnpledgeTokenInfo struct {
+	TokenID string `json:"tokenId"`
+}
+

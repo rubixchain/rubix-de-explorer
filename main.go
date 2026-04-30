@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"syscall"
 	"time"
@@ -18,19 +21,47 @@ import (
 	"explorer-server/processor"
 	"explorer-server/pubsub"
 	"explorer-server/router"
+	"explorer-server/util"
 
 	"github.com/joho/godotenv"
 	"github.com/rs/cors"
 )
 
 func main() {
+	// 1. Setup Logging (Unique File per Restart + Console)
+	logDir := "logs"
+	if _, err := os.Stat(logDir); os.IsNotExist(err) {
+		_ = os.Mkdir(logDir, 0755)
+	}
+	
+	// Create a unique filename based on the current time
+	startTime := time.Now()
+	logFileName := fmt.Sprintf("explorer_%s.log", startTime.Format("2006-01-02_15-04-05"))
+	
+	logFile, err := os.OpenFile(filepath.Join(logDir, logFileName), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Could not open log file: %v\n", err)
+	} else {
+		// Use MultiWriter for the standard log package (Go's log.Printf etc)
+		mw := io.MultiWriter(os.Stdout, logFile)
+		log.SetOutput(mw)
+
+		// On Linux, also redirect the OS-level file descriptors 1 (stdout) and 2 (stderr).
+		// This ensures that "fatal error: concurrent map write" or panics are caught in the log file.
+		util.RedirectStderr(logFile)
+	}
+
+	log.Println("----------------------------------------------------------------")
+	log.Printf(">>> EXPLORER RESTART - %s", time.Now().Format("2006-01-02 15:04:05"))
+	log.Println("----------------------------------------------------------------")
+
 	// CLI Flags
 	testNet := flag.Bool("testnet", false, "Connect to Rubix TestNet (default: MainNet)")
 	swarmKeyPath := flag.String("swarmkey", "", "Path to a custom swarm.key file (overrides built-in keys)")
 	publishDummy := flag.Bool("publish-dummy", false, "TODO: DELETE LATER - Publish a dummy transaction for testing")
 	flag.Parse()
 
-	startTime := time.Now()
+	startTime = time.Now()
 
 	// Log which network we're connecting to
 	if *swarmKeyPath != "" {
@@ -54,12 +85,12 @@ func main() {
 	database.ConnectAndMigrate(false)
 	log.Println("Database connection established and migrated")
 
-	// One-time pledged balance sync
-	log.Println("Migration: Starting one-time PledgedBalance synchronization...")
-	if err := operations.SyncPledgedBalances(database.WriteDB); err != nil {
-		log.Printf("Migration Warning: Failed to sync pledged balances: %v\n", err)
+	// One-time balance sync
+	log.Println("Migration: Starting one-time Balance synchronization...")
+	if err := operations.SyncAllBalances(database.WriteDB); err != nil {
+		log.Printf("Migration Warning: Failed to sync balances: %v\n", err)
 	} else {
-		log.Println("Migration: PledgedBalance synchronization complete")
+		log.Println("Migration: Balance synchronization complete")
 	}
 
 	log.Printf("Explorer Server initialized with %d cores\n", totalCores)
@@ -100,7 +131,15 @@ func main() {
 		err = psClient.SubscribeTopic(topicDID, processor.TxnCallBack)
 		if err != nil {
 			log.Printf("Warning: Failed to subscribe to PubSub topic %s: %v\n", topicDID, err)
-		} else if *publishDummy {
+		}
+
+		topicUnpledge := models.Event_RubixUnpledge
+		err = psClient.SubscribeTopic(topicUnpledge, processor.TxnCallBack)
+		if err != nil {
+			log.Printf("Warning: Failed to subscribe to PubSub topic %s: %v\n", topicUnpledge, err)
+		}
+
+		if *publishDummy {
 			// TODO: DELETE LATER - Dummy Publisher for testing the new EventTransaction struct
 			go func() {
 				time.Sleep(5 * time.Second) // Delay to ensure explorer is fully ready

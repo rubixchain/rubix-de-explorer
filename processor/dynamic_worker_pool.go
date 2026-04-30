@@ -3,8 +3,10 @@ package processor
 import (
 	"context"
 	"explorer-server/model"
+	"explorer-server/util"
 	"log"
 	"runtime"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -37,7 +39,9 @@ type DynamicWorkerPool struct {
 	// Metrics
 	queueLength        int64
 	averageProcessTime time.Duration
+	receivedTxnCount   int64
 	processedTxnCount  int64
+	metricsMu          sync.Mutex
 
 	// Worker management
 	workerChannels  map[int]chan struct{}
@@ -54,14 +58,18 @@ func InitDynamicWorkerPool() {
 
 	numCPU := runtime.NumCPU()
 
-	// Determine max workers.
-	maxW := numCPU - 1
+	// Determine max workers. Because workload is heavily DB I/O bound,
+	// we can safely exceed physical CPU cores. Cap at 80 (since MaxOpenConns is 100).
+	maxW := numCPU * 4
+	if maxW > 80 {
+		maxW = 80
+	}
 	if maxW < 1 {
 		maxW = 1
 	}
 
 	GlobalWorkerPool = &DynamicWorkerPool{
-		txnQueue:        make(chan *model.EventTransaction, 2000),
+		txnQueue:        make(chan *model.EventTransaction, 20000),
 		ctx:             ctx,
 		cancel:          cancel,
 		minWorkers:      mathMax(1, numCPU/4),
@@ -88,14 +96,14 @@ func InitDynamicWorkerPool() {
 
 // EnqueueTransaction adds a transaction to the processing queue
 func (p *DynamicWorkerPool) EnqueueTransaction(txnEvent *model.EventTransaction) {
-	currentQueueLen := int64(len(p.txnQueue))
-	p.queueLength = currentQueueLen
+	atomic.AddInt64(&p.receivedTxnCount, 1)
+	atomic.StoreInt64(&p.queueLength, int64(len(p.txnQueue)))
 
 	select {
 	case p.txnQueue <- txnEvent:
 		// Successfully queued
 
-	case <-time.After(5 * time.Second):
+	case <-time.After(20 * time.Second):
 		log.Printf("Warning: Failed to queue transaction %s - queue full (length=%d)\n",
 			txnEvent.Transaction.ID, len(p.txnQueue))
 		return
@@ -123,17 +131,7 @@ func (p *DynamicWorkerPool) systemMonitor() {
 
 // Evaluate system conditions and decide on scaling
 func (p *DynamicWorkerPool) evaluateAndScale() {
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-
-	usedMB := float64(m.Alloc) / 1024 / 1024
-	sysMB := float64(m.Sys) / 1024 / 1024
-
-	var memoryUsagePercent float64
-	if sysMB > 0 {
-		memoryUsagePercent = (usedMB / sysMB) * 100.0
-	}
-
+	memoryUsagePercent := util.GetSystemMemoryUsage()
 	queueLen := int64(len(p.txnQueue))
 
 	p.workersMutex.RLock()
@@ -213,18 +211,28 @@ func (p *DynamicWorkerPool) scaleDown() {
 	removeWorkers = mathMin(removeWorkers, p.currentWorkers-p.minWorkers)
 
 	p.workerChanMutex.Lock()
-	workersToStop := make([]int, 0, removeWorkers)
+	// Robust scaling: collect and sort live IDs to ensure we stop the newest ones first
+	liveIDs := make([]int, 0, len(p.workerChannels))
+	for id := range p.workerChannels {
+		liveIDs = append(liveIDs, id)
+	}
+	sort.Ints(liveIDs)
 
-	for workerID := p.currentWorkers - 1; len(workersToStop) < removeWorkers && workerID >= p.minWorkers; workerID-- {
-		if stopChan, exists := p.workerChannels[workerID]; exists {
+	stopped := 0
+	for i := len(liveIDs) - 1; i >= 0 && stopped < removeWorkers; i-- {
+		id := liveIDs[i]
+		if id < p.minWorkers {
+			break
+		}
+		if stopChan, exists := p.workerChannels[id]; exists {
 			close(stopChan)
-			delete(p.workerChannels, workerID)
-			workersToStop = append(workersToStop, workerID)
+			delete(p.workerChannels, id)
+			stopped++
 		}
 	}
 	p.workerChanMutex.Unlock()
 
-	p.currentWorkers -= len(workersToStop)
+	p.currentWorkers -= stopped
 	p.lastScaleAction = time.Now()
 }
 
@@ -245,14 +253,28 @@ func (p *DynamicWorkerPool) dynamicWorker(workerID int, stopChan chan struct{}) 
 	for {
 		select {
 		case txnEvent := <-p.txnQueue:
-			startTime := time.Now()
+			// Safety: If RAM is critical, don't start new work to prevent OOM
+			for util.GetSystemMemoryUsage() > 85 {
+				log.Printf("[Worker %d] CRITICAL RAM (>85%%). Pausing ingestion to prevent crash...", workerID)
+				time.Sleep(2 * time.Second)
+			}
 
-			// Handle the actual DB processing
-			ProcessDBTransaction(txnEvent, workerID)
+			// Layer 3: Recovery protection for the top-level worker thread
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("[Worker %d] CRITICAL RECOVERY: Rescued from panic during transaction %s: %v", workerID, txnEvent.TransactionID, r)
+					}
+				}()
+				startTime := time.Now()
 
-			atomic.AddInt64(&p.processedTxnCount, 1)
-			processingTime := time.Since(startTime)
-			p.updateProcessingMetrics(processingTime)
+				// Handle the actual DB processing
+				ProcessDBTransaction(txnEvent, workerID)
+
+				atomic.AddInt64(&p.processedTxnCount, 1)
+				processingTime := time.Since(startTime)
+				p.updateProcessingMetrics(processingTime)
+			}()
 
 		case <-stopChan:
 			return
@@ -264,6 +286,8 @@ func (p *DynamicWorkerPool) dynamicWorker(workerID int, stopChan chan struct{}) 
 }
 
 func (p *DynamicWorkerPool) updateProcessingMetrics(processingTime time.Duration) {
+	p.metricsMu.Lock()
+	defer p.metricsMu.Unlock()
 	if p.averageProcessTime == 0 {
 		p.averageProcessTime = processingTime
 	} else {
@@ -318,8 +342,11 @@ func (p *DynamicWorkerPool) GetStats() map[string]interface{} {
 	p.workersMutex.RUnlock()
 
 	return map[string]interface{}{
-		"workers":      currentWorkers,
-		"queue_length": len(p.txnQueue),
-		"queue_cap":    cap(p.txnQueue),
+		"workers":           currentWorkers,
+		"queue_length":      len(p.txnQueue),
+		"queue_cap":         cap(p.txnQueue),
+		"received_txns":     atomic.LoadInt64(&p.receivedTxnCount),
+		"processed_txns":    atomic.LoadInt64(&p.processedTxnCount),
+		"avg_process_time":  p.averageProcessTime.String(),
 	}
 }
