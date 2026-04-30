@@ -159,13 +159,9 @@ func GetRBTSupplyStats() (RBTSupplyStats, error) {
 
 	// Total supply = count of RBT mint transactions (RBT tokens with no previousTransactionID), each worth 1 RBT
 	if err := database.ReadDB.Raw(`
-		SELECT COUNT(*) FROM "TransactionInfo"
-		WHERE jsonb_typeof(tokens->'rbt') = 'array'
-		  AND jsonb_array_length(tokens->'rbt') > 0
-		  AND NOT EXISTS (
-			SELECT 1 FROM jsonb_array_elements(tokens->'rbt') AS tok
-			WHERE tok->>'previousTransactionID' IS NOT NULL AND tok->>'previousTransactionID' != ''
-		  )
+		SELECT COUNT(*) FROM "Tokens"
+		WHERE token_type = 1
+		  AND token_id ~ '^[^_]+_[^_]+$'
 	`).Scan(&stats.TotalSupply).Error; err != nil {
 		return stats, err
 	}
