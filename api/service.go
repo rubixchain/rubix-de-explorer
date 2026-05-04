@@ -752,7 +752,7 @@ func GetTransactionInfo(txnID string) (models.TransactionInfo, error) {
 	return transaction, nil
 }
 
-func GetTxnsByDID(did string, page, limit int) ([]models.TransactionInfo, int64, error) {
+func GetTxnsByDID(did string, page, limit int) ([]models.TransactionSummary, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -774,13 +774,13 @@ func GetTxnsByDID(did string, page, limit int) ([]models.TransactionInfo, int64,
 		return nil, 0, err
 	}
 
-	// 2. Fetch combined paginated results
-	var transactions []models.TransactionInfo
+	// 2. Fetch combined paginated results (Summary ONLY)
+	var transactions []models.TransactionSummary
 	dataQuery := `
 		SELECT * FROM (
-			SELECT transaction_id, initiator, owner, epoch, network, tokens, committed_tokens, quorums, memo, status, amount, created_at, updated_at FROM "TransactionInfo" WHERE initiator = ? OR owner = ?
+			SELECT transaction_id, initiator, owner, epoch, network, status, amount, created_at FROM "TransactionInfo" WHERE initiator = ? OR owner = ?
 			UNION ALL
-			SELECT transaction_id, initiator, owner, epoch, network, tokens, committed_tokens, quorums, memo, status, amount, created_at, updated_at FROM "FailedTransactionInfo" WHERE initiator = ? OR owner = ?
+			SELECT transaction_id, initiator, owner, epoch, network, status, amount, created_at FROM "FailedTransactionInfo" WHERE initiator = ? OR owner = ?
 		) AS combined
 		ORDER BY epoch DESC
 		LIMIT ? OFFSET ?
@@ -790,7 +790,7 @@ func GetTxnsByDID(did string, page, limit int) ([]models.TransactionInfo, int64,
 	}
 
 	if transactions == nil {
-		transactions = make([]models.TransactionInfo, 0)
+		transactions = make([]models.TransactionSummary, 0)
 	}
 
 	return transactions, total, nil

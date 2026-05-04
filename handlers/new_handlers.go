@@ -344,7 +344,7 @@ func GetTxnsByDIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if data == nil {
-		data = []models.TransactionInfo{}
+		data = []models.TransactionSummary{}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(model.NewPaginated(data, total, page, limit))
