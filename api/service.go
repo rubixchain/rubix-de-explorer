@@ -660,7 +660,7 @@ func GetCurrentlyPledgedTransactionsList(limit, page int) ([]models.TransactionS
 			FROM "Tokens" 
 			WHERE token_status IN (6, 7)
 		) t ON ti.transaction_id = t.transaction_id
-		ORDER BY ti.created_at DESC
+		ORDER BY ti.epoch DESC
 		LIMIT ? OFFSET ?
 	`
 	if err := database.ReadDB.Raw(dataQuery, limit, offset).Scan(&result).Error; err != nil {
