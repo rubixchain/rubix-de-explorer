@@ -171,7 +171,7 @@ func GetLatestTransactionsHandler(w http.ResponseWriter, r *http.Request) {
 // GetCurrentlyPledgedTransactionsHandler returns a list of transactions that currently have pledged tokens
 func GetCurrentlyPledgedTransactionsHandler(w http.ResponseWriter, r *http.Request) {
 	limit, page := getPagination(r)
-	data, totalTx, totalTokens, err := api.GetCurrentlyPledgedTransactionsList(limit, page)
+	data, totalTx, totalValue, err := api.GetCurrentlyPledgedTransactionsList(limit, page)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -181,8 +181,8 @@ func GetCurrentlyPledgedTransactionsHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	response := map[string]interface{}{
-		"total_tokens_pledged": totalTokens,
-		"transactions":         model.NewPaginated(data, totalTx, page, limit),
+		"total_pledged_value": totalValue,
+		"transactions":        model.NewPaginated(data, totalTx, page, limit),
 	}
 
 	w.Header().Set("Content-Type", "application/json")

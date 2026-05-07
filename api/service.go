@@ -623,7 +623,7 @@ func GetTransactionSummaryList(limit, page int) ([]models.TransactionSummary, in
 }
 
 // GetCurrentlyPledgedTransactionsList returns transactions that currently have pledged tokens
-func GetCurrentlyPledgedTransactionsList(limit, page int) ([]models.TransactionSummary, int64, int64, error) {
+func GetCurrentlyPledgedTransactionsList(limit, page int) ([]models.TransactionSummary, int64, float64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -634,10 +634,10 @@ func GetCurrentlyPledgedTransactionsList(limit, page int) ([]models.TransactionS
 
 	var counts struct {
 		TxCount    int64
-		TokenCount int64
+		TokenValue float64
 	}
 	countQuery := `
-		SELECT COUNT(DISTINCT transaction_id) as tx_count, COUNT(token_id) as token_count 
+		SELECT COUNT(DISTINCT transaction_id) as tx_count, COALESCE(SUM(token_value), 0) as token_value 
 		FROM "Tokens" 
 		WHERE token_status IN (6, 7)
 	`
@@ -671,7 +671,7 @@ func GetCurrentlyPledgedTransactionsList(limit, page int) ([]models.TransactionS
 		result = make([]models.TransactionSummary, 0)
 	}
 
-	return result, counts.TxCount, counts.TokenCount, nil
+	return result, counts.TxCount, counts.TokenValue, nil
 }
 
 func GetDIDHoldersList(limit, page int) ([]models.DIDBalance, int64, error) {
