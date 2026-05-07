@@ -135,6 +135,8 @@ func ensurePerformanceIndexes(db *gorm.DB) {
 		`CREATE INDEX IF NOT EXISTS idx_failed_txn_info_created_amount ON "FailedTransactionInfo" (created_at DESC, amount);`,
 		// Index for DID Balance lookups
 		`CREATE INDEX IF NOT EXISTS idx_did_balances_did_asset ON "DIDBalances" (did, asset_type);`,
+		// Partial index for currently pledged tokens query
+		`CREATE INDEX IF NOT EXISTS idx_tokens_pledged_txn ON "Tokens" (transaction_id) WHERE token_status IN (6, 7);`,
 	}
 
 	for _, q := range queries {
