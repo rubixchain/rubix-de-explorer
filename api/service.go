@@ -647,23 +647,31 @@ func GetCurrentlyPledgedTransactionsList(limit, page int) ([]models.TransactionS
 
 	var result []models.TransactionSummary
 	dataQuery := `
-		SELECT ti.transaction_id, ti.initiator,
-			COALESCE(NULLIF(ti.owner, ''), ti.tokens->'rbt'->0->>'tokenId', ti.tokens->'ft'->0->>'tokenId', ti.tokens->'nft'->0->>'tokenId', ti.tokens->'smartContract'->0->>'tokenId') AS owner,
-			ti.epoch, ti.network, ti.status, ti.amount, ti.created_at
+		SELECT transaction_id, initiator,
+			COALESCE(NULLIF(owner, ''), tokens->'rbt'->0->>'tokenId', tokens->'ft'->0->>'tokenId', tokens->'nft'->0->>'tokenId', tokens->'smartContract'->0->>'tokenId') AS owner,
+			epoch, network, status, amount, created_at
 		FROM (
-			SELECT transaction_id, initiator, owner, tokens, epoch, network, status, amount, created_at FROM "TransactionInfo"
+			(
+				SELECT transaction_id, initiator, owner, tokens, epoch, network, status, amount, created_at 
+				FROM "TransactionInfo" ti
+				WHERE EXISTS (SELECT 1 FROM "Tokens" t WHERE t.transaction_id = ti.transaction_id AND t.token_status IN (6, 7))
+				ORDER BY epoch DESC 
+				LIMIT ?
+			)
 			UNION ALL
-			SELECT transaction_id, initiator, owner, tokens, epoch, network, status, amount, created_at FROM "FailedTransactionInfo"
-		) ti
-		INNER JOIN (
-			SELECT DISTINCT transaction_id 
-			FROM "Tokens" 
-			WHERE token_status IN (6, 7)
-		) t ON ti.transaction_id = t.transaction_id
-		ORDER BY ti.epoch DESC
+			(
+				SELECT transaction_id, initiator, owner, tokens, epoch, network, status, amount, created_at 
+				FROM "FailedTransactionInfo" ti
+				WHERE EXISTS (SELECT 1 FROM "Tokens" t WHERE t.transaction_id = ti.transaction_id AND t.token_status IN (6, 7))
+				ORDER BY epoch DESC 
+				LIMIT ?
+			)
+		) AS combined
+		ORDER BY epoch DESC
 		LIMIT ? OFFSET ?
 	`
-	if err := database.ReadDB.Raw(dataQuery, limit, offset).Scan(&result).Error; err != nil {
+	subLimit := limit + offset
+	if err := database.ReadDB.Raw(dataQuery, subLimit, subLimit, limit, offset).Scan(&result).Error; err != nil {
 		return nil, 0, 0, err
 	}
 
