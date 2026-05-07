@@ -168,6 +168,27 @@ func GetLatestTransactionsHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(model.NewPaginated(data, total, page, limit))
 }
 
+// GetCurrentlyPledgedTransactionsHandler returns a list of transactions that currently have pledged tokens
+func GetCurrentlyPledgedTransactionsHandler(w http.ResponseWriter, r *http.Request) {
+	limit, page := getPagination(r)
+	data, totalTx, totalTokens, err := api.GetCurrentlyPledgedTransactionsList(limit, page)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if data == nil {
+		data = []models.TransactionSummary{}
+	}
+
+	response := map[string]interface{}{
+		"total_tokens_pledged": totalTokens,
+		"transactions":         model.NewPaginated(data, totalTx, page, limit),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
 // GetDIDHoldersListHandler returns DIDs with the most RBT balances
 func GetDIDHoldersListHandler(w http.ResponseWriter, r *http.Request) {
 	limit, page := getPagination(r)

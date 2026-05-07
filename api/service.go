@@ -622,6 +622,58 @@ func GetTransactionSummaryList(limit, page int) ([]models.TransactionSummary, in
 	return result, total, nil
 }
 
+// GetCurrentlyPledgedTransactionsList returns transactions that currently have pledged tokens
+func GetCurrentlyPledgedTransactionsList(limit, page int) ([]models.TransactionSummary, int64, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 10
+	}
+	offset := (page - 1) * limit
+
+	var counts struct {
+		TxCount    int64
+		TokenCount int64
+	}
+	countQuery := `
+		SELECT COUNT(DISTINCT transaction_id) as tx_count, COUNT(token_id) as token_count 
+		FROM "Tokens" 
+		WHERE token_status IN (6, 7)
+	`
+	if err := database.ReadDB.Raw(countQuery).Scan(&counts).Error; err != nil {
+		return nil, 0, 0, err
+	}
+
+	var result []models.TransactionSummary
+	dataQuery := `
+		SELECT ti.transaction_id, ti.initiator,
+			COALESCE(NULLIF(ti.owner, ''), ti.tokens->'rbt'->0->>'tokenId', ti.tokens->'ft'->0->>'tokenId', ti.tokens->'nft'->0->>'tokenId', ti.tokens->'smartContract'->0->>'tokenId') AS owner,
+			ti.epoch, ti.network, ti.status, ti.amount, ti.created_at
+		FROM (
+			SELECT transaction_id, initiator, owner, tokens, epoch, network, status, amount, created_at FROM "TransactionInfo"
+			UNION ALL
+			SELECT transaction_id, initiator, owner, tokens, epoch, network, status, amount, created_at FROM "FailedTransactionInfo"
+		) ti
+		INNER JOIN (
+			SELECT DISTINCT transaction_id 
+			FROM "Tokens" 
+			WHERE token_status IN (6, 7)
+		) t ON ti.transaction_id = t.transaction_id
+		ORDER BY ti.created_at DESC
+		LIMIT ? OFFSET ?
+	`
+	if err := database.ReadDB.Raw(dataQuery, limit, offset).Scan(&result).Error; err != nil {
+		return nil, 0, 0, err
+	}
+
+	if result == nil {
+		result = make([]models.TransactionSummary, 0)
+	}
+
+	return result, counts.TxCount, counts.TokenCount, nil
+}
+
 func GetDIDHoldersList(limit, page int) ([]models.DIDBalance, int64, error) {
 	if page < 1 {
 		page = 1
