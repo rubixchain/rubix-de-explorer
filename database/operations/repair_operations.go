@@ -3,6 +3,7 @@ package operations
 import (
 	"encoding/json"
 	"log"
+	"strings"
 
 	"explorer-server/database"
 	"explorer-server/database/models"
@@ -20,8 +21,8 @@ func RepairMissingAssetsFromTransactionInfo() error {
 
 	return database.WriteDB.Transaction(func(tx *gorm.DB) error {
 		var txns []models.TransactionInfo
-		// Only look at successful transactions
-		if err := tx.Where("status = ?", true).Find(&txns).Error; err != nil {
+		// Audit transactions in chronological order to ensure mutable values (like NFTs) end up with the correct final state.
+		if err := tx.Where("status = ?", true).Order("epoch ASC, created_at ASC").Find(&txns).Error; err != nil {
 			return err
 		}
 
@@ -100,16 +101,17 @@ func RepairMissingAssetsFromTransactionInfo() error {
 					// REFRESH: Exists in history, but check if Token table needs value/deployer fix
 					var tokenEntry models.Token
 					if err := tx.Where("token_id = ?", asset.TokenID).First(&tokenEntry).Error; err == nil {
-						// Only refresh if Value is 0 or Deployer is missing
-						if (tokenEntry.TokenValue == 0 && asset.TokenValue > 0) || (tokenEntry.DeployerDID == "" && asset.PreviousTransactionID == "") {
-							log.Printf("[Repair] Refreshing incomplete token entry for %s (updating value/deployer)", asset.TokenID)
+						// Only refresh if Value has changed or Deployer is missing
+						if (tokenEntry.TokenValue != asset.TokenValue) || (tokenEntry.DeployerDID == "" && (asset.PreviousTransactionID == "" || util.IsValidFT(asset.TokenID))) {
+							log.Printf("[Repair] Refreshing token entry for %s (updating value: %v -> %v)", asset.TokenID, tokenEntry.TokenValue, asset.TokenValue)
 							
-							// If value is changing, we need to update the balance of the CURRENT owner
-							if tokenEntry.TokenValue == 0 && asset.TokenValue > 0 {
+							// If value is changing, we need to update the balance of the CURRENT owner by the delta
+							if tokenEntry.TokenValue != asset.TokenValue {
 								typeName := tokenTypeName(tokenEntry.TokenType)
-								// Add the value to the current owner's balance
-								if err := updateBalances(tx, tokenEntry.DID, typeName, "", "", asset.TokenValue, 0); err != nil {
-									log.Printf("[Repair] Failed to update balance during refresh: %v", err)
+								delta := asset.TokenValue - tokenEntry.TokenValue
+								// Apply the difference to the current owner's balance
+								if err := updateBalances(tx, tokenEntry.DID, typeName, "", "", delta, 0); err != nil {
+									log.Printf("[Repair] Failed to update balance delta during refresh: %v", err)
 								}
 							}
 							
@@ -118,8 +120,19 @@ func RepairMissingAssetsFromTransactionInfo() error {
 							if asset.TokenValue > 0 {
 								updates["token_value"] = asset.TokenValue
 							}
-							if tokenEntry.DeployerDID == "" && asset.PreviousTransactionID == "" {
-								updates["deployer_did"] = txn.Initiator
+							if tokenEntry.DeployerDID == "" {
+								if util.IsValidFT(asset.TokenID) {
+									// Extract Creator from FT TokenID
+									parts := strings.Split(asset.TokenID, "_")
+									for _, p := range parts {
+										if strings.HasPrefix(p, "bafy") && len(p) == 59 {
+											updates["deployer_did"] = p
+											break
+										}
+									}
+								} else if asset.PreviousTransactionID == "" {
+									updates["deployer_did"] = txn.Initiator
+								}
 							}
 							
 							if len(updates) > 0 {
