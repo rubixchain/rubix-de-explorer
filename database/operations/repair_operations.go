@@ -27,10 +27,18 @@ func RepairMissingAssetsFromTransactionInfo() error {
 
 		log.Printf("[Repair] Found %d successful transactions to audit", len(txns))
 
-		// Diagnostic: Search for "daisy" in the raw JSON to see if it's there at all
+		// Diagnostic 1: Search for "daisy" in the raw JSON to see if it's there at all
 		var countDaisy int64
 		tx.Table("TransactionInfo").Where("tokens::text LIKE ?", "%daisy%").Count(&countDaisy)
 		log.Printf("[Repair] Diagnostic: Found %d transactions containing 'daisy' in raw JSON", countDaisy)
+
+		// Diagnostic 2: Use JSONB operators to count non-empty arrays
+		var countFT, countNFT, countSC int64
+		tx.Table("TransactionInfo").Where("tokens->'ft' IS NOT NULL AND tokens->>'ft' != 'null' AND jsonb_array_length(tokens->'ft') > 0").Count(&countFT)
+		tx.Table("TransactionInfo").Where("tokens->'nft' IS NOT NULL AND tokens->>'nft' != 'null' AND jsonb_array_length(tokens->'nft') > 0").Count(&countNFT)
+		tx.Table("TransactionInfo").Where("tokens->'smartContract' IS NOT NULL AND tokens->>'smartContract' != 'null' AND jsonb_array_length(tokens->'smartContract') > 0").Count(&countSC)
+		
+		log.Printf("[Repair] Diagnostic: JSONB counts -> FT: %d, NFT: %d, SC: %d", countFT, countNFT, countSC)
 
 		repairedCount := 0
 
@@ -57,42 +65,69 @@ func RepairMissingAssetsFromTransactionInfo() error {
 				txn.TransactionID, len(assetsToCheck), len(tokens.FT), len(tokens.NFT), len(tokens.SmartContract))
 
 			for _, asset := range assetsToCheck {
-				// Safety check: skip if this specific asset for this specific txn is already in our history
-				var count int64
-				tx.Model(&models.TokenChain{}).Where("token_id = ? AND transaction_id = ?", asset.TokenID, txn.TransactionID).Count(&count)
-				if count > 0 {
-					continue
-				}
+				// 1. Check if this specific asset for this specific txn is already in our history
+				var existingChain models.TokenChain
+				err := tx.Where("token_id = ? AND transaction_id = ?", asset.TokenID, txn.TransactionID).First(&existingChain).Error
+				
+				if err == gorm.ErrRecordNotFound {
+					// FULL REPAIR: Missing from history, re-process entirely
+					log.Printf("[Repair] Found missing asset %s in successful txn %s. Repairing...", asset.TokenID, txn.TransactionID)
+					
+					partialInfo := &model.TransactionInfo{
+						Initiator: txn.Initiator,
+						Owner:     txn.Owner,
+						Epoch:     txn.Epoch,
+						Network:   txn.Network,
+						Tokens:    &model.TransactionTokens{},
+					}
+					
+					if util.IsValidFT(asset.TokenID) {
+						partialInfo.Tokens.FT = []*model.TokenInfo{asset}
+					} else if util.IsValidNFT(asset.TokenID) {
+						partialInfo.Tokens.NFT = []*model.TokenInfo{asset}
+					} else if util.IsValidSC(asset.TokenID) {
+						partialInfo.Tokens.SmartContract = []*model.TokenInfo{asset}
+					} else {
+						continue
+					}
 
-				log.Printf("[Repair] Found missing asset %s in successful txn %s. Repairing...", asset.TokenID, txn.TransactionID)
-				
-				// Create a surgical partial TransactionInfo containing ONLY this missing asset.
-				// This ensures ProcessTransactionAssets does not re-process RBTs or other already-recorded tokens.
-				partialInfo := &model.TransactionInfo{
-					Initiator: txn.Initiator,
-					Owner:     txn.Owner,
-					Epoch:     txn.Epoch,
-					Network:   txn.Network,
-					Tokens:    &model.TransactionTokens{},
+					if err := ProcessTransactionAssets(tx, partialInfo, txn.TransactionID); err != nil {
+						log.Printf("[Repair] ERROR: Failed to repair asset %s: %v", asset.TokenID, err)
+						continue
+					}
+					repairedCount++
+				} else if err == nil {
+					// REFRESH: Exists in history, but check if Token table needs value/deployer fix
+					var tokenEntry models.Token
+					if err := tx.Where("token_id = ?", asset.TokenID).First(&tokenEntry).Error; err == nil {
+						// Only refresh if Value is 0 or Deployer is missing
+						if (tokenEntry.TokenValue == 0 && asset.TokenValue > 0) || (tokenEntry.DeployerDID == "" && asset.PreviousTransactionID == "") {
+							log.Printf("[Repair] Refreshing incomplete token entry for %s (updating value/deployer)", asset.TokenID)
+							
+							// If value is changing, we need to update the balance of the CURRENT owner
+							if tokenEntry.TokenValue == 0 && asset.TokenValue > 0 {
+								typeName := tokenTypeName(tokenEntry.TokenType)
+								// Add the value to the current owner's balance
+								if err := updateBalances(tx, tokenEntry.DID, typeName, "", "", asset.TokenValue, 0); err != nil {
+									log.Printf("[Repair] Failed to update balance during refresh: %v", err)
+								}
+							}
+							
+							// Update the Token table entry
+							updates := make(map[string]interface{})
+							if asset.TokenValue > 0 {
+								updates["token_value"] = asset.TokenValue
+							}
+							if tokenEntry.DeployerDID == "" && asset.PreviousTransactionID == "" {
+								updates["deployer_did"] = txn.Initiator
+							}
+							
+							if len(updates) > 0 {
+								tx.Model(&tokenEntry).Updates(updates)
+							}
+						}
+					}
 				}
-				
-				if util.IsValidFT(asset.TokenID) {
-					partialInfo.Tokens.FT = []*model.TokenInfo{asset}
-				} else if util.IsValidNFT(asset.TokenID) {
-					partialInfo.Tokens.NFT = []*model.TokenInfo{asset}
-				} else if util.IsValidSC(asset.TokenID) {
-					partialInfo.Tokens.SmartContract = []*model.TokenInfo{asset}
-				} else {
-					continue
-				}
-
-				// Re-run the (now fixed) ingestion logic for this specific missing asset
-				if err := ProcessTransactionAssets(tx, partialInfo, txn.TransactionID); err != nil {
-					log.Printf("[Repair] ERROR: Failed to repair asset %s: %v", asset.TokenID, err)
-					continue
-				}
-				
-				repairedCount++
 			}
 		}
 
