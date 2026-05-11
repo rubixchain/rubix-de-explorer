@@ -27,6 +27,11 @@ func RepairMissingAssetsFromTransactionInfo() error {
 
 		log.Printf("[Repair] Found %d successful transactions to audit", len(txns))
 
+		// Diagnostic: Search for "daisy" in the raw JSON to see if it's there at all
+		var countDaisy int64
+		tx.Table("TransactionInfo").Where("tokens::text LIKE ?", "%daisy%").Count(&countDaisy)
+		log.Printf("[Repair] Diagnostic: Found %d transactions containing 'daisy' in raw JSON", countDaisy)
+
 		repairedCount := 0
 
 		for i, txn := range txns {
@@ -45,11 +50,11 @@ func RepairMissingAssetsFromTransactionInfo() error {
 			assetsToCheck = append(assetsToCheck, tokens.SmartContract...)
 
 			if len(assetsToCheck) == 0 {
-				if i < 5 { // Debug: Log a few empty transactions to see what we are skipping
-					log.Printf("[Repair] Debug: No FT/NFT/SC found in txn %s (tokens: %s)", txn.TransactionID, string(txn.Tokens))
-				}
 				continue
 			}
+
+			log.Printf("[Repair] Found txn %s with %d assets to check (FT:%d, NFT:%d, SC:%d)", 
+				txn.TransactionID, len(assetsToCheck), len(tokens.FT), len(tokens.NFT), len(tokens.SmartContract))
 
 			for _, asset := range assetsToCheck {
 				// Safety check: skip if this specific asset for this specific txn is already in our history
