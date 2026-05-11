@@ -153,11 +153,15 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 		key := balanceKey{DID: did, AssetType: typeName}
 		if token.TokenType == TokenTypeFT {
 			parts := strings.Split(token.TokenID, "_")
-			if len(parts) >= 3 {
+			if len(parts) > 0 {
 				key.TokenName = parts[0]
-				key.CreatorDID = parts[len(parts)-1]
-			} else if len(parts) > 0 {
-				key.TokenName = parts[0]
+				// Intelligently find the DID part (it's the one starting with 'bafy')
+				for _, p := range parts {
+					if strings.HasPrefix(p, "bafy") && len(p) == 59 {
+						key.CreatorDID = p
+						break
+					}
+				}
 			}
 		}
 		if _, ok := balanceChanges[key]; !ok {
