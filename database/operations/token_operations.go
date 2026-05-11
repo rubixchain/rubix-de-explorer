@@ -317,6 +317,10 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 				if info.Data != "" {
 					tokenToSave.Data = info.Data
 				}
+				// Update value for mutable assets (NFT/SC)
+				if typeID != TokenTypeRBT && info.TokenValue > 0 {
+					tokenToSave.TokenValue = info.TokenValue
+				}
 				
 				inferredRole := models.TokenRole_Transfer
 				if typeID == TokenTypeSC {
