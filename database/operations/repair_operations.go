@@ -29,9 +29,12 @@ func RepairMissingAssetsFromTransactionInfo() error {
 
 		repairedCount := 0
 
-		for _, txn := range txns {
+		for i, txn := range txns {
 			var tokens model.TransactionTokens
 			if err := json.Unmarshal(txn.Tokens, &tokens); err != nil {
+				if i < 10 { // Log only first 10 failures to avoid spam
+					log.Printf("[Repair] Debug: JSON Unmarshal failed for txn %s: %v", txn.TransactionID, err)
+				}
 				continue
 			}
 
@@ -42,6 +45,9 @@ func RepairMissingAssetsFromTransactionInfo() error {
 			assetsToCheck = append(assetsToCheck, tokens.SmartContract...)
 
 			if len(assetsToCheck) == 0 {
+				if i < 5 { // Debug: Log a few empty transactions to see what we are skipping
+					log.Printf("[Repair] Debug: No FT/NFT/SC found in txn %s (tokens: %s)", txn.TransactionID, string(txn.Tokens))
+				}
 				continue
 			}
 
