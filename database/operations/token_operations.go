@@ -54,13 +54,18 @@ func UpdateTokenAndBalances(token *models.Token, prevOwner string) error {
 			// SC Interaction (Execute) or Burn does not transfer balance for SCs.
 		} else if prevOwner != token.DID {
 			// Standard Logic: RBT, FT, NFT transfer ownership/balances
+			val := token.TokenValue
+			if token.TokenType != TokenTypeRBT && val == 0 {
+				val = 1.0 // Fallback for legacy tokens without value
+			}
+
 			if prevOwner != "" && prevOwner != "0" {
-				if err := updateBalances(tx, prevOwner, tokenTypeName(token.TokenType), "", "", -1, 0); err != nil {
+				if err := updateBalances(tx, prevOwner, tokenTypeName(token.TokenType), "", "", -val, 0); err != nil {
 					return err
 				}
 			}
 			if token.DID != "" && token.DID != "0" {
-				if err := updateBalances(tx, token.DID, tokenTypeName(token.TokenType), "", "", 1, 0); err != nil {
+				if err := updateBalances(tx, token.DID, tokenTypeName(token.TokenType), "", "", val, 0); err != nil {
 					return err
 				}
 			}
@@ -144,10 +149,9 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 		}
 		typeName := tokenTypeName(token.TokenType)
 		var val float64
-		if token.TokenType == TokenTypeRBT {
-			val = token.TokenValue
-		} else {
-			val = 1.0
+		val = token.TokenValue
+		if val == 0 && token.TokenType != TokenTypeRBT {
+			val = 1.0 // Fallback for NFT/FT/SC
 		}
 
 		key := balanceKey{DID: did, AssetType: typeName}
@@ -201,9 +205,24 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 					TransactionID: txnID,
 					NeedsSync:     true,
 				}
-				if typeID == TokenTypeSC {
-					tokenToSave.DID = txn.Initiator
-					tokenToSave.DeployerDID = txn.Initiator
+				if typeID == TokenTypeSC || typeID == TokenTypeNFT {
+					// 1. Preserve existing DeployerDID if we have it
+					if exists {
+						tokenToSave.DeployerDID = existing.DeployerDID
+					}
+					// 2. If this is the mint/deploy, set the DeployerDID
+					if isNew {
+						tokenToSave.DeployerDID = txn.Initiator
+					}
+
+					// For deployments, if Owner is empty, the Initiator is the owner
+					if txn.Owner != "" {
+						tokenToSave.DID = txn.Owner
+					} else if isNew {
+						tokenToSave.DID = txn.Initiator
+					} else if exists {
+						tokenToSave.DID = existing.DID
+					}
 				} else {
 					tokenToSave.DID = txn.Owner
 				}
@@ -222,7 +241,10 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 							burnedSum += v
 						}
 					}
-					if typeID == TokenTypeFT {
+					// Use explicit TokenValue if provided (common for NFT/FT), otherwise fallback to burnedSum
+					if info.TokenValue > 0 {
+						tokenToSave.TokenValue = info.TokenValue
+					} else if typeID == TokenTypeFT {
 						ftCount := len(txn.Tokens.FT)
 						if ftCount > 0 {
 							tokenToSave.TokenValue = burnedSum / float64(ftCount)
