@@ -295,50 +295,33 @@ func buildDAGResponse(edges []dagEdgeRow) model.DAGResponse {
 	return model.DAGResponse{Transactions: txns}
 }
 
-// hasParent checks if a txn has any previousTransactionID in its tokens JSONB.
+// hasParent checks if a txn has any previous_transaction_id in TokenChain.
 func hasParent(txnID string) bool {
 	var count int64
 	database.ReadDB.Raw(`
-		SELECT COUNT(*)
-		FROM "TransactionInfo",
-		     jsonb_array_elements(
-		         COALESCE(tokens->'rbt', '[]'::jsonb) ||
-		         COALESCE(tokens->'ft', '[]'::jsonb) ||
-		         COALESCE(tokens->'nft', '[]'::jsonb) ||
-		         COALESCE(tokens->'smartContract', '[]'::jsonb)
-		     ) AS elem
+		SELECT COUNT(*) FROM "TokenChain"
 		WHERE transaction_id = ?
-		  AND elem->>'previousTransactionID' IS NOT NULL
-		  AND elem->>'previousTransactionID' <> ''
+		  AND previous_transaction_id IS NOT NULL
+		  AND previous_transaction_id <> ''
 		LIMIT 1
 	`, txnID).Scan(&count)
 	return count > 0
 }
 
-// chainScore recursively counts how many ancestor levels exist behind txnID, up to maxDepth.
+// chainScore recursively counts ancestor levels behind txnID, up to maxDepth.
 func chainScore(txnID string, maxDepth int) int {
 	if maxDepth == 0 {
 		return 0
 	}
-	if !hasParent(txnID) {
-		return 0
-	}
-	// get one parent and recurse
 	var row struct {
 		ParentTxnID string `gorm:"column:parent_txn_id"`
 	}
 	database.ReadDB.Raw(`
-		SELECT elem->>'previousTransactionID' AS parent_txn_id
-		FROM "TransactionInfo",
-		     jsonb_array_elements(
-		         COALESCE(tokens->'rbt', '[]'::jsonb) ||
-		         COALESCE(tokens->'ft', '[]'::jsonb) ||
-		         COALESCE(tokens->'nft', '[]'::jsonb) ||
-		         COALESCE(tokens->'smartContract', '[]'::jsonb)
-		     ) AS elem
+		SELECT previous_transaction_id AS parent_txn_id
+		FROM "TokenChain"
 		WHERE transaction_id = ?
-		  AND elem->>'previousTransactionID' IS NOT NULL
-		  AND elem->>'previousTransactionID' <> ''
+		  AND previous_transaction_id IS NOT NULL
+		  AND previous_transaction_id <> ''
 		LIMIT 1
 	`, txnID).Scan(&row)
 	if row.ParentTxnID == "" {
@@ -347,24 +330,18 @@ func chainScore(txnID string, maxDepth int) int {
 	return 1 + chainScore(row.ParentTxnID, maxDepth-1)
 }
 
-// fetchParents gets all candidate parent IDs for a txn, scores each by chain depth
-// up to 5 levels, returns top maxParents sorted deepest-chain first.
+// fetchParents gets all distinct parent IDs for a txn from TokenChain,
+// scores each by chain depth up to 5 levels, returns top maxParents sorted deepest-chain first.
 func fetchParents(txnID string, maxParents int) []string {
 	var rows []struct {
 		ParentTxnID string `gorm:"column:parent_txn_id"`
 	}
 	database.ReadDB.Raw(`
-		SELECT DISTINCT elem->>'previousTransactionID' AS parent_txn_id
-		FROM "TransactionInfo",
-		     jsonb_array_elements(
-		         COALESCE(tokens->'rbt', '[]'::jsonb) ||
-		         COALESCE(tokens->'ft', '[]'::jsonb) ||
-		         COALESCE(tokens->'nft', '[]'::jsonb) ||
-		         COALESCE(tokens->'smartContract', '[]'::jsonb)
-		     ) AS elem
+		SELECT DISTINCT previous_transaction_id AS parent_txn_id
+		FROM "TokenChain"
 		WHERE transaction_id = ?
-		  AND elem->>'previousTransactionID' IS NOT NULL
-		  AND elem->>'previousTransactionID' <> ''
+		  AND previous_transaction_id IS NOT NULL
+		  AND previous_transaction_id <> ''
 	`, txnID).Scan(&rows)
 
 	candidates := make([]string, 0, len(rows))
@@ -377,7 +354,6 @@ func fetchParents(txnID string, maxParents int) []string {
 		return nil
 	}
 
-	// Score each candidate by how deep its chain goes (up to 5 levels)
 	type scored struct {
 		id    string
 		score int
