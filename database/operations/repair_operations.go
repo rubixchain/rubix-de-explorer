@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"log"
 
-	"github.com/rubixchain/de-explorer/database"
-	"github.com/rubixchain/de-explorer/database/models"
-	"github.com/rubixchain/de-explorer/model"
-	"github.com/rubixchain/de-explorer/util"
+	"explorer-server/database"
+	"explorer-server/database/models"
+	"explorer-server/model"
+	"explorer-server/util"
 	"gorm.io/gorm"
 )
 
