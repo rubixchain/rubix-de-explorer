@@ -35,10 +35,7 @@ var tokenTypeMap = map[string]int16{
 // UpdateTokenAndBalances atomically updates the token state and increments/decrements DID balances
 func UpdateTokenAndBalances(token *models.Token, prevOwner string) error {
 	return database.WriteDB.Transaction(func(tx *gorm.DB) error {
-		// 1. Upsert Token
-		if err := tx.Save(token).Error; err != nil {
-			return err
-		}
+		// 1. We will save the token at the end, after calculating balance deltas
 
 		// 2. Update Balances
 		// Special Case: Smart Contracts (SC). Balance counts deployments/mints only.
@@ -46,9 +43,7 @@ func UpdateTokenAndBalances(token *models.Token, prevOwner string) error {
 			if (prevOwner == "" || prevOwner == "0") && token.TokenStatus != models.TokenStatus_Burnt {
 				// If it's new (Mint/Deploy), increment for the owner
 				val := token.TokenValue
-				if token.TokenType != TokenTypeRBT && val == 0 {
-					val = 1.0 // Fallback
-				}
+				if val == 0 { val = 1.0 }
 
 				if token.DID != "" && token.DID != "0" {
 					if err := updateBalances(tx, token.DID, tokenTypeName(token.TokenType), "", "", val, 0); err != nil {
@@ -56,26 +51,38 @@ func UpdateTokenAndBalances(token *models.Token, prevOwner string) error {
 					}
 				}
 			}
-		// SC Interaction (Execute) or Burn does not transfer balance for SCs.
 		} else {
 			// Standard Logic: RBT, FT, NFT transfer ownership/balances
-			// NOTE: In this single-token update path, we assume the 'token' struct 
-			// has already been updated with its NEW value by the caller.
-			val := token.TokenValue
-			if token.TokenType != TokenTypeRBT && val == 0 {
-				val = 1.0 // Fallback
+			// We need the OLD value to calculate the delta correctly
+			var existing models.Token
+			oldVal := 0.0
+			if tx.Where("token_id = ?", token.TokenID).First(&existing).Error == nil {
+				oldVal = existing.TokenValue
+			}
+			newVal := token.TokenValue
+
+			if token.TokenType != TokenTypeRBT {
+				if oldVal == 0 { oldVal = 1.0 }
+				if newVal == 0 { newVal = 1.0 }
 			}
 
-			if prevOwner != "" && prevOwner != "0" && prevOwner != token.DID {
-				if err := updateBalances(tx, prevOwner, tokenTypeName(token.TokenType), "", "", -val, 0); err != nil {
+			// Subtract OLD from previous owner
+			if prevOwner != "" && prevOwner != "0" {
+				if err := updateBalances(tx, prevOwner, tokenTypeName(token.TokenType), "", "", -oldVal, 0); err != nil {
 					return err
 				}
 			}
-			if token.DID != "" && token.DID != "0" && prevOwner != token.DID {
-				if err := updateBalances(tx, token.DID, tokenTypeName(token.TokenType), "", "", val, 0); err != nil {
+			// Add NEW to current owner
+			if token.DID != "" && token.DID != "0" {
+				if err := updateBalances(tx, token.DID, tokenTypeName(token.TokenType), "", "", newVal, 0); err != nil {
 					return err
 				}
 			}
+		}
+
+		// 3. Finally Upsert the Token state
+		if err := tx.Save(token).Error; err != nil {
+			return err
 		}
 
 		return nil
@@ -150,7 +157,7 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 	}
 	balanceChanges := make(map[balanceKey]*balanceChange)
 
-	addBalanceChange := func(did string, typeID int16, tokenID string, value float64, delta float64) {
+	addBalanceChange := func(did string, typeID int16, tokenID string, delta, pledgedDelta float64) {
 		if did == "" || did == "0" {
 			return
 		}
@@ -173,8 +180,9 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 		if _, ok := balanceChanges[key]; !ok {
 			balanceChanges[key] = &balanceChange{}
 		}
-		// delta is now the actual value to add/subtract (no internal multiplication by token.TokenValue)
+		// deltas are now the actual values to add/subtract
 		balanceChanges[key].Balance = util.RoundToMaxDecimals(balanceChanges[key].Balance + delta)
+		balanceChanges[key].PledgedBalance = util.RoundToMaxDecimals(balanceChanges[key].PledgedBalance + pledgedDelta)
 	}
 
 	tokensToUpsert := make([]models.Token, 0)
@@ -320,6 +328,9 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 						inferredRole = models.TokenRole_Transfer
 					}
 				}
+				tokenToSave.LatestRole = inferredRole
+			}
+
 			// Assign TokenStatus based on the role (following Core)
 			if tokenToSave.LatestRole == models.TokenRole_Deploy {
 				tokenToSave.TokenStatus = models.TokenStatus_Deployed
@@ -347,12 +358,12 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 
 			if typeID == TokenTypeSC {
 				if isNew && tokenToSave.DID != "" && tokenToSave.DID != "0" {
-					addBalanceChange(tokenToSave.DID, typeID, info.TokenID, 0, newVal)
+					addBalanceChange(tokenToSave.DID, typeID, info.TokenID, newVal, 0)
 				}
 			} else {
 				// Standard Logic: Subtract OLD, Add NEW
-				addBalanceChange(prevOwner, typeID, info.TokenID, 0, -oldVal)
-				addBalanceChange(tokenToSave.DID, typeID, info.TokenID, 0, newVal)
+				addBalanceChange(prevOwner, typeID, info.TokenID, -oldVal, 0)
+				addBalanceChange(tokenToSave.DID, typeID, info.TokenID, newVal, 0)
 			}
 		}
 		return nil
@@ -385,7 +396,10 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 				})
 				if q.Did != "" && t.TokenType != TokenTypeSC && !alreadyPledged {
 					// Only adjust balance when transitioning Free → Pledged (not re-pledge)
-					addBalanceChange(q.Did, &t, -1, 1)
+					// Subtract value from Free, Add to Pledged
+					val := t.TokenValue
+					if val == 0 { val = 1.0 }
+					addBalanceChange(q.Did, t.TokenType, info.TokenID, -val, val)
 				}
 			}
 		}
@@ -415,7 +429,9 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 			})
 			if prevDID != "" && t.TokenType != TokenTypeSC {
 				// Deduct from Regular balance (Burned/Committed tokens are no longer Free)
-				addBalanceChange(prevDID, &t, -1, 0)
+				val := t.TokenValue
+				if val == 0 { val = 1.0 }
+				addBalanceChange(prevDID, t.TokenType, info.TokenID, -val, 0)
 			}
 		}
 	}
@@ -653,7 +669,6 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 			}
 		}
 	}
-
 
 	return nil
 }
