@@ -45,8 +45,13 @@ func UpdateTokenAndBalances(token *models.Token, prevOwner string) error {
 		if token.TokenType == TokenTypeSC {
 			if (prevOwner == "" || prevOwner == "0") && token.TokenStatus != models.TokenStatus_Burnt {
 				// If it's new (Mint/Deploy), increment for the owner
+				val := token.TokenValue
+				if token.TokenType != TokenTypeRBT && val == 0 {
+					val = 1.0 // Fallback
+				}
+
 				if token.DID != "" && token.DID != "0" {
-					if err := updateBalances(tx, token.DID, tokenTypeName(token.TokenType), "", "", 1, 0); err != nil {
+					if err := updateBalances(tx, token.DID, tokenTypeName(token.TokenType), "", "", val, 0); err != nil {
 						return err
 					}
 				}
