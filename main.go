@@ -59,7 +59,6 @@ func main() {
 	testNet := flag.Bool("testnet", false, "Connect to Rubix TestNet (default: MainNet)")
 	swarmKeyPath := flag.String("swarmkey", "", "Path to a custom swarm.key file (overrides built-in keys)")
 	publishDummy := flag.Bool("publish-dummy", false, "TODO: DELETE LATER - Publish a dummy transaction for testing")
-	repairAssets := flag.Bool("repair-assets", false, "Run one-time repair for missing FT/NFT assets")
 	flag.Parse()
 
 	startTime = time.Now()
@@ -92,16 +91,6 @@ func main() {
 		log.Printf("Migration Warning: Failed to sync balances: %v\n", err)
 	} else {
 		log.Println("Migration: Balance synchronization complete")
-	}
-
-	// 8.5 One-time Asset Repair (if flag is set)
-	if *repairAssets {
-		log.Println("Repair: Starting one-time FT/NFT asset repair...")
-		if err := operations.RepairMissingAssetsFromTransactionInfo(); err != nil {
-			log.Printf("Repair Warning: Failed to repair assets: %v\n", err)
-		} else {
-			log.Println("Repair: Asset repair complete")
-		}
 	}
 
 	log.Printf("Explorer Server initialized with %d cores\n", totalCores)
