@@ -108,10 +108,21 @@ func RepairMissingAssetsFromTransactionInfo() error {
 							// If value is changing, we need to update the balance of the CURRENT owner by the delta
 							if tokenEntry.TokenValue != asset.TokenValue {
 								typeName := tokenTypeName(tokenEntry.TokenType)
-								delta := asset.TokenValue - tokenEntry.TokenValue
-								// Apply the difference to the current owner's balance
-								if err := updateBalances(tx, tokenEntry.DID, typeName, "", "", delta, 0); err != nil {
-									log.Printf("[Repair] Failed to update balance delta during refresh: %v", err)
+								
+								// Weight Logic: Non-RBT assets use 1.0 (Count)
+								oldWeight := tokenEntry.TokenValue
+								newWeight := asset.TokenValue
+								if tokenEntry.TokenType != 1 { // Not RBT
+									oldWeight = 1.0
+									newWeight = 1.0
+								}
+
+								delta := newWeight - oldWeight
+								if delta != 0 {
+									// Apply the difference to the current owner's balance
+									if err := updateBalances(tx, tokenEntry.DID, typeName, "", "", delta, 0); err != nil {
+										log.Printf("[Repair] Failed to update balance delta during refresh: %v", err)
+									}
 								}
 							}
 							
