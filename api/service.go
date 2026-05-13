@@ -958,13 +958,10 @@ func GetFTTopHolders(ftName, creatorDID string, limit, page int) (model.FTTopHol
 
 	var holders []model.FTHolder
 	err := database.ReadDB.Raw(`
-		SELECT did, COUNT(*) AS token_count
-		FROM "Tokens"
-		WHERE token_type = 2
-			AND split_part(token_id, '_', 1) = ?
-			AND reverse(split_part(reverse(token_id), '_', 1)) = ?
-		GROUP BY did
-		ORDER BY token_count DESC
+		SELECT did, balance AS token_count
+		FROM "DIDBalances"
+		WHERE asset_type = 'FT' AND token_name = ? AND creator_did = ? AND balance > 0
+		ORDER BY balance DESC
 		LIMIT ? OFFSET ?
 	`, ftName, creatorDID, limit, offset).Scan(&holders).Error
 	if err != nil {
@@ -973,11 +970,9 @@ func GetFTTopHolders(ftName, creatorDID string, limit, page int) (model.FTTopHol
 
 	var countResult struct{ Count int64 }
 	if err := database.ReadDB.Raw(`
-		SELECT COUNT(DISTINCT did) AS count
-		FROM "Tokens"
-		WHERE token_type = 2
-			AND split_part(token_id, '_', 1) = ?
-			AND reverse(split_part(reverse(token_id), '_', 1)) = ?
+		SELECT COUNT(*) AS count
+		FROM "DIDBalances"
+		WHERE asset_type = 'FT' AND token_name = ? AND creator_did = ? AND balance > 0
 	`, ftName, creatorDID).Scan(&countResult).Error; err != nil {
 		return model.FTTopHoldersResponse{}, err
 	}
