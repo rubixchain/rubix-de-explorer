@@ -106,10 +106,10 @@ type EventTransaction struct {
 }
 
 type FTGroup struct {
-	FTName     string  `json:"ftName"`
-	Count      float64 `json:"count"`
-	CreatorDID string  `json:"creatorDID"`
-	FTValue    float64 `json:"ftValue"`
+	FTName     string  `json:"ftName" gorm:"column:ft_name"`
+	Count      float64 `json:"count" gorm:"column:count"`
+	CreatorDID string  `json:"creatorDID" gorm:"column:creator_did"`
+	FTValue    float64 `json:"ftValue" gorm:"column:ft_value"`
 }
 
 type FTSuggestion struct {
