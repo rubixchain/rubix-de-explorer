@@ -109,6 +109,7 @@ type FTGroup struct {
 	FTName     string  `json:"ftName"`
 	Count      float64 `json:"count"`
 	CreatorDID string  `json:"creatorDID"`
+	FTValue    float64 `json:"ftValue"`
 }
 
 type FTSuggestion struct {

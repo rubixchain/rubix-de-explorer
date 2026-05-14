@@ -711,17 +711,14 @@ func GetFTGroupList(limit, page int) ([]model.FTGroup, int64, error) {
 	}
 	offset := (page - 1) * limit
 
-	// FT token_id format: <ftName>_<creatorDID>_<index>
-	// creatorDID is the 59-char "bafy..." segment; extract it via regex.
+	// Use DIDBalances as the source of truth for FT holders.
+	// FT value is pulled from the Tokens table by matching on (ft_name, creator_did).
 	var total int64
 	if err := database.ReadDB.Raw(`
 		SELECT COUNT(*) FROM (
-			SELECT DISTINCT
-				split_part(token_id, '_', 1) AS ft_name,
-				(regexp_match(token_id, 'bafy[a-zA-Z0-9]{55}'))[1] AS creator_did
-			FROM "Tokens"
-			WHERE token_type = 2
-			  AND token_id ~ 'bafy[a-zA-Z0-9]{55}'
+			SELECT DISTINCT token_name, creator_did
+			FROM "DIDBalances"
+			WHERE asset_type = 'FT' AND balance > 0
 		) AS distinct_groups
 	`).Scan(&total).Error; err != nil {
 		return nil, 0, err
@@ -730,13 +727,17 @@ func GetFTGroupList(limit, page int) ([]model.FTGroup, int64, error) {
 	var groups []model.FTGroup
 	if err := database.ReadDB.Raw(`
 		SELECT
-			split_part(token_id, '_', 1) AS ft_name,
-			(regexp_match(token_id, 'bafy[a-zA-Z0-9]{55}'))[1] AS creator_did,
-			COUNT(*) AS count
-		FROM "Tokens"
-		WHERE token_type = 2
-		  AND token_id ~ 'bafy[a-zA-Z0-9]{55}'
-		GROUP BY ft_name, creator_did
+			db.token_name AS ft_name,
+			db.creator_did,
+			SUM(db.balance) AS count,
+			COALESCE(MAX(t.token_value), 0) AS ft_value
+		FROM "DIDBalances" db
+		LEFT JOIN "Tokens" t
+		  ON t.token_type = 2
+		 AND split_part(t.token_id, '_', 1) = db.token_name
+		 AND t.token_id LIKE '%_' || db.creator_did || '_%'
+		WHERE db.asset_type = 'FT' AND db.balance > 0
+		GROUP BY db.token_name, db.creator_did
 		ORDER BY count DESC
 		LIMIT ? OFFSET ?
 	`, limit, offset).Scan(&groups).Error; err != nil {
