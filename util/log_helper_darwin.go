@@ -11,3 +11,4 @@ import (
 func RedirectStderr(file *os.File) {
 	_ = syscall.Dup2(int(file.Fd()), int(os.Stderr.Fd()))
 }
+

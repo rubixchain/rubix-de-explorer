@@ -711,21 +711,32 @@ func GetFTGroupList(limit, page int) ([]model.FTGroup, int64, error) {
 	}
 	offset := (page - 1) * limit
 
-	// Use DIDBalances table for pre-aggregated grouping to prevent OOM
+	// FT token_id format: <ftName>_<creatorDID>_<index>
+	// creatorDID is the 59-char "bafy..." segment; extract it via regex.
 	var total int64
-	if err := database.ReadDB.Table("DIDBalances").
-		Where("asset_type = ?", "FT").
-		Select("COUNT(DISTINCT (token_name, creator_did))").
-		Scan(&total).Error; err != nil {
+	if err := database.ReadDB.Raw(`
+		SELECT COUNT(*) FROM (
+			SELECT DISTINCT
+				split_part(token_id, '_', 1) AS ft_name,
+				(regexp_match(token_id, 'bafy[a-zA-Z0-9]{55}'))[1] AS creator_did
+			FROM "Tokens"
+			WHERE token_type = 2
+			  AND token_id ~ 'bafy[a-zA-Z0-9]{55}'
+		) AS distinct_groups
+	`).Scan(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
 	var groups []model.FTGroup
 	if err := database.ReadDB.Raw(`
-		SELECT token_name as ft_name, creator_did, SUM(balance) as count
-		FROM "DIDBalances"
-		WHERE asset_type = 'FT'
-		GROUP BY token_name, creator_did
+		SELECT
+			split_part(token_id, '_', 1) AS ft_name,
+			(regexp_match(token_id, 'bafy[a-zA-Z0-9]{55}'))[1] AS creator_did,
+			COUNT(*) AS count
+		FROM "Tokens"
+		WHERE token_type = 2
+		  AND token_id ~ 'bafy[a-zA-Z0-9]{55}'
+		GROUP BY ft_name, creator_did
 		ORDER BY count DESC
 		LIMIT ? OFFSET ?
 	`, limit, offset).Scan(&groups).Error; err != nil {
@@ -741,9 +752,10 @@ func GetFTGroupList(limit, page int) ([]model.FTGroup, int64, error) {
 
 func GetFTListByFTName(ftName string, creatorDID string, limit, page int) ([]models.Token, int64, error) {
 	offset := (page - 1) * limit
+	// FT token_id format: <ftName>_<creatorDID>_<index> — creatorDID is the middle bafy segment.
 	base := database.ReadDB.Model(&models.Token{}).Where("token_type = ?", 2).Where("token_id LIKE ?", ftName+"_%")
 	if creatorDID != "" {
-		base = base.Where("token_id LIKE ?", "%_"+creatorDID)
+		base = base.Where("token_id LIKE ?", "%_"+creatorDID+"_%")
 	}
 
 	var total int64
@@ -927,19 +939,20 @@ func GetRBTInfo(tokenID string) (model.RBTInfo, error) {
 }
 
 // GetFTInfo returns aggregate details for a specific FT (identified by name + creator DID).
+// FT token_id format: <ftName>_<creatorDID>_<index>
 func GetFTInfo(ftName, creatorDID string) (model.FTInfo, error) {
 	var info model.FTInfo
 	err := database.ReadDB.Raw(`
 		SELECT
 			split_part(token_id, '_', 1)                              AS ft_name,
-			reverse(split_part(reverse(token_id), '_', 1))            AS creator_did,
+			(regexp_match(token_id, 'bafy[a-zA-Z0-9]{55}'))[1]        AS creator_did,
 			MAX(token_value)                                           AS ft_value,
 			COUNT(*)                                                   AS total_amount,
 			EXTRACT(EPOCH FROM MIN(created_at))::bigint                AS created_time
 		FROM "Tokens"
 		WHERE token_type = 2
 			AND split_part(token_id, '_', 1) = ?
-			AND reverse(split_part(reverse(token_id), '_', 1)) = ?
+			AND (regexp_match(token_id, 'bafy[a-zA-Z0-9]{55}'))[1] = ?
 		GROUP BY ft_name, creator_did
 	`, ftName, creatorDID).Scan(&info).Error
 	return info, err
@@ -996,12 +1009,11 @@ func SearchFTSuggestions(prefix string, limit int) ([]model.FTSuggestion, error)
 	}
 	var suggestions []model.FTSuggestion
 	err := database.ReadDB.Raw(`
-		SELECT DISTINCT
-			split_part(token_id, '_', 1) AS ft_name,
-			reverse(split_part(reverse(token_id), '_', 1)) AS creator_did
-		FROM "Tokens"
-		WHERE token_type = 2
-			AND split_part(token_id, '_', 1) ILIKE ?
+		SELECT DISTINCT token_name AS ft_name, creator_did
+		FROM "DIDBalances"
+		WHERE asset_type = 'FT'
+			AND token_name ILIKE ?
+			AND balance > 0
 		ORDER BY ft_name
 		LIMIT ?
 	`, prefix+"%", limit).Scan(&suggestions).Error
