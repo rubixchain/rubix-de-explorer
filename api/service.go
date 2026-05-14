@@ -711,14 +711,15 @@ func GetFTGroupList(limit, page int) ([]model.FTGroup, int64, error) {
 	}
 	offset := (page - 1) * limit
 
-	// Use DIDBalances as the source of truth for FT holders.
-	// FT value is pulled from the Tokens table by matching on (ft_name, creator_did).
+	// FT token_id format: <ftName>_<creatorDID>_<index> — extract directly from Tokens.
 	var total int64
 	if err := database.ReadDB.Raw(`
 		SELECT COUNT(*) FROM (
-			SELECT DISTINCT token_name, creator_did
-			FROM "DIDBalances"
-			WHERE asset_type = 'FT' AND balance > 0
+			SELECT DISTINCT
+				split_part(token_id, '_', 1) AS ft_name,
+				split_part(token_id, '_', 2) AS creator_did
+			FROM "Tokens"
+			WHERE token_type = 2
 		) AS distinct_groups
 	`).Scan(&total).Error; err != nil {
 		return nil, 0, err
@@ -727,17 +728,13 @@ func GetFTGroupList(limit, page int) ([]model.FTGroup, int64, error) {
 	var groups []model.FTGroup
 	if err := database.ReadDB.Raw(`
 		SELECT
-			db.token_name AS ft_name,
-			db.creator_did,
-			SUM(db.balance) AS count,
-			COALESCE(MAX(t.token_value), 0) AS ft_value
-		FROM "DIDBalances" db
-		LEFT JOIN "Tokens" t
-		  ON t.token_type = 2
-		 AND split_part(t.token_id, '_', 1) = db.token_name
-		 AND t.token_id LIKE '%_' || db.creator_did || '_%'
-		WHERE db.asset_type = 'FT' AND db.balance > 0
-		GROUP BY db.token_name, db.creator_did
+			split_part(token_id, '_', 1) AS ft_name,
+			split_part(token_id, '_', 2) AS creator_did,
+			COUNT(*) AS count,
+			MAX(token_value) AS ft_value
+		FROM "Tokens"
+		WHERE token_type = 2
+		GROUP BY ft_name, creator_did
 		ORDER BY count DESC
 		LIMIT ? OFFSET ?
 	`, limit, offset).Scan(&groups).Error; err != nil {
