@@ -234,6 +234,21 @@ func GetFTGroupListHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(model.NewPaginated(data, total, page, limit))
 }
 
+// GetFTHoldersListHandler returns DIDs ranked by total FT count, with per-FT breakdown.
+func GetFTHoldersListHandler(w http.ResponseWriter, r *http.Request) {
+	limit, page := getPagination(r)
+	data, total, err := api.GetFTHoldersList(limit, page)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if data == nil {
+		data = []model.FTHolderInfo{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(model.NewPaginated(data, total, page, limit))
+}
+
 // GetFTListByFTNameHandler returns all FT tokens for a specific group
 func GetFTListByFTNameHandler(w http.ResponseWriter, r *http.Request) {
 	ftName := r.URL.Query().Get("ftName")

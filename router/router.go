@@ -67,6 +67,7 @@ func NewRouter() *mux.Router {
 	r.HandleFunc("/api/get-rbt-info", handlers.GetRBTInfoHandler).Methods(http.MethodGet)
 	// FT
 	r.HandleFunc("/api/get-ft-group-list", handlers.GetFTGroupListHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-ft-holders-list", handlers.GetFTHoldersListHandler).Methods(http.MethodGet)
 	r.HandleFunc("/api/get-ft-list-by-ftname", handlers.GetFTListByFTNameHandler).Methods(http.MethodGet)
 	r.HandleFunc("/api/search-ft-suggestions", handlers.GetFTSuggestionsHandler).Methods(http.MethodGet)
 	r.HandleFunc("/api/get-ft-top-holders", handlers.GetFTTopHoldersHandler).Methods(http.MethodGet)

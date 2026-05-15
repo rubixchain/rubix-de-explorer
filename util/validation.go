@@ -11,8 +11,8 @@ var (
 	// RBT: Numeric levels and numbers separated by underscores
 	rbtRegex = regexp.MustCompile(`^\d+_\d+(_\d+)*$`)
 
-	// FT: {Name}_{Index}_{CreatorDID}
-	ftRegex = regexp.MustCompile(`^[a-zA-Z0-9]+_\d+_bafy[abcdefghijklmnopqrstuvwxyz234567]{55}$`)
+	// FT: {Name}_{CreatorDID}_{Index}
+	ftRegex = regexp.MustCompile(`^[a-zA-Z0-9]+_bafy[abcdefghijklmnopqrstuvwxyz234567]{55}_\d+$`)
 
 	// NFT & Private SC: Must start with Qm, exactly 46 characters, Base58
 	ipfsRegex = regexp.MustCompile(`^Qm[1-9A-HJ-NP-Za-km-z]{44}$`)

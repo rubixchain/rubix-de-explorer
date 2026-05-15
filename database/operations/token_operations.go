@@ -32,42 +32,51 @@ var tokenTypeMap = map[string]int16{
 	"SC":  TokenTypeSC,
 }
 
-// UpdateTokenAndBalances atomically updates the token state and increments/decrements DID balances
-func UpdateTokenAndBalances(token *models.Token, prevOwner string) error {
-	return database.WriteDB.Transaction(func(tx *gorm.DB) error {
-		// 1. Upsert Token
-		if err := tx.Save(token).Error; err != nil {
+// getBalanceWeight returns the weight a token contributes to the balance based on its type and status.
+// Non-RBT assets use 1.0 (Count), RBT uses TokenValue.
+// Terminal or locked statuses (Burnt, Pledged, Orphaned) contribute 0 to the Free balance.
+func getBalanceWeight(typeID int16, status int16, value float64) float64 {
+	switch status {
+	case models.TokenStatus_Burnt, models.TokenStatus_BurntForFT, 
+	     models.TokenStatus_Pledged, models.TokenStatus_QuorumPledged,
+	     models.TokenStatus_Orphaned, models.TokenStatus_BeingDoubleSpent:
+		return 0
+	}
+
+	if typeID == TokenTypeRBT {
+		return value
+	}
+	return 1.0
+}
+
+func UpdateTokenAndBalances(tx *gorm.DB, token *models.Token) error {
+	// 1. Fetch previous state to calculate delta
+	var existing models.Token
+	prevOwner := ""
+	oldWeight := 0.0
+	if tx.Where("token_id = ?", token.TokenID).First(&existing).Error == nil {
+		prevOwner = existing.DID
+		oldWeight = getBalanceWeight(existing.TokenType, existing.TokenStatus, existing.TokenValue)
+	}
+	newWeight := getBalanceWeight(token.TokenType, token.TokenStatus, token.TokenValue)
+
+	// 2. Update Balances (Subtract Old, Add New)
+	if prevOwner != "" && prevOwner != "0" {
+		if err := updateBalances(tx, prevOwner, tokenTypeName(token.TokenType), "", "", -oldWeight, 0); err != nil {
 			return err
 		}
-
-		// 2. Update Balances
-		// Special Case: Smart Contracts (SC). Balance counts deployments/mints only.
-		if token.TokenType == TokenTypeSC {
-			if (prevOwner == "" || prevOwner == "0") && token.TokenStatus != models.TokenStatus_Burnt {
-				// If it's new (Mint/Deploy), increment for the owner
-				if token.DID != "" && token.DID != "0" {
-					if err := updateBalances(tx, token.DID, tokenTypeName(token.TokenType), "", "", 1, 0); err != nil {
-						return err
-					}
-				}
-			}
-			// SC Interaction (Execute) or Burn does not transfer balance for SCs.
-		} else if prevOwner != token.DID {
-			// Standard Logic: RBT, FT, NFT transfer ownership/balances
-			if prevOwner != "" && prevOwner != "0" {
-				if err := updateBalances(tx, prevOwner, tokenTypeName(token.TokenType), "", "", -1, 0); err != nil {
-					return err
-				}
-			}
-			if token.DID != "" && token.DID != "0" {
-				if err := updateBalances(tx, token.DID, tokenTypeName(token.TokenType), "", "", 1, 0); err != nil {
-					return err
-				}
-			}
+	}
+	if token.DID != "" && token.DID != "0" {
+		if err := updateBalances(tx, token.DID, tokenTypeName(token.TokenType), "", "", newWeight, 0); err != nil {
+			return err
 		}
+	}
 
-		return nil
-	})
+	// 3. Save the token
+	if err := tx.Save(token).Error; err != nil {
+		return err
+	}
+	return nil
 }
 
 // ProcessTransactionAssets orchestrates the DB updates for all assets in a transaction in a highly scalable bulk-oriented way.
@@ -138,33 +147,32 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 	}
 	balanceChanges := make(map[balanceKey]*balanceChange)
 
-	addBalanceChange := func(did string, token *models.Token, balanceDelta, pledgeDelta float64) {
+	addBalanceChange := func(did string, typeID int16, tokenID string, delta, pledgedDelta float64) {
 		if did == "" || did == "0" {
 			return
 		}
-		typeName := tokenTypeName(token.TokenType)
-		var val float64
-		if token.TokenType == TokenTypeRBT {
-			val = token.TokenValue
-		} else {
-			val = 1.0
-		}
-
+		typeName := tokenTypeName(typeID)
+		
 		key := balanceKey{DID: did, AssetType: typeName}
-		if token.TokenType == TokenTypeFT {
-			parts := strings.Split(token.TokenID, "_")
-			if len(parts) >= 3 {
+		if typeID == TokenTypeFT {
+			parts := strings.Split(tokenID, "_")
+			if len(parts) > 0 {
 				key.TokenName = parts[0]
-				key.CreatorDID = parts[len(parts)-1]
-			} else if len(parts) > 0 {
-				key.TokenName = parts[0]
+				// Intelligently find the DID part (it's the one starting with 'bafy')
+				for _, p := range parts {
+					if strings.HasPrefix(p, "bafy") && len(p) == 59 {
+						key.CreatorDID = p
+						break
+					}
+				}
 			}
 		}
 		if _, ok := balanceChanges[key]; !ok {
 			balanceChanges[key] = &balanceChange{}
 		}
-		balanceChanges[key].Balance = util.RoundToMaxDecimals(balanceChanges[key].Balance + (val * balanceDelta))
-		balanceChanges[key].PledgedBalance = util.RoundToMaxDecimals(balanceChanges[key].PledgedBalance + (val * pledgeDelta))
+		// deltas are now the actual values to add/subtract
+		balanceChanges[key].Balance = util.RoundToMaxDecimals(balanceChanges[key].Balance + delta)
+		balanceChanges[key].PledgedBalance = util.RoundToMaxDecimals(balanceChanges[key].PledgedBalance + pledgedDelta)
 	}
 
 	tokensToUpsert := make([]models.Token, 0)
@@ -197,9 +205,34 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 					TransactionID: txnID,
 					NeedsSync:     true,
 				}
-				if typeID == TokenTypeSC {
-					tokenToSave.DID = txn.Initiator
-					tokenToSave.DeployerDID = txn.Initiator
+				if typeID == TokenTypeSC || typeID == TokenTypeNFT {
+					// 1. Preserve existing DeployerDID if we have it
+					if exists {
+						tokenToSave.DeployerDID = existing.DeployerDID
+					}
+					// 2. If this is the mint/deploy, set the DeployerDID
+					if isNew {
+						tokenToSave.DeployerDID = txn.Initiator
+					}
+
+					// For deployments, if Owner is empty, the Initiator is the owner
+					if txn.Owner != "" {
+						tokenToSave.DID = txn.Owner
+					} else if isNew {
+						tokenToSave.DID = txn.Initiator
+					} else if exists {
+						tokenToSave.DID = existing.DID
+					}
+				} else if typeID == TokenTypeFT {
+					tokenToSave.DID = txn.Owner
+					// Extract Creator from FT TokenID
+					parts := strings.Split(info.TokenID, "_")
+					for _, p := range parts {
+						if strings.HasPrefix(p, "bafy") && len(p) == 59 {
+							tokenToSave.DeployerDID = p
+							break
+						}
+					}
 				} else {
 					tokenToSave.DID = txn.Owner
 				}
@@ -218,7 +251,10 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 							burnedSum += v
 						}
 					}
-					if typeID == TokenTypeFT {
+					// Use explicit TokenValue if provided (common for NFT/FT), otherwise fallback to burnedSum
+					if info.TokenValue > 0 {
+						tokenToSave.TokenValue = info.TokenValue
+					} else if typeID == TokenTypeFT {
 						ftCount := len(txn.Tokens.FT)
 						if ftCount > 0 {
 							tokenToSave.TokenValue = burnedSum / float64(ftCount)
@@ -271,6 +307,10 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 				if info.Data != "" {
 					tokenToSave.Data = info.Data
 				}
+				// Update value for mutable assets (NFT/SC)
+				if typeID != TokenTypeRBT && info.TokenValue > 0 {
+					tokenToSave.TokenValue = info.TokenValue
+				}
 				
 				inferredRole := models.TokenRole_Transfer
 				if typeID == TokenTypeSC {
@@ -302,14 +342,23 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 				Role:                  tokenToSave.LatestRole,
 			})
 
-			// Aggregate Balance Changes
+			// 2. Aggregate Balance Changes with deltas
+			oldWeight := 0.0
+			if !isNew {
+				oldWeight = getBalanceWeight(typeID, existing.TokenStatus, existing.TokenValue)
+			}
+			newWeight := getBalanceWeight(typeID, tokenToSave.TokenStatus, tokenToSave.TokenValue)
+
 			if typeID == TokenTypeSC {
 				if isNew && tokenToSave.DID != "" && tokenToSave.DID != "0" {
-					addBalanceChange(tokenToSave.DID, &tokenToSave, 1, 0)
+					addBalanceChange(tokenToSave.DID, typeID, info.TokenID, newWeight, 0)
 				}
-			} else if prevOwner != tokenToSave.DID {
-				addBalanceChange(prevOwner, &tokenToSave, -1, 0)
-				addBalanceChange(tokenToSave.DID, &tokenToSave, 1, 0)
+			} else {
+				// Standard Logic: Subtract OLD weight from previous owner, Add NEW weight to current
+				if !isNew && prevOwner != "" && prevOwner != "0" {
+					addBalanceChange(prevOwner, typeID, info.TokenID, -oldWeight, 0)
+				}
+				addBalanceChange(tokenToSave.DID, typeID, info.TokenID, newWeight, 0)
 			}
 		}
 		return nil
@@ -327,8 +376,9 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 	for _, q := range txn.Quorums {
 		for _, info := range q.Tokens {
 			if t, exists := existingTokens[info.TokenID]; exists {
+				oldStatus := t.TokenStatus
 				// Check if the token is already pledged (prevents double-counting pledge balance)
-				alreadyPledged := t.TokenStatus == models.TokenStatus_Pledged
+				alreadyPledged := oldStatus == models.TokenStatus_Pledged
 
 				t.LatestRole = models.TokenRole_Pledge
 				t.TransactionID = txnID
@@ -340,9 +390,17 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 					PreviousTransactionID: info.PreviousTransactionID,
 					Role:                  models.TokenRole_Pledge,
 				})
-				if q.Did != "" && t.TokenType != TokenTypeSC && !alreadyPledged {
+				if q.Did != "" && t.TokenType == TokenTypeRBT && !alreadyPledged {
 					// Only adjust balance when transitioning Free → Pledged (not re-pledge)
-					addBalanceChange(q.Did, &t, -1, 1)
+					// Subtract value from Free, Add to Pledged
+					oldWeight := getBalanceWeight(t.TokenType, oldStatus, t.TokenValue)
+					newWeight := 0.0 // Pledged tokens don't count in Free balance
+					
+					// RBT is the only one that populates the pledged_balance column
+					pledgedWeight := t.TokenValue
+					if pledgedWeight == 0 { pledgedWeight = 1.0 }
+
+					addBalanceChange(q.Did, t.TokenType, info.TokenID, newWeight-oldWeight, pledgedWeight)
 				}
 			}
 		}
@@ -351,6 +409,7 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 	// 6. Committed Tokens Processing (Commit or Burn)
 	for _, info := range txn.CommittedTokens {
 		if t, exists := existingTokens[info.TokenID]; exists {
+			oldStatus := t.TokenStatus
 			prevDID := t.DID
 			
 			if hasSCDeploy {
@@ -372,7 +431,10 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 			})
 			if prevDID != "" && t.TokenType != TokenTypeSC {
 				// Deduct from Regular balance (Burned/Committed tokens are no longer Free)
-				addBalanceChange(prevDID, &t, -1, 0)
+				oldWeight := getBalanceWeight(t.TokenType, oldStatus, t.TokenValue)
+				newWeight := getBalanceWeight(t.TokenType, t.TokenStatus, t.TokenValue) // Will be 0 for Burnt
+				
+				addBalanceChange(prevDID, t.TokenType, info.TokenID, newWeight-oldWeight, 0)
 			}
 		}
 	}
@@ -611,7 +673,6 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 		}
 	}
 
-
 	return nil
 }
 
@@ -676,41 +737,65 @@ func updateBalances(tx *gorm.DB, did, assetType, tokenName, creatorDID string, b
 
 
 // SyncAllBalances is a startup migration helper to populate both the balance and pledged_balance columns
-// for existing DIDs by dynamically calculating them from the Tokens table.
+// for all asset types by dynamically calculating them from the Tokens table.
 func SyncAllBalances(db *gorm.DB) error {
+	log.Println("[Sync] Starting Universal Balance Synchronization...")
+	
 	return db.Transaction(func(tx *gorm.DB) error {
-		// 1. Reset all balances to 0
-		if err := tx.Model(&models.DIDBalance{}).Where("asset_type = ?", "RBT").Updates(map[string]interface{}{
+		// 1. Reset ALL balances in DIDBalances table to 0
+		if err := tx.Model(&models.DIDBalance{}).Where("1 = 1").Updates(map[string]interface{}{
 			"balance": 0, 
 			"pledged_balance": 0,
 		}).Error; err != nil {
 			return err
 		}
 
-		// 2. Aggregate RBT tokens per DID
+		// 2. Aggregate ALL tokens per DID/AssetType/TokenName/CreatorDID
 		type balanceResult struct {
 			DID          string  `gorm:"column:did"`
+			AssetType    int16   `gorm:"column:token_type"`
+			TokenName    string  `gorm:"column:token_name"`
+			CreatorDID   string  `gorm:"column:creator_did"`
 			TotalFree    float64 `gorm:"column:total_free"`
 			TotalPledged float64 `gorm:"column:total_pledged"`
 		}
 		var results []balanceResult
+		
+		// Weight Logic in SQL:
+		// RBT/NFT: Sum of token_value (with 1.0 fallback for NFT if 0)
+		// FT/SC: Count of tokens (1.0 each)
 		err := tx.Raw(`
-			SELECT did, 
-			       SUM(CASE WHEN token_status IN (?, ?) THEN token_value ELSE 0 END) as total_free,
-			       SUM(CASE WHEN token_status IN (?, ?) THEN token_value ELSE 0 END) as total_pledged
+			SELECT 
+				did, 
+				token_type,
+				CASE WHEN token_type = 2 THEN SPLIT_PART(token_id, '_', 1) ELSE '' END as token_name,
+				CASE WHEN token_type = 2 THEN deployer_did ELSE '' END as creator_did,
+				SUM(CASE 
+					WHEN token_status IN (?, ?, ?, ?, ?, ?) THEN 
+						CASE 
+							WHEN token_type = 1 THEN token_value
+							ELSE 1.0 
+						END
+					ELSE 0 
+				END) as total_free,
+				SUM(CASE 
+					WHEN token_status IN (?, ?) AND token_type = 1 THEN token_value
+					ELSE 0 
+				END) as total_pledged
 			FROM "Tokens"
-			WHERE token_type = ? AND token_status IN (?, ?, ?, ?)
-			GROUP BY did
+			WHERE did IS NOT NULL AND did != '' AND did != '0'
+			GROUP BY did, token_type, token_name, creator_did
 		`, 
-			models.TokenStatus_Free, models.TokenStatus_Locked,
-			models.TokenStatus_Pledged, models.TokenStatus_QuorumPledged,
-			TokenTypeRBT, 
-			models.TokenStatus_Free, models.TokenStatus_Locked, 
+			models.TokenStatus_Free, models.TokenStatus_Locked, models.TokenStatus_Transferred, 
+			models.TokenStatus_Deployed, models.TokenStatus_Executed, models.TokenStatus_Fetched,
 			models.TokenStatus_Pledged, models.TokenStatus_QuorumPledged,
 		).Scan(&results).Error
+		
 		if err != nil {
 			return err
 		}
+
+		log.Printf("[Sync] Found %d unique balance buckets to synchronize", len(results))
 
 		// 3. Update or Create entries in DIDBalances table
 		for _, res := range results {
@@ -718,15 +803,23 @@ func SyncAllBalances(db *gorm.DB) error {
 				continue
 			}
 
+			typeName := tokenTypeName(res.AssetType)
+			
 			var balance models.DIDBalance
-			err := tx.Where("did = ? AND asset_type = ? AND token_name = ? AND creator_did = ?", res.DID, "RBT", "", "").First(&balance).Error
+			err := tx.Where("did = ? AND asset_type = ? AND token_name = ? AND creator_did = ?", 
+				res.DID, typeName, res.TokenName, res.CreatorDID).First(&balance).Error
+			
 			if err == gorm.ErrRecordNotFound {
-				// Create new record for DIDs that had no balance row
-				balance.DID = res.DID
-				balance.AssetType = "RBT"
-				balance.Balance = res.TotalFree
-				balance.PledgedBalance = res.TotalPledged
-				// Try to fetch peer_id/algo if possible
+				// Create new record
+				balance = models.DIDBalance{
+					DID:            res.DID,
+					AssetType:      typeName,
+					TokenName:      res.TokenName,
+					CreatorDID:     res.CreatorDID,
+					Balance:        res.TotalFree,
+					PledgedBalance: res.TotalPledged,
+				}
+				// Try to fetch peer_id/algo from any existing row for this DID
 				var meta models.DIDBalance
 				if tx.Where("did = ? AND (peer_id IS NOT NULL AND peer_id != '')", res.DID).
 					Select("peer_id, did_algo").First(&meta).Error == nil {
@@ -736,18 +829,23 @@ func SyncAllBalances(db *gorm.DB) error {
 				if err := tx.Create(&balance).Error; err != nil {
 					return err
 				}
-			} else if err != nil {
-				return err
-			} else {
+			} else if err == nil {
 				// Update existing
 				if err := tx.Model(&balance).Updates(map[string]interface{}{
-					"balance": res.TotalFree,
-					"pledged_balance": res.TotalPledged,
+					"balance": util.RoundToMaxDecimals(res.TotalFree),
+					"pledged_balance": util.RoundToMaxDecimals(res.TotalPledged),
 				}).Error; err != nil {
 					return err
 				}
+			} else {
+				return err
 			}
 		}
+
+		// 4. Cleanup: Remove rows that remained 0 and don't match any tokens (orphans)
+		tx.Where("balance = 0 AND pledged_balance = 0").Delete(&models.DIDBalance{})
+
+		log.Println("[Sync] Universal Balance Synchronization complete")
 		return nil
 	})
 }
@@ -787,12 +885,16 @@ func ProcessUnpledgeTokens(event *model.UnpledgeEvent) error {
 
 		log.Printf("[Unpledge] Processing %d pledged tokens (out of %d received)", len(pledgedTokens), len(tokenIDs))
 
-		// 2. Aggregate balance deltas per DID
+		// 2. Aggregate balance deltas per DID and AssetType
+		type balanceKey struct {
+			DID       string
+			AssetType int16
+		}
 		type balanceDelta struct {
 			FreeDelta   float64
 			PledgeDelta float64
 		}
-		didDeltas := make(map[string]*balanceDelta)
+		didDeltas := make(map[balanceKey]*balanceDelta)
 
 		tokenIDsToUpdate := make([]string, 0, len(pledgedTokens))
 		for _, t := range pledgedTokens {
@@ -802,17 +904,22 @@ func ProcessUnpledgeTokens(event *model.UnpledgeEvent) error {
 				continue
 			}
 
+			// Weight Logic: Non-RBT assets use 1.0 (Count)
 			val := t.TokenValue
 			if t.TokenType != TokenTypeRBT {
 				val = 1.0
+			} else if val == 0 {
+				val = 1.0
 			}
 
-			if _, ok := didDeltas[t.DID]; !ok {
-				didDeltas[t.DID] = &balanceDelta{}
+			key := balanceKey{DID: t.DID, AssetType: t.TokenType}
+			if _, ok := didDeltas[key]; !ok {
+				didDeltas[key] = &balanceDelta{}
 			}
-			didDeltas[t.DID].FreeDelta = util.RoundToMaxDecimals(didDeltas[t.DID].FreeDelta + val)
-			didDeltas[t.DID].PledgeDelta = util.RoundToMaxDecimals(didDeltas[t.DID].PledgeDelta - val)
+			didDeltas[key].FreeDelta = util.RoundToMaxDecimals(didDeltas[key].FreeDelta + val)
+			didDeltas[key].PledgeDelta = util.RoundToMaxDecimals(didDeltas[key].PledgeDelta - val)
 		}
+
 
 		// 3. Bulk update tokens: Pledged → Free, role → Unpledge
 		if err := tx.Model(&models.Token{}).
@@ -909,19 +1016,12 @@ func ProcessUnpledgeTokens(event *model.UnpledgeEvent) error {
 		}
 
 		// 6. Apply balance adjustments (increment free, decrement pledged)
-		// Sort keys to prevent Postgres deadlocks from concurrent non-deterministic locking order
-		sortedDIDs := make([]string, 0, len(didDeltas))
-		for did := range didDeltas {
-			sortedDIDs = append(sortedDIDs, did)
-		}
-		sort.Strings(sortedDIDs)
-
-		for _, did := range sortedDIDs {
-			delta := didDeltas[did]
+		for key, delta := range didDeltas {
 			if delta.FreeDelta == 0 && delta.PledgeDelta == 0 {
 				continue
 			}
-			if err := updateBalances(tx, did, "RBT", "", "", delta.FreeDelta, delta.PledgeDelta); err != nil {
+			typeName := tokenTypeName(key.AssetType)
+			if err := updateBalances(tx, key.DID, typeName, "", "", delta.FreeDelta, delta.PledgeDelta); err != nil {
 				return err
 			}
 		}
