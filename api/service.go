@@ -768,6 +768,100 @@ func GetFTListByFTName(ftName string, creatorDID string, limit, page int) ([]mod
 	return tokens, total, nil
 }
 
+// GetFTHoldersList returns DIDs ranked by total FT count, with a per-FT breakdown for each DID.
+// FT token_id format: <ftName>_<creatorDID>_<index>
+func GetFTHoldersList(limit, page int) ([]model.FTHolderInfo, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 10
+	}
+	offset := (page - 1) * limit
+
+	// 1. Total number of distinct DIDs holding any FT
+	var total int64
+	if err := database.ReadDB.Raw(`
+		SELECT COUNT(DISTINCT did) FROM "Tokens"
+		WHERE token_type = 2 AND did != '' AND did != '0'
+	`).Scan(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	// 2. Top DIDs by total FT count (paginated)
+	type didTotalRow struct {
+		DID          string `gorm:"column:did"`
+		TotalFTCount int64  `gorm:"column:total_ft_count"`
+	}
+	var didTotals []didTotalRow
+	if err := database.ReadDB.Raw(`
+		SELECT did, COUNT(*) AS total_ft_count
+		FROM "Tokens"
+		WHERE token_type = 2 AND did != '' AND did != '0'
+		GROUP BY did
+		ORDER BY total_ft_count DESC
+		LIMIT ? OFFSET ?
+	`, limit, offset).Scan(&didTotals).Error; err != nil {
+		return nil, 0, err
+	}
+
+	if len(didTotals) == 0 {
+		return []model.FTHolderInfo{}, total, nil
+	}
+
+	// 3. Per-FT breakdown for those DIDs only
+	dids := make([]string, len(didTotals))
+	for i, dt := range didTotals {
+		dids[i] = dt.DID
+	}
+
+	type breakdownRow struct {
+		DID        string  `gorm:"column:did"`
+		FTName     string  `gorm:"column:ft_name"`
+		CreatorDID string  `gorm:"column:creator_did"`
+		Count      float64 `gorm:"column:count"`
+	}
+	var breakdowns []breakdownRow
+	if err := database.ReadDB.Raw(`
+		SELECT
+			did,
+			split_part(token_id, '_', 1) AS ft_name,
+			split_part(token_id, '_', 2) AS creator_did,
+			COUNT(*) AS count
+		FROM "Tokens"
+		WHERE token_type = 2 AND did IN ?
+		GROUP BY did, ft_name, creator_did
+		ORDER BY count DESC
+	`, dids).Scan(&breakdowns).Error; err != nil {
+		return nil, 0, err
+	}
+
+	// 4. Merge breakdowns under each DID
+	holdingsByDID := make(map[string][]model.FTHolding)
+	for _, b := range breakdowns {
+		holdingsByDID[b.DID] = append(holdingsByDID[b.DID], model.FTHolding{
+			FTName:     b.FTName,
+			CreatorDID: b.CreatorDID,
+			Count:      b.Count,
+		})
+	}
+
+	result := make([]model.FTHolderInfo, len(didTotals))
+	for i, dt := range didTotals {
+		holdings := holdingsByDID[dt.DID]
+		if holdings == nil {
+			holdings = []model.FTHolding{}
+		}
+		result[i] = model.FTHolderInfo{
+			DID:          dt.DID,
+			TotalFTCount: dt.TotalFTCount,
+			Holdings:     holdings,
+		}
+	}
+
+	return result, total, nil
+}
+
 func GetSCList(limit, page int) ([]models.Token, int64, error) {
 	offset := (page - 1) * limit
 

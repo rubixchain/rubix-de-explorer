@@ -112,6 +112,18 @@ type FTGroup struct {
 	FTValue    float64 `json:"ftValue" gorm:"column:ft_value"`
 }
 
+type FTHolding struct {
+	FTName     string  `json:"ft_name" gorm:"column:ft_name"`
+	CreatorDID string  `json:"creator_did" gorm:"column:creator_did"`
+	Count      float64 `json:"count" gorm:"column:count"`
+}
+
+type FTHolderInfo struct {
+	DID          string      `json:"did"`
+	TotalFTCount int64       `json:"total_ft_count"`
+	Holdings     []FTHolding `json:"holdings"`
+}
+
 type FTSuggestion struct {
 	FTName     string `json:"ft_name" gorm:"column:ft_name"`
 	CreatorDID string `json:"creator_did" gorm:"column:creator_did"`
