@@ -193,6 +193,18 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 	prepareTokens := func(tokenInfos []*model.TokenInfo, tokenType string) error {
 		typeID := tokenTypeMap[tokenType]
 		for _, info := range tokenInfos {
+			// Restrict duplicate mint transactions for the same token
+			if info.PreviousTransactionID == "" {
+				var count int64
+				if err := tx.Model(&models.TokenChain{}).
+					Where("token_id = ? AND (previous_transaction_id = ? OR role = ? OR role = ?) AND transaction_id != ?",
+						info.TokenID, "", models.TokenRole_Mint, models.TokenRole_Deploy, txnID).
+					Count(&count).Error; err == nil && count > 0 {
+					log.Printf("[Asset Processor] Restricting duplicate mint transaction info for token %s (already minted in another transaction)", info.TokenID)
+					continue
+				}
+			}
+
 			existing, exists := existingTokens[info.TokenID]
 			isNew := !exists
 			var prevOwner string
@@ -235,6 +247,9 @@ func ProcessTransactionAssets(db *gorm.DB, txn *model.TransactionInfo, txnID str
 					}
 				} else {
 					tokenToSave.DID = txn.Owner
+				}
+				if tokenToSave.DID == "" {
+					tokenToSave.DID = txn.Initiator
 				}
 				if info.Data != "" {
 					tokenToSave.Data = info.Data
@@ -705,10 +720,20 @@ func updateBalances(tx *gorm.DB, did, assetType, tokenName, creatorDID string, b
 		didAlgo = meta.DIDAlgo
 	}
 
+	var balanceExpr interface{}
+	var pledgedExpr interface{}
+	if tx.Dialector.Name() == "sqlite" {
+		balanceExpr = gorm.Expr("ROUND(MAX(0, \"DIDBalances\".balance + ?), 3)", balanceDelta)
+		pledgedExpr = gorm.Expr("ROUND(MAX(0, \"DIDBalances\".pledged_balance + ?), 3)", pledgedDelta)
+	} else {
+		balanceExpr = gorm.Expr("ROUND(GREATEST(0, \"DIDBalances\".balance + ?), 3)", balanceDelta)
+		pledgedExpr = gorm.Expr("ROUND(GREATEST(0, \"DIDBalances\".pledged_balance + ?), 3)", pledgedDelta)
+	}
+
 	// Atomic UPSERT logic:
 	// 1. Try to INSERT the new balance record.
 	// 2. IF a conflict occurs (DID+AssetType+TokenName+CreatorDID already exists),
-	//    THEN update the existing balance using GREATEST(0, balance + delta) to prevent negative values.
+	//    THEN update the existing balance using GREATEST/MAX to prevent negative values.
 	return tx.Clauses(clause.OnConflict{
 		Columns: []clause.Column{
 			{Name: "did"},
@@ -717,8 +742,8 @@ func updateBalances(tx *gorm.DB, did, assetType, tokenName, creatorDID string, b
 			{Name: "creator_did"},
 		},
 		DoUpdates: clause.Assignments(map[string]interface{}{
-			"balance":         gorm.Expr("ROUND(GREATEST(0, \"DIDBalances\".balance + ?), 3)", balanceDelta),
-			"pledged_balance": gorm.Expr("ROUND(GREATEST(0, \"DIDBalances\".pledged_balance + ?), 3)", pledgedDelta),
+			"balance":         balanceExpr,
+			"pledged_balance": pledgedExpr,
 			"peer_id":         gorm.Expr("COALESCE(\"DIDBalances\".peer_id, EXCLUDED.peer_id)"),
 			"did_algo":        gorm.Expr("COALESCE(\"DIDBalances\".did_algo, EXCLUDED.did_algo)"),
 		}),
