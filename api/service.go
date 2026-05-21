@@ -301,6 +301,61 @@ func GetDAGTransactions() (model.DAGResponse, error) {
 	return model.DAGResponse{Transactions: txns}, nil
 }
 
+// notMintFilter excludes RBT-only mint transactions where initiator == owner
+// and the tokens JSON contains only RBT entries (no FT/NFT/SC).
+const notMintFilter = `
+	AND NOT (
+		initiator = owner
+		AND (jsonb_typeof(tokens->'ft')            != 'array' OR jsonb_array_length(tokens->'ft')            = 0)
+		AND (jsonb_typeof(tokens->'nft')           != 'array' OR jsonb_array_length(tokens->'nft')           = 0)
+		AND (jsonb_typeof(tokens->'smartContract') != 'array' OR jsonb_array_length(tokens->'smartContract') = 0)
+		AND jsonb_typeof(tokens->'rbt') = 'array'
+		AND jsonb_array_length(tokens->'rbt') > 0
+	)`
+
+// GetTransactionInfoListNoMint mirrors GetTransactionInfoList but hides mint transactions.
+func GetTransactionInfoListNoMint(limit, page int) ([]models.TransactionInfo, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 10
+	}
+	offset := (page - 1) * limit
+
+	var total int64
+	countQuery := `
+		SELECT COUNT(*) FROM (
+			SELECT transaction_id FROM "TransactionInfo" WHERE amount > 0` + notMintFilter + `
+			UNION ALL
+			SELECT transaction_id FROM "FailedTransactionInfo" WHERE amount > 0` + notMintFilter + `
+		) AS combined
+	`
+	if err := database.ReadDB.Raw(countQuery).Scan(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var result []models.TransactionInfo
+	dataQuery := `
+		SELECT * FROM (
+			SELECT transaction_id, initiator, owner, epoch, network, tokens, committed_tokens, quorums, memo, status, amount, created_at, updated_at FROM "TransactionInfo" WHERE amount > 0` + notMintFilter + `
+			UNION ALL
+			SELECT transaction_id, initiator, owner, epoch, network, tokens, committed_tokens, quorums, memo, status, amount, created_at, updated_at FROM "FailedTransactionInfo" WHERE amount > 0` + notMintFilter + `
+		) AS combined
+		ORDER BY created_at DESC
+		LIMIT ? OFFSET ?
+	`
+	if err := database.ReadDB.Raw(dataQuery, limit, offset).Scan(&result).Error; err != nil {
+		return nil, 0, err
+	}
+
+	if result == nil {
+		result = make([]models.TransactionInfo, 0)
+	}
+
+	return result, total, nil
+}
+
 func GetTransactionInfoList(limit, page int) ([]models.TransactionInfo, int64, error) {
 	if page < 1 {
 		page = 1

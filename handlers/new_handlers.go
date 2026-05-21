@@ -130,6 +130,22 @@ func GetLatestTransactionsListHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(model.NewPaginated(data, total, page, limit))
 }
 
+// HideMintTxnsHandler returns latest transactions excluding RBT mint transactions
+// (where initiator == owner and only RBT tokens are involved).
+func HideMintTxnsHandler(w http.ResponseWriter, r *http.Request) {
+	limit, page := getPagination(r)
+	data, total, err := api.GetTransactionInfoListNoMint(limit, page)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if data == nil {
+		data = []models.TransactionInfo{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(model.NewPaginated(data, total, page, limit))
+}
+
 // GetDIDHoldersListHandler returns DIDs with the most RBT balances
 func GetDIDHoldersListHandler(w http.ResponseWriter, r *http.Request) {
 	limit, page := getPagination(r)
