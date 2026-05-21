@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -119,29 +118,22 @@ type RBTSupplyStats struct {
 	TVL               float64 `json:"tvl"`
 }
 
-type kpiResponse struct {
-	Data struct {
-		RBTPrice string `json:"rbtPrice"`
-	} `json:"data"`
-}
-
 func fetchRBTPrice() (float64, error) {
-	resp, err := http.Get("https://rexplorerapi.azurewebsites.net/api/Analytics/GetKPIDetails")
+	resp, err := http.Get("https://api.coingecko.com/api/v3/simple/price?ids=rubix&vs_currencies=usd")
 	if err != nil {
 		return 0, err
 	}
 	defer resp.Body.Close()
 
-	var kpi kpiResponse
-	if err := json.NewDecoder(resp.Body).Decode(&kpi); err != nil {
+	// CoinGecko response: {"rubix":{"usd":98.84}}
+	var body map[string]map[string]float64
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		return 0, err
 	}
 
-	// rbtPrice comes as "$123.27" — strip the leading "$" before parsing
-	priceStr := strings.TrimPrefix(strings.TrimSpace(kpi.Data.RBTPrice), "$")
-	price, err := strconv.ParseFloat(priceStr, 64)
-	if err != nil {
-		return 0, err
+	price, ok := body["rubix"]["usd"]
+	if !ok {
+		return 0, fmt.Errorf("rubix/usd price missing from CoinGecko response")
 	}
 	return price, nil
 }
