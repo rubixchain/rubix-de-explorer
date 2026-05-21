@@ -45,6 +45,7 @@ func NewRouter() *mux.Router {
 	r.HandleFunc("/api/get-sc-count", handlers.GetSCsCountHandler).Methods(http.MethodGet)
 	r.HandleFunc("/api/get-txn-count", handlers.GetTxnsCountHandler).Methods(http.MethodGet)
 	r.HandleFunc("/api/get-did-count", handlers.GetDIDCountHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/get-rbt-supply-stats", handlers.GetRBTSupplyStatsHandler).Methods(http.MethodGet)
 
 	// Latest transactions
 	r.HandleFunc("/api/get-latest-transactions", handlers.GetLatestTransactionsListHandler).Methods(http.MethodGet)

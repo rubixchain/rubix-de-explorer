@@ -111,6 +111,18 @@ func GetDIDCountHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+// GetRBTSupplyStatsHandler returns circulating/total supply, FT/NFT/SC counts,
+// the live RBT price (from CoinGecko), and TVL.
+func GetRBTSupplyStatsHandler(w http.ResponseWriter, r *http.Request) {
+	stats, err := api.GetRBTSupplyStats()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
+}
+
 // ==========================================
 //   3. Lists and Holders Handlers
 // ==========================================
