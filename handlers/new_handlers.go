@@ -168,6 +168,22 @@ func GetLatestTransactionsHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(model.NewPaginated(data, total, page, limit))
 }
 
+// HideMintTxnsHandler returns the same shape as GetLatestTransactionsHandler but
+// excludes RBT-only mint transactions (initiator == owner with only RBT tokens).
+func HideMintTxnsHandler(w http.ResponseWriter, r *http.Request) {
+	limit, page := getPagination(r)
+	data, total, err := api.GetTransactionSummaryListNoMint(limit, page)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if data == nil {
+		data = []models.TransactionSummary{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(model.NewPaginated(data, total, page, limit))
+}
+
 // GetCurrentlyPledgedTransactionsHandler returns a list of transactions that currently have pledged tokens
 func GetCurrentlyPledgedTransactionsHandler(w http.ResponseWriter, r *http.Request) {
 	limit, page := getPagination(r)

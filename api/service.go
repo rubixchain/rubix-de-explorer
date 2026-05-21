@@ -541,6 +541,65 @@ func GetTransactionInfoList(limit, page int) ([]models.TransactionInfo, int64, e
 	return result, total, nil
 }
 
+// notMintFilter excludes RBT-only mint transactions where initiator == owner and
+// the tokens JSON contains only RBT entries (no FT/NFT/SC).
+const notMintFilter = `
+	AND NOT (
+		initiator = owner
+		AND (jsonb_typeof(tokens->'ft')            != 'array' OR jsonb_array_length(tokens->'ft')            = 0)
+		AND (jsonb_typeof(tokens->'nft')           != 'array' OR jsonb_array_length(tokens->'nft')           = 0)
+		AND (jsonb_typeof(tokens->'smartContract') != 'array' OR jsonb_array_length(tokens->'smartContract') = 0)
+		AND jsonb_typeof(tokens->'rbt') = 'array'
+		AND jsonb_array_length(tokens->'rbt') > 0
+	)`
+
+// GetTransactionSummaryListNoMint mirrors GetTransactionSummaryList but hides mint transactions.
+func GetTransactionSummaryListNoMint(limit, page int) ([]models.TransactionSummary, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 10
+	}
+	offset := (page - 1) * limit
+
+	var total int64
+	countQuery := `
+		SELECT SUM(c) FROM (
+			SELECT COUNT(*) as c FROM "TransactionInfo" WHERE amount > 0` + notMintFilter + `
+			UNION ALL
+			SELECT COUNT(*) as c FROM "FailedTransactionInfo" WHERE amount > 0` + notMintFilter + `
+		) AS combined
+	`
+	if err := database.ReadDB.Raw(countQuery).Scan(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var result []models.TransactionSummary
+	dataQuery := `
+		SELECT transaction_id, initiator,
+			COALESCE(NULLIF(owner, ''), tokens->'rbt'->0->>'tokenId', tokens->'ft'->0->>'tokenId', tokens->'nft'->0->>'tokenId', tokens->'smartContract'->0->>'tokenId') AS owner,
+			epoch, network, status, amount, created_at
+		FROM (
+			(SELECT transaction_id, initiator, owner, tokens, epoch, network, status, amount, created_at FROM "TransactionInfo" WHERE amount > 0` + notMintFilter + ` ORDER BY created_at DESC LIMIT ?)
+			UNION ALL
+			(SELECT transaction_id, initiator, owner, tokens, epoch, network, status, amount, created_at FROM "FailedTransactionInfo" WHERE amount > 0` + notMintFilter + ` ORDER BY created_at DESC LIMIT ?)
+		) AS combined
+		ORDER BY created_at DESC
+		LIMIT ? OFFSET ?
+	`
+	subLimit := limit + offset
+	if err := database.ReadDB.Raw(dataQuery, subLimit, subLimit, limit, offset).Scan(&result).Error; err != nil {
+		return nil, 0, err
+	}
+
+	if result == nil {
+		result = make([]models.TransactionSummary, 0)
+	}
+
+	return result, total, nil
+}
+
 // GetTransactionSummaryList returns a lightweight list of transactions (no token details)
 func GetTransactionSummaryList(limit, page int) ([]models.TransactionSummary, int64, error) {
 	if page < 1 {
