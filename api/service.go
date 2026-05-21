@@ -6,6 +6,7 @@ import (
 	"explorer-server/database/models"
 	"explorer-server/model"
 	"fmt"
+	"net/http"
 	"strings"
 )
 
@@ -100,6 +101,77 @@ func GetDIDCount() (int64, error) {
 		return 0, err
 	}
 	return count, nil
+}
+
+type RBTSupplyStats struct {
+	CirculatingSupply float64 `json:"circulating_supply"`
+	TotalSupply       int64   `json:"total_supply"`
+	FTCount           int64   `json:"ft_count"`
+	NFTCount          int64   `json:"nft_count"`
+	SCCount           int64   `json:"sc_count"`
+	RBTPrice          float64 `json:"rbt_price"`
+	TVL               float64 `json:"tvl"`
+}
+
+func fetchRBTPrice() (float64, error) {
+	resp, err := http.Get("https://api.coingecko.com/api/v3/simple/price?ids=rubix&vs_currencies=usd")
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	// CoinGecko response: {"rubix":{"usd":98.84}}
+	var body map[string]map[string]float64
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return 0, err
+	}
+
+	price, ok := body["rubix"]["usd"]
+	if !ok {
+		return 0, fmt.Errorf("rubix/usd price missing from CoinGecko response")
+	}
+	return price, nil
+}
+
+func GetRBTSupplyStats() (RBTSupplyStats, error) {
+	var stats RBTSupplyStats
+
+	// Circulating supply = sum of all RBT balances held by DIDs
+	if err := database.ReadDB.Table("DIDBalances").
+		Where("asset_type = ?", "RBT").
+		Select("COALESCE(SUM(balance), 0)").
+		Scan(&stats.CirculatingSupply).Error; err != nil {
+		return stats, err
+	}
+
+	// Total supply = count of RBT mint transactions (RBT tokens with no previousTransactionID), each worth 1 RBT
+	if err := database.ReadDB.Raw(`
+		SELECT COUNT(*) FROM "Tokens"
+		WHERE token_type = 1
+		  AND token_id ~ '^[^_]+_[^_]+$'
+	`).Scan(&stats.TotalSupply).Error; err != nil {
+		return stats, err
+	}
+
+	// FT, NFT, SC counts from the Tokens table by token_type
+	if err := database.ReadDB.Model(&models.Token{}).Where("token_type = ?", 2).Count(&stats.FTCount).Error; err != nil {
+		return stats, err
+	}
+	if err := database.ReadDB.Model(&models.Token{}).Where("token_type = ?", 3).Count(&stats.NFTCount).Error; err != nil {
+		return stats, err
+	}
+	if err := database.ReadDB.Model(&models.Token{}).Where("token_type = ?", 4).Count(&stats.SCCount).Error; err != nil {
+		return stats, err
+	}
+
+	// Price from external API; TVL = (total_supply - circulating_supply) * price
+	price, err := fetchRBTPrice()
+	if err == nil {
+		stats.RBTPrice = price
+		stats.TVL = float64(stats.TotalSupply-int64(stats.CirculatingSupply)) * price
+	}
+
+	return stats, nil
 }
 
 // -------------------------------------------------------------------
