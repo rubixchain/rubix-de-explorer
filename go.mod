@@ -8,6 +8,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/rs/cors v1.11.1
 	gorm.io/driver/postgres v1.6.0
+	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.0
 )
 
@@ -48,4 +49,7 @@ require (
 	lukechampine.com/blake3 v1.1.7 // indirect
 )
 
-require github.com/stretchr/testify v1.9.0 // indirect
+require (
+	github.com/mattn/go-sqlite3 v1.14.22 // indirect
+	github.com/stretchr/testify v1.9.0 // indirect
+)

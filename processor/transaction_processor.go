@@ -1,12 +1,14 @@
 package processor
 
 import (
+	"fmt"
+	"log"
+
 	"explorer-server/database"
 	"explorer-server/database/models"
 	"explorer-server/database/operations"
 	"explorer-server/model"
 	"explorer-server/util"
-	"log"
 
 	"gorm.io/gorm"
 )
@@ -14,42 +16,65 @@ import (
 // HandleIncomingTxn orchestrates the unmarshaling, validation, and enqueuing of a transaction
 func HandleIncomingTxn(newEvent *model.EventTransaction) {
 	if newEvent.Transaction == nil {
-		log.Printf("Warning: Received transaction with nil info, skipping")
+		if txnID := getEventTxnID(newEvent); txnID != "" {
+			_ = operations.SaveEventTransaction(nil, txnID, false, "missing transaction payload")
+			_ = operations.SaveFailedTransactionReason(nil, txnID, "missing transaction payload")
+			log.Printf("Warning: Received event with nil transaction, stored transaction %s as failed", txnID)
+		} else {
+			log.Printf("Warning: Received event with nil transaction and no transaction_id, skipping")
+		}
 		return
 	}
 
 	// 1. Format Validation
-	if !ValidateTransactionFormat(newEvent) {
-		return
+	if ok, reason := ValidateTransactionFormatWithReason(newEvent); !ok {
+		newEvent.Status = false
+		newEvent.Message = reason
 	}
 
 	// 2. Enqueue for processing
 	if GlobalWorkerPool != nil {
 		GlobalWorkerPool.EnqueueTransaction(newEvent)
 	} else {
-		log.Printf("Warning: GlobalWorkerPool not initialized, dropping transaction %s", newEvent.Transaction.ID)
+		txnID := getEventTxnID(newEvent)
+		_ = operations.SaveEventTransaction(nil, txnID, false, "worker pool not initialized")
+		_ = operations.SaveTransaction(nil, &models.Transactions{ID: txnID, Info: newEvent.Transaction.Info, Signature: newEvent.Transaction.Signature})
+		_ = operations.SaveFailedTransactionReason(nil, txnID, "worker pool not initialized")
+		log.Printf("Warning: GlobalWorkerPool not initialized, storing transaction %s as failed", txnID)
 	}
+}
+
+func getEventTxnID(newEvent *model.EventTransaction) string {
+	if newEvent.Transaction != nil && newEvent.Transaction.ID != "" {
+		return newEvent.Transaction.ID
+	}
+	return newEvent.TransactionID
 }
 
 // ValidateTransactionFormat checks the DIDs and TokenIDs against Rubix format rules
 func ValidateTransactionFormat(newEvent *model.EventTransaction) bool {
+	ok, _ := ValidateTransactionFormatWithReason(newEvent)
+	return ok
+}
+
+func ValidateTransactionFormatWithReason(newEvent *model.EventTransaction) (bool, string) {
 	info, err := newEvent.Transaction.ParseInfo()
 	if err != nil {
 		log.Printf("Warning: Failed to parse transaction info for validation: %v", err)
-		return false
+		return false, fmt.Sprintf("failed to parse transaction info: %v", err)
 	}
 	if info == nil {
-		return true // No info to validate
+		return true, "" // No info to validate
 	}
 
 	// DID Validation
 	if info.Initiator != "" && !util.IsValidDID(info.Initiator) {
 		log.Printf("ID-FORMAT-ERR: Invalid Initiator DID format: %s", info.Initiator)
-		return false
+		return false, fmt.Sprintf("invalid initiator DID format: %s", info.Initiator)
 	}
 	if info.Owner != "" && !util.IsValidDID(info.Owner) {
 		log.Printf("ID-FORMAT-ERR: Invalid Owner DID format: %s", info.Owner)
-		return false
+		return false, fmt.Sprintf("invalid owner DID format: %s", info.Owner)
 	}
 
 	// TokenID Validation
@@ -57,25 +82,25 @@ func ValidateTransactionFormat(newEvent *model.EventTransaction) bool {
 		for _, t := range info.Tokens.RBT {
 			if !util.IsValidRBT(t.TokenID) {
 				log.Printf("ID-FORMAT-ERR: Invalid RBT TokenID format: %s", t.TokenID)
-				return false
+				return false, fmt.Sprintf("invalid RBT token ID format: %s", t.TokenID)
 			}
 		}
 		for _, t := range info.Tokens.FT {
 			if !util.IsValidFT(t.TokenID) {
 				log.Printf("ID-FORMAT-ERR: Invalid FT TokenID format: %s", t.TokenID)
-				return false
+				return false, fmt.Sprintf("invalid FT token ID format: %s", t.TokenID)
 			}
 		}
 		for _, t := range info.Tokens.NFT {
 			if !util.IsValidNFT(t.TokenID) {
 				log.Printf("ID-FORMAT-ERR: Invalid NFT TokenID format: %s", t.TokenID)
-				return false
+				return false, fmt.Sprintf("invalid NFT token ID format: %s", t.TokenID)
 			}
 		}
 		for _, t := range info.Tokens.SmartContract {
 			if !util.IsValidSC(t.TokenID) {
 				log.Printf("ID-FORMAT-ERR: Invalid SC TokenID format: %s", t.TokenID)
-				return false
+				return false, fmt.Sprintf("invalid smart contract token ID format: %s", t.TokenID)
 			}
 		}
 	}
@@ -84,13 +109,13 @@ func ValidateTransactionFormat(newEvent *model.EventTransaction) bool {
 	for _, q := range info.Quorums {
 		if !util.IsValidDID(q.Did) {
 			log.Printf("ID-FORMAT-ERR: Invalid Quorum DID format: %s", q.Did)
-			return false
+			return false, fmt.Sprintf("invalid quorum DID format: %s", q.Did)
 		}
 		if q.Tokens != nil {
 			for _, t := range q.Tokens {
 				if !util.IsValidRBT(t.TokenID) {
 					log.Printf("ID-FORMAT-ERR: Invalid Quorum RBT TokenID format: %s", t.TokenID)
-					return false
+					return false, fmt.Sprintf("invalid quorum RBT token ID format: %s", t.TokenID)
 				}
 			}
 		}
@@ -102,7 +127,7 @@ func ValidateTransactionFormat(newEvent *model.EventTransaction) bool {
 		for _, q := range sig.Quorums {
 			if !util.IsValidDID(q.Did) {
 				log.Printf("ID-FORMAT-ERR: Invalid Quorum Signature DID format: %s", q.Did)
-				return false
+				return false, fmt.Sprintf("invalid quorum signature DID format: %s", q.Did)
 			}
 		}
 	}
@@ -111,28 +136,21 @@ func ValidateTransactionFormat(newEvent *model.EventTransaction) bool {
 	for _, t := range info.CommittedTokens {
 		if !util.IsValidRBT(t.TokenID) {
 			log.Printf("ID-FORMAT-ERR: Invalid Committed RBT TokenID format: %s", t.TokenID)
-			return false
+			return false, fmt.Sprintf("invalid committed RBT token ID format: %s", t.TokenID)
 		}
 	}
 
-	return true
+	return true, ""
 }
 
 // ProcessDBTransaction handles the actual logic of logging/inserting to DB
 // Called by workers in the DynamicWorkerPool
 func ProcessDBTransaction(newEvent *model.EventTransaction, workerID int) {
-	txnID := newEvent.Transaction.ID
+	txnID := getEventTxnID(newEvent)
 
 	// 1. Save EventTransaction (captures consensus result)
 	if err := operations.SaveEventTransaction(nil, txnID, newEvent.Status, newEvent.Message); err != nil {
 		log.Printf("[Worker %d] ERROR: Transaction %s - Failed to save event: %v", workerID, txnID, err)
-	}
-
-	// Parse Info
-	txnInfo, err := newEvent.Transaction.ParseInfo()
-	if err != nil || txnInfo == nil {
-		log.Printf("[Worker %d] ERROR: Transaction %s - Failed to parse info: %v", workerID, txnID, err)
-		return
 	}
 
 	// 2. Save Raw Transaction
@@ -140,8 +158,22 @@ func ProcessDBTransaction(newEvent *model.EventTransaction, workerID int) {
 		log.Printf("[Worker %d] ERROR: Transaction %s - Failed to save raw txn: %v", workerID, txnID, err)
 	}
 
+	// Parse Info
+	txnInfo, err := newEvent.Transaction.ParseInfo()
+	if err != nil || txnInfo == nil {
+		reason := newEvent.Message
+		if reason == "" {
+			reason = fmt.Sprintf("failed to parse transaction info: %v", err)
+		}
+		if err := operations.SaveFailedTransactionReason(nil, txnID, reason); err != nil {
+			log.Printf("[Worker %d] ERROR: Transaction %s - Failed to save failed details: %v", workerID, txnID, err)
+		}
+		log.Printf("[Worker %d] ERROR: Transaction %s - Failed to parse info: %v", workerID, txnID, err)
+		return
+	}
+
 	// 3. Save Flattened Details
-	if err := operations.SaveTransactionDetails(nil, txnID, txnInfo, newEvent.Status); err != nil {
+	if err := operations.SaveTransactionDetails(nil, txnID, txnInfo, newEvent.Status, newEvent.Message); err != nil {
 		log.Printf("[Worker %d] ERROR: Transaction %s - Failed to save details: %v", workerID, txnID, err)
 	}
 

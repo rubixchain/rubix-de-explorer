@@ -37,9 +37,29 @@ CREATE TABLE IF NOT EXISTS "TransactionInfo" (
     "updated_at" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS "FailedTransactionInfo" (
+    "transaction_id" TEXT PRIMARY KEY,
+    "initiator" TEXT,
+    "owner" TEXT,
+    "epoch" INTEGER,
+    "network" TEXT,
+    "tokens" JSONB,
+    "committed_tokens" JSONB,
+    "quorums" JSONB,
+    "memo" TEXT,
+    "status" BOOLEAN DEFAULT FALSE,
+    "amount" DOUBLE PRECISION DEFAULT 0,
+    "failure_reason" TEXT,
+    "created_at" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_txn_info_initiator ON "TransactionInfo"(initiator);
 CREATE INDEX IF NOT EXISTS idx_txn_info_owner ON "TransactionInfo"(owner);
 CREATE INDEX IF NOT EXISTS idx_txn_info_epoch ON "TransactionInfo"(epoch DESC);
+CREATE INDEX IF NOT EXISTS idx_failed_txn_info_initiator ON "FailedTransactionInfo"(initiator);
+CREATE INDEX IF NOT EXISTS idx_failed_txn_info_owner ON "FailedTransactionInfo"(owner);
+CREATE INDEX IF NOT EXISTS idx_failed_txn_info_epoch ON "FailedTransactionInfo"(epoch DESC);
 
 -- 4. Tokens: Unified state for RBT, FT, NFT, and SC
 CREATE TABLE IF NOT EXISTS "Tokens" (

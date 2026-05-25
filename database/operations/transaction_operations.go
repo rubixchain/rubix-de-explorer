@@ -34,7 +34,7 @@ func SaveEventTransaction(db *gorm.DB, txnID string, status bool, message string
 
 // SaveTransactionDetails saves the flattened TransactionInfo fields for easy querying.
 // If status is false, it saves to FailedTransactionInfo table.
-func SaveTransactionDetails(db *gorm.DB, txnID string, info *model.TransactionInfo, status bool) error {
+func SaveTransactionDetails(db *gorm.DB, txnID string, info *model.TransactionInfo, status bool, failureReason ...string) error {
 	if db == nil {
 		db = database.WriteDB
 	}
@@ -104,6 +104,10 @@ func SaveTransactionDetails(db *gorm.DB, txnID string, info *model.TransactionIn
 		}
 		return db.Clauses(clause.OnConflict{DoNothing: true}).Create(details).Error
 	} else {
+		reason := ""
+		if len(failureReason) > 0 {
+			reason = failureReason[0]
+		}
 		details := &models.FailedTransactionInfo{
 			TransactionID:   txnID,
 			Initiator:       info.Initiator,
@@ -116,7 +120,26 @@ func SaveTransactionDetails(db *gorm.DB, txnID string, info *model.TransactionIn
 			Memo:            info.Memo,
 			Status:          false,
 			Amount:          finalAmount,
+			FailureReason:   reason,
 		}
 		return db.Clauses(clause.OnConflict{DoNothing: true}).Create(details).Error
 	}
+}
+
+func SaveFailedTransactionReason(db *gorm.DB, txnID, reason string) error {
+	if db == nil {
+		db = database.WriteDB
+	}
+	details := &models.FailedTransactionInfo{
+		TransactionID: txnID,
+		Status:        false,
+		FailureReason: reason,
+	}
+	return db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "transaction_id"}},
+		DoUpdates: clause.Assignments(map[string]interface{}{
+			"failure_reason": reason,
+			"status":         false,
+		}),
+	}).Create(details).Error
 }
