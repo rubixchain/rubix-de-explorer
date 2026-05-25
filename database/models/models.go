@@ -75,6 +75,7 @@ type FailedTransactionInfo struct {
 	Memo            string          `json:"memo" gorm:"column:memo"`
 	Status          bool            `json:"status" gorm:"column:status;index"`
 	Amount          float64         `json:"amount" gorm:"column:amount"`
+	FailureReason   string          `json:"failure_reason" gorm:"column:failure_reason"`
 	CreatedAt       time.Time       `json:"created_at" gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt       time.Time       `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
 }
