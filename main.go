@@ -21,6 +21,7 @@ import (
 	"explorer-server/processor"
 	"explorer-server/pubsub"
 	"explorer-server/router"
+	tokensync "explorer-server/sync"
 	"explorer-server/util"
 
 	"github.com/joho/godotenv"
@@ -58,6 +59,7 @@ func main() {
 	// CLI Flags
 	testNet := flag.Bool("testnet", false, "Connect to Rubix TestNet (default: MainNet)")
 	swarmKeyPath := flag.String("swarmkey", "", "Path to a custom swarm.key file (overrides built-in keys)")
+	runSync := flag.Bool("sync", false, "Run one token-chain sync cycle 10s after startup (manual test mode; no periodic sync)")
 	flag.Parse()
 
 	startTime = time.Now()
@@ -140,6 +142,31 @@ func main() {
 	}
 
 	// --------------------------------------------------
+	// Token chain sync (manual one-shot via -sync flag)
+	// --------------------------------------------------
+	syncCtx, syncCancel := context.WithCancel(context.Background())
+	defer syncCancel()
+	if *runSync {
+		if tokenSyncSvc := tokensync.NewTokenSyncServiceFromEnv(*testNet); tokenSyncSvc != nil {
+			go func() {
+				log.Println("[TokenSync] -sync flag set; first cycle will run 10s after startup")
+				select {
+				case <-syncCtx.Done():
+					return
+				case <-time.After(10 * time.Second):
+				}
+				log.Println("[TokenSync] Starting one-shot sync cycle")
+				tokenSyncSvc.RunOnce(syncCtx)
+				log.Println("[TokenSync] One-shot sync cycle finished; explorer continues serving (no further syncs this run)")
+			}()
+		} else {
+			log.Println("[TokenSync] -sync flag set but fullnode peer not configured (need TOKEN_SYNC_FULLNODE_PEER_ID)")
+		}
+	} else {
+		log.Println("[TokenSync] Skipped (start with -sync to trigger one cycle)")
+	}
+
+	// --------------------------------------------------
 	// HTTP router + CORS
 	// --------------------------------------------------
 	r := router.NewRouter()
@@ -177,6 +204,8 @@ func main() {
 
 	shutdownStart := time.Now()
 	log.Printf("Shutdown signal received at %s\n", shutdownStart.Format(time.RFC1123))
+
+	syncCancel()
 
 	// 1) Stop accepting new HTTP requests
 	httpCtx, httpCancel := context.WithTimeout(context.Background(), 10*time.Second)
