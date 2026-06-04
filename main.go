@@ -142,28 +142,44 @@ func main() {
 	}
 
 	// --------------------------------------------------
-	// Token chain sync (manual one-shot via -sync flag)
+	// Token chain sync — libp2p sync-txn-info-chain consumer.
+	//
+	// Two independent triggers:
+	//   --sync                            → one-shot manual run, OneShotDelayFromEnv()
+	//                                       after startup (default 10s, so IPFS daemon is up).
+	//   TOKEN_SYNC_SCHEDULER_ENABLED=true → recurring run every IntervalFromEnv()
+	//                                       (default 6h).
+	// Both share a single Scheduler; its atomic guard skips a tick if a
+	// run is already in-flight, so the one-shot and the periodic timer
+	// can never overlap.
 	// --------------------------------------------------
 	syncCtx, syncCancel := context.WithCancel(context.Background())
 	defer syncCancel()
+
+	syncCfg := tokensync.ConfigFromEnv(*testNet)
+	syncForwarder := tokensync.NewShellAdapter(ipfsHost)
+	syncSvc := tokensync.NewService(syncCfg, syncForwarder)
+	syncScheduler := tokensync.NewScheduler(syncSvc, tokensync.IntervalFromEnv())
+
 	if *runSync {
-		if tokenSyncSvc := tokensync.NewTokenSyncServiceFromEnv(*testNet); tokenSyncSvc != nil {
-			go func() {
-				log.Println("[TokenSync] -sync flag set; first cycle will run 10s after startup")
-				select {
-				case <-syncCtx.Done():
-					return
-				case <-time.After(10 * time.Second):
-				}
-				log.Println("[TokenSync] Starting one-shot sync cycle")
-				tokenSyncSvc.RunOnce(syncCtx)
-				log.Println("[TokenSync] One-shot sync cycle finished; explorer continues serving (no further syncs this run)")
-			}()
-		} else {
-			log.Println("[TokenSync] -sync flag set but fullnode peer not configured (need TOKEN_SYNC_FULLNODE_PEER_ID)")
-		}
+		delay := tokensync.OneShotDelayFromEnv()
+		go func() {
+			log.Printf("[Sync] -sync flag set; one-shot will run %s after startup", delay)
+			select {
+			case <-syncCtx.Done():
+				return
+			case <-time.After(delay):
+			}
+			syncScheduler.RunOneShot(syncCtx, "one-shot (-sync)")
+		}()
 	} else {
-		log.Println("[TokenSync] Skipped (start with -sync to trigger one cycle)")
+		log.Println("[Sync] -sync flag absent — no one-shot run this startup")
+	}
+
+	if tokensync.SchedulerEnabledFromEnv() {
+		go syncScheduler.Start(syncCtx)
+	} else {
+		log.Println("[Sync] scheduler disabled (set TOKEN_SYNC_SCHEDULER_ENABLED=true to enable)")
 	}
 
 	// --------------------------------------------------

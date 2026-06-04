@@ -74,6 +74,10 @@ func ConnectAndMigrate(drop bool) {
 		&models.TokenChain{},
 		&models.TokenChainArray{},
 		&models.DIDBalance{},
+		// Sync-only mirror tables (sync-txn-info-chain consumer). UI does
+		// not read from these.
+		&models.SyncTransaction{},
+		&models.SyncTokenChain{},
 	}
 
 	err = WriteDB.AutoMigrate(allModels...)
@@ -105,8 +109,12 @@ func ensureUniqueConstraints(db *gorm.DB, models []interface{}) {
 			log.Printf("Skipping %s: No primary key defined in model", tableName)
 			continue
 		}
-
-		// Currently support single-column PKs for this migration
+		// Composite PKs are created at table-create time by AutoMigrate;
+		// this manual ADD PRIMARY KEY backstop only knows how to issue a
+		// single-column constraint, so skip composite-PK models entirely.
+		if len(pkFields) > 1 {
+			continue
+		}
 		pk := pkFields[0]
 
 		query := fmt.Sprintf(`

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"strings"
 	"time"
@@ -12,47 +13,10 @@ import (
 // DefaultFullnodePeersURL is the canonical registry of fullnode peer IDs
 // published by the Rubix team. Operators can override via
 // TOKEN_SYNC_FULLNODE_PEERS_URL (e.g. a private fork).
+//
+// The file carries only peer_id (no IPs, no multiaddrs) — that's the only
+// identifier the libp2p stack needs.
 const DefaultFullnodePeersURL = "https://raw.githubusercontent.com/rubixchain/assets/refs/heads/main/fullnodes.json"
-
-// PeerResolver returns a fullnode peer ID to dial. Implementations:
-//   - StaticPeerResolver: returns a pre-configured ID (env var)
-//   - RegistryPeerResolver: fetches the registry JSON, picks first Active peer
-//
-// Resolution is intentionally lazy — the client doesn't call ResolvePeerID
-// until the first sync request, so a -sync run that finds no flagged tokens
-// never hits the network.
-type PeerResolver interface {
-	ResolvePeerID(ctx context.Context) (string, error)
-}
-
-// StaticPeerResolver returns a hard-coded peer ID. Used when an operator
-// pins a specific fullnode via TOKEN_SYNC_FULLNODE_PEER_ID.
-type StaticPeerResolver struct {
-	PeerID string
-}
-
-func (s StaticPeerResolver) ResolvePeerID(_ context.Context) (string, error) {
-	id := strings.TrimSpace(s.PeerID)
-	if id == "" {
-		return "", fmt.Errorf("static peer ID is empty")
-	}
-	return id, nil
-}
-
-// RegistryPeerResolver fetches a JSON registry of fullnode peer IDs grouped by
-// network and returns the first Active peer for the configured network.
-//
-// Expected registry shape (matches https://raw.githubusercontent.com/rubixchain/assets/refs/heads/main/fullnodes.json):
-//
-//	{
-//	  "mainnet": [{"peer_id": "12D3Koo...", "status": "Active"}, ...],
-//	  "testnet": [{"peer_id": "12D3Koo...", "status": "Active"}, ...]
-//	}
-type RegistryPeerResolver struct {
-	URL     string
-	Network string // "mainnet" or "testnet"
-	Client  *http.Client
-}
 
 type fullnodePeer struct {
 	PeerID string `json:"peer_id"`
@@ -64,53 +28,89 @@ type fullnodesRegistry struct {
 	Testnet []fullnodePeer `json:"testnet"`
 }
 
-func (r RegistryPeerResolver) ResolvePeerID(ctx context.Context) (string, error) {
-	if r.URL == "" {
-		return "", fmt.Errorf("registry URL is empty")
+// PeerSource fetches the registry and picks one active fullnode peer ID for a
+// sync run. The same peer must be reused across the run so total_pages stays
+// stable — see PickActivePeer.
+type PeerSource struct {
+	URL     string
+	Network string // "mainnet" or "testnet"
+	Client  *http.Client
+	Rand    *rand.Rand // optional; tests inject a deterministic source
+}
+
+// NewPeerSource builds a PeerSource with sensible defaults. URL defaults to
+// DefaultFullnodePeersURL when empty; Network defaults to "mainnet".
+func NewPeerSource(url, network string) *PeerSource {
+	if url == "" {
+		url = DefaultFullnodePeersURL
 	}
-	network := strings.ToLower(strings.TrimSpace(r.Network))
+	if network == "" {
+		network = "mainnet"
+	}
+	return &PeerSource{
+		URL:     url,
+		Network: network,
+		Client:  &http.Client{Timeout: 15 * time.Second},
+		Rand:    rand.New(rand.NewSource(time.Now().UnixNano())),
+	}
+}
+
+// PickActivePeer fetches the registry, filters to status="Active" entries for
+// the configured network, and returns one peer ID picked at random.
+// Caller pins to this peer for the entire sync run.
+func (p *PeerSource) PickActivePeer(ctx context.Context) (string, error) {
+	peers, err := p.listActivePeers(ctx)
+	if err != nil {
+		return "", err
+	}
+	if len(peers) == 0 {
+		return "", fmt.Errorf("no active fullnode peers in %s", p.Network)
+	}
+	return peers[p.Rand.Intn(len(peers))], nil
+}
+
+func (p *PeerSource) listActivePeers(ctx context.Context) ([]string, error) {
+	if p.URL == "" {
+		return nil, fmt.Errorf("peer registry URL is empty")
+	}
+	network := strings.ToLower(strings.TrimSpace(p.Network))
 	if network == "" {
 		network = "mainnet"
 	}
 
-	client := r.Client
-	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Second}
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.URL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.URL, nil)
 	if err != nil {
-		return "", fmt.Errorf("build registry request: %w", err)
+		return nil, fmt.Errorf("build registry request: %w", err)
 	}
-	resp, err := client.Do(req)
+	resp, err := p.Client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("fetch registry %s: %w", r.URL, err)
+		return nil, fmt.Errorf("fetch registry %s: %w", p.URL, err)
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("registry %s returned HTTP %d", r.URL, resp.StatusCode)
+		return nil, fmt.Errorf("registry %s returned HTTP %d", p.URL, resp.StatusCode)
 	}
 
 	var reg fullnodesRegistry
 	if err := json.NewDecoder(resp.Body).Decode(&reg); err != nil {
-		return "", fmt.Errorf("decode registry: %w", err)
+		return nil, fmt.Errorf("decode registry: %w", err)
 	}
 
-	var peers []fullnodePeer
+	var src []fullnodePeer
 	switch network {
 	case "testnet":
-		peers = reg.Testnet
+		src = reg.Testnet
 	case "mainnet":
-		peers = reg.Mainnet
+		src = reg.Mainnet
 	default:
-		return "", fmt.Errorf("unknown network %q (use mainnet or testnet)", network)
+		return nil, fmt.Errorf("unknown network %q (use mainnet or testnet)", network)
 	}
 
-	for _, p := range peers {
-		if strings.EqualFold(strings.TrimSpace(p.Status), "Active") && strings.TrimSpace(p.PeerID) != "" {
-			return strings.TrimSpace(p.PeerID), nil
+	active := make([]string, 0, len(src))
+	for _, peer := range src {
+		if strings.EqualFold(strings.TrimSpace(peer.Status), "Active") && strings.TrimSpace(peer.PeerID) != "" {
+			active = append(active, strings.TrimSpace(peer.PeerID))
 		}
 	}
-	return "", fmt.Errorf("no active fullnode peers listed for network %s in registry %s", network, r.URL)
+	return active, nil
 }
