@@ -36,6 +36,9 @@ func HandleIncomingTxn(newEvent *model.EventTransaction) {
 		if ok, reason := ValidateAllowlist(info); !ok {
 			newEvent.Status = false
 			newEvent.Message = reason
+		} else if ok, reason := CheckNoDoubleMint(info); !ok {
+			newEvent.Status = false
+			newEvent.Message = reason
 		}
 	}
 
@@ -306,4 +309,55 @@ func isRBTMintTransaction(info *model.TransactionInfo) bool {
 		}
 	}
 	return true
+}
+
+// Rejects a mint transaction targeting any RBT token already present in
+// TokenChain with Role=Mint. Catches duplicate mints regardless of whether
+// the second attempt is by the same DID or another.
+//
+// Out-of-order safety: we check TokenChain (Role=Mint) rather than the
+// presence of a Tokens row, because a Tokens row can also be created by a
+// transfer that arrived before its originating mint (see the
+// "Missed genesis" branch in token_operations.go). A late-arriving
+// legitimate mint should NOT be rejected just because a transfer landed
+// first.
+//
+// Race window: two concurrent duplicate-mints can both pass this check
+// before either worker inserts a TokenChain row. The first to write wins
+// downstream; the second silently overwrites Tokens fields. The validation-
+// time check catches the common case (duplicates arriving with any time
+// gap); tighter race protection would require row-level locking inside
+// ProcessTransactionAssets, which is out of scope here.
+func CheckNoDoubleMint(info *model.TransactionInfo) (bool, string) {
+	if !isRBTMintTransaction(info) {
+		return true, ""
+	}
+	for _, t := range info.Tokens.RBT {
+		if t == nil {
+			continue
+		}
+		if existsAt, ok := lookupExistingMintTxn(database.ReadDB, t.TokenID); ok {
+			return false, fmt.Sprintf(
+				"double mint: token %s already minted in transaction %s",
+				t.TokenID, existsAt,
+			)
+		}
+	}
+	return true, ""
+}
+
+func lookupExistingMintTxn(db *gorm.DB, tokenID string) (string, bool) {
+	if db == nil {
+		return "", false
+	}
+	var row models.TokenChain
+	err := db.Model(&models.TokenChain{}).
+		Where("token_id = ? AND role = ?", tokenID, models.TokenRole_Mint).
+		Select("transaction_id").
+		Limit(1).
+		First(&row).Error
+	if err != nil {
+		return "", false
+	}
+	return row.TransactionID, true
 }

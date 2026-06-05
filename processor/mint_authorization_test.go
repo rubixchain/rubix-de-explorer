@@ -4,7 +4,13 @@ import (
 	"strings"
 	"testing"
 
+	"explorer-server/database"
+	"explorer-server/database/models"
 	"explorer-server/model"
+
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 const (
@@ -294,4 +300,144 @@ func TestValidateAllowlist_ReasonsContainKeyFields(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ---------- CheckNoDoubleMint ----------
+
+func setupDoubleMintTestDB(t *testing.T) func() {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&models.TokenChain{}); err != nil {
+		t.Fatalf("automigrate: %v", err)
+	}
+	prevR := database.ReadDB
+	database.ReadDB = db
+	return func() { database.ReadDB = prevR }
+}
+
+func seedMintChainRow(t *testing.T, tokenID, txnID string) {
+	t.Helper()
+	row := &models.TokenChain{
+		TokenID:       tokenID,
+		TransactionID: txnID,
+		Role:          models.TokenRole_Mint,
+	}
+	if err := database.ReadDB.Create(row).Error; err != nil {
+		t.Fatalf("seed mint row: %v", err)
+	}
+}
+
+func TestCheckNoDoubleMint_FirstMintAccepted(t *testing.T) {
+	defer setupDoubleMintTestDB(t)()
+
+	info := mkInfo("mainnet", mainnetMinterRow1DID, "1_100|")
+	ok, reason := ValidateAllowlistAndDoubleMint(info)
+	if !ok {
+		t.Errorf("first mint should be accepted, got: %q", reason)
+	}
+}
+
+func TestCheckNoDoubleMint_SecondMintRejected(t *testing.T) {
+	defer setupDoubleMintTestDB(t)()
+	seedMintChainRow(t, "1_100", "original-mint-txn-id")
+
+	info := mkInfo("mainnet", mainnetMinterRow1DID, "1_100|")
+	ok, reason := CheckNoDoubleMint(info)
+	if ok {
+		t.Fatal("duplicate mint should be rejected")
+	}
+	if !strings.Contains(reason, "double mint") {
+		t.Errorf("reason should mention double mint, got %q", reason)
+	}
+	if !strings.Contains(reason, "1_100") {
+		t.Errorf("reason should mention token id, got %q", reason)
+	}
+	if !strings.Contains(reason, "original-mint-txn-id") {
+		t.Errorf("reason should surface the original mint txn id, got %q", reason)
+	}
+}
+
+// A transfer arriving before the mint creates a Tokens row but no TokenChain
+// row with Role=Mint. The later legitimate mint must still be accepted.
+func TestCheckNoDoubleMint_TransferRoleDoesNotBlockMint(t *testing.T) {
+	defer setupDoubleMintTestDB(t)()
+	// Seed a TokenChain row for the same token with a TRANSFER role.
+	row := &models.TokenChain{
+		TokenID: "1_100", TransactionID: "transfer-txn", Role: models.TokenRole_Transfer,
+	}
+	if err := database.ReadDB.Create(row).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	info := mkInfo("mainnet", mainnetMinterRow1DID, "1_100|")
+	ok, _ := CheckNoDoubleMint(info)
+	if !ok {
+		t.Error("a prior transfer must not block a later (genuine) mint")
+	}
+}
+
+func TestCheckNoDoubleMint_TransfersPass(t *testing.T) {
+	defer setupDoubleMintTestDB(t)()
+	seedMintChainRow(t, "1_100", "original-mint-txn-id")
+
+	// Same token_id, but this is a transfer (prev != ""). Must NOT be
+	// classified as a mint, so the check passes.
+	info := mkInfo("mainnet", "anyDID", "1_100|prev_tx_id")
+	ok, _ := CheckNoDoubleMint(info)
+	if !ok {
+		t.Error("transfer should not be rejected by double-mint check")
+	}
+}
+
+func TestCheckNoDoubleMint_SecondTokenInBatchTrips(t *testing.T) {
+	defer setupDoubleMintTestDB(t)()
+	seedMintChainRow(t, "1_200", "original-2")
+
+	// Batch mint: 1_100 is fresh; 1_200 already minted. The check must
+	// reject the whole transaction on the FIRST offending token.
+	info := mkInfo("mainnet", mainnetMinterRow1DID, "1_100|", "1_200|")
+	ok, reason := CheckNoDoubleMint(info)
+	if ok {
+		t.Fatal("batch mint containing a duplicate should be rejected")
+	}
+	if !strings.Contains(reason, "1_200") {
+		t.Errorf("reason should mention the duplicate token, got %q", reason)
+	}
+}
+
+func TestCheckNoDoubleMint_NilInfoPasses(t *testing.T) {
+	defer setupDoubleMintTestDB(t)()
+	ok, _ := CheckNoDoubleMint(nil)
+	if !ok {
+		t.Error("nil info should not trip double-mint check")
+	}
+}
+
+func TestCheckNoDoubleMint_NoRBTPasses(t *testing.T) {
+	defer setupDoubleMintTestDB(t)()
+	info := &model.TransactionInfo{
+		Network:   "mainnet",
+		Initiator: "anyDID",
+		Tokens:    &model.TransactionTokens{},
+	}
+	ok, _ := CheckNoDoubleMint(info)
+	if !ok {
+		t.Error("no-RBT transaction should pass")
+	}
+}
+
+// Helper so the first-mint test can run both validators in the same call
+// the same way HandleIncomingTxn does.
+func ValidateAllowlistAndDoubleMint(info *model.TransactionInfo) (bool, string) {
+	SetExplorerNetwork(false)
+	defer resetExplorerNetworkForTesting()
+	if ok, reason := ValidateAllowlist(info); !ok {
+		return false, reason
+	}
+	return CheckNoDoubleMint(info)
 }
