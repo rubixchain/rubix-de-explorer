@@ -3,6 +3,8 @@ package processor
 import (
 	"fmt"
 	"log"
+	"strings"
+	"sync"
 
 	"explorer-server/database"
 	"explorer-server/database/models"
@@ -30,6 +32,11 @@ func HandleIncomingTxn(newEvent *model.EventTransaction) {
 	if ok, reason := ValidateTransactionFormatWithReason(newEvent); !ok {
 		newEvent.Status = false
 		newEvent.Message = reason
+	} else if info, err := newEvent.Transaction.ParseInfo(); err == nil && info != nil {
+		if ok, reason := ValidateAllowlist(info); !ok {
+			newEvent.Status = false
+			newEvent.Message = reason
+		}
 	}
 
 	// 2. Enqueue for processing
@@ -190,4 +197,113 @@ func ProcessDBTransaction(newEvent *model.EventTransaction, workerID int) {
 
 	// ONE SUMMARY LOG: Success
 	log.Printf("[Worker %d] SUCCESS: Transaction %s processed (Status: %v)", workerID, txnID, newEvent.Status)
+}
+
+// ---------- DID + token-level allowlist ----------
+
+var (
+	explorerNetworkMu sync.RWMutex
+	explorerNetwork   string
+)
+
+func SetExplorerNetwork(testnet bool) {
+	explorerNetworkMu.Lock()
+	defer explorerNetworkMu.Unlock()
+	if testnet {
+		explorerNetwork = util.NetworkTestnet
+	} else {
+		explorerNetwork = util.NetworkMainnet
+	}
+}
+
+func GetExplorerNetwork() string {
+	explorerNetworkMu.RLock()
+	defer explorerNetworkMu.RUnlock()
+	return explorerNetwork
+}
+
+func resetExplorerNetworkForTesting() {
+	explorerNetworkMu.Lock()
+	defer explorerNetworkMu.Unlock()
+	explorerNetwork = ""
+}
+
+func networkMatches(infoNetwork, configured string) bool {
+	if configured == "" {
+		return false
+	}
+	if strings.TrimSpace(infoNetwork) == "" {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(infoNetwork), configured)
+}
+
+// Three checks in order: network match, per-token range, mainnet/testnet
+// mint DID partition. Returns the first failure with a reason suitable for
+// FailedTransactionInfo.failure_reason.
+func ValidateAllowlist(info *model.TransactionInfo) (bool, string) {
+	if info == nil {
+		return true, ""
+	}
+
+	configured := GetExplorerNetwork()
+	if !networkMatches(info.Network, configured) {
+		return false, fmt.Sprintf(
+			"network mismatch: explorer=%q transaction=%q",
+			configured, info.Network,
+		)
+	}
+
+	if info.Tokens == nil || len(info.Tokens.RBT) == 0 {
+		return true, ""
+	}
+
+	isMint := isRBTMintTransaction(info)
+	network := util.NormalizeNetwork(info.Network)
+
+	for _, t := range info.Tokens.RBT {
+		if t == nil {
+			continue
+		}
+		elems, err := util.ParseRbtTokenID(t.TokenID)
+		if err != nil {
+			return false, fmt.Sprintf(
+				"unparseable RBT token ID for allowlist check: %s",
+				t.TokenID,
+			)
+		}
+
+		if !util.IsAuthorizedTokenRange(network, elems.Level, elems.TokenNumber) {
+			return false, fmt.Sprintf(
+				"token %s outside allowed range for %s: level=%d number=%d",
+				t.TokenID, network, elems.Level, elems.TokenNumber,
+			)
+		}
+
+		if isMint && !util.IsAuthorizedMint(network, info.Initiator, elems.Level, elems.TokenNumber) {
+			return false, fmt.Sprintf(
+				"unauthorized mint on %s: initiator=%s token=%s level=%d number=%d",
+				network, info.Initiator, t.TokenID, elems.Level, elems.TokenNumber,
+			)
+		}
+	}
+
+	return true, ""
+}
+
+// A transaction is a mint when every RBT token has empty previous_transaction_id
+// — same classifier the pubsub ProcessTransactionAssets path uses.
+func isRBTMintTransaction(info *model.TransactionInfo) bool {
+	if info == nil || info.Tokens == nil || len(info.Tokens.RBT) == 0 {
+		return false
+	}
+	for _, t := range info.Tokens.RBT {
+		if t == nil {
+			continue
+		}
+		if t.PreviousTransactionID != "" {
+			return false
+		}
+	}
+	return true
 }

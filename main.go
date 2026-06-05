@@ -71,6 +71,9 @@ func main() {
 		log.Println("Network: MainNet")
 	}
 
+	// Allowlist filter uses this to reject cross-network leaks via shared IPFS pubsub.
+	processor.SetExplorerNetwork(*testNet)
+
 	// Detect CPU cores
 	totalCores := runtime.NumCPU()
 	runtime.GOMAXPROCS(totalCores)

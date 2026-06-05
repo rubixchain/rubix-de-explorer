@@ -47,32 +47,28 @@ func TestIsValidDID(t *testing.T) {
 }
 
 func TestIsValidFT(t *testing.T) {
+	const did = "bafybmihy4panvvrjssdjqksrwjcxza6xpgnxvcyufn2wuam75idnqlugdq"
 	tests := []struct {
 		name     string
 		tokenID  string
 		expected bool
 	}{
-		{
-			name:     "Valid FT",
-			tokenID:  "APPLE_1_bafybmihy4panvvrjssdjqksrwjcxza6xpgnxvcyufn2wuam75idnqlugdq",
-			expected: true,
-		},
-		{
-			name:     "Invalid FT - no name",
-			tokenID:  "_1_bafybmihy4panvvrjssdjqksrwjcxza6xpgnxvcyufn2wuam75idnqlugdq",
-			expected: false,
-		},
-		{
-			name:     "Invalid FT - invalid DID",
-			tokenID:  "APPLE_1_invalid_did",
-			expected: false,
-		},
+		{"Valid FT - simple alphanumeric name", "APPLE_" + did + "_1", true},
+		{"Valid FT - name with hyphens (real wire shape)", "ft-A-00001-x7j6_" + did + "_0", true},
+		{"Valid FT - name with dots", "Foo.Bar_" + did + "_5", true},
+		{"Valid FT - large index", "X_" + did + "_999999", true},
+		{"Invalid FT - empty name", "_" + did + "_1", false},
+		{"Invalid FT - name contains underscore", "AP_PLE_" + did + "_1", false},
+		{"Invalid FT - DID malformed", "APPLE_not-a-did_1", false},
+		{"Invalid FT - missing index", "APPLE_" + did, false},
+		{"Invalid FT - non-numeric index", "APPLE_" + did + "_abc", false},
+		{"Invalid FT - DID uppercase chars (outside base32)", "APPLE_BAFYBMIHY4PANVVRJSSDJQKSRWJCXZA6XPGNXVCYUFN2WUAM75IDNQLUGDQ_1", false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := IsValidFT(tt.tokenID); got != tt.expected {
-				t.Errorf("IsValidFT() = %v, want %v", got, tt.expected)
+				t.Errorf("IsValidFT(%q) = %v, want %v", tt.tokenID, got, tt.expected)
 			}
 		})
 	}
