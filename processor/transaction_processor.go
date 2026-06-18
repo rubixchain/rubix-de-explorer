@@ -304,7 +304,17 @@ func isRBTMintTransaction(info *model.TransactionInfo) bool {
 		if t == nil {
 			continue
 		}
+		// A non-empty previous transaction ID means a transfer, not a mint.
 		if t.PreviousTransactionID != "" {
+			return false
+		}
+		// Split outputs are freshly created sub-tokens (PartIndex > 0) of an
+		// already-minted parent. They carry an empty previous_transaction_id
+		// but are NOT mints — only whole tokens (PartIndex == 0) are genesis
+		// mints. A single part token disqualifies the whole transaction from
+		// the mint DID gate (it's a split, allowed for any owner). Unparseable
+		// IDs are left to the range check in the caller to reject.
+		if elems, err := util.ParseRbtTokenID(t.TokenID); err == nil && elems.PartIndex > 0 {
 			return false
 		}
 	}

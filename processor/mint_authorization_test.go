@@ -245,6 +245,27 @@ func TestValidateAllowlist_MixedRBT_OneTransferDisablesMintCheck(t *testing.T) {
 	}
 }
 
+// A split produces freshly created sub-tokens (3-part IDs, empty prev) of an
+// already-minted parent. The splitter is a normal owner, not an allowlisted
+// minter, so the mint DID gate must NOT apply — these are not genesis mints.
+// Regression for split txns landing in FailedTransactionInfo as
+// "unauthorized mint".
+func TestValidateAllowlist_TestnetSplitPartsByAnyDID_Accepted(t *testing.T) {
+	SetExplorerNetwork(true)
+	defer resetExplorerNetworkForTesting()
+
+	stranger := "bafybmistrangermistrangermistrangermistrangermistrangerff"
+	info := mkInfo("testnet", stranger,
+		"50001_2000295_2|",
+		"50001_2000295_3|",
+		"50001_2000295_4|",
+	)
+	ok, reason := ValidateAllowlist(info)
+	if !ok {
+		t.Errorf("split into part tokens by any DID should be accepted, got %q", reason)
+	}
+}
+
 func TestValidateAllowlist_NoRBT_OnlyChecksNetwork(t *testing.T) {
 	SetExplorerNetwork(false)
 	defer resetExplorerNetworkForTesting()
