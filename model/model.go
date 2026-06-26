@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"strings"
 )
 
 // --- Paginated Response Wrappers ---
@@ -73,6 +74,58 @@ type Transactions struct {
 	Signature json.RawMessage `json:"signature"`
 }
 
+// trimTokenInfos strips surrounding whitespace from the identifier fields of a
+// slice of TokenInfo. Upstream nodes occasionally emit whitespace-padded IDs.
+func trimTokenInfos(ts []*TokenInfo) {
+	for _, t := range ts {
+		if t == nil {
+			continue
+		}
+		t.TokenID = strings.TrimSpace(t.TokenID)
+		t.PreviousTransactionID = strings.TrimSpace(t.PreviousTransactionID)
+	}
+}
+
+// Normalize trims surrounding whitespace from every DID and token identifier in
+// the transaction. Upstream payloads sometimes carry padded fields (e.g. a
+// whitespace-prefixed owner DID); without this, the anchored format regexes in
+// util reject otherwise-valid identities and the txn lands in
+// FailedTransactionInfo. Called from ParseInfo so validation, the flattened
+// TransactionInfo row, and asset processing all see clean values.
+func (info *TransactionInfo) Normalize() {
+	if info == nil {
+		return
+	}
+	info.Initiator = strings.TrimSpace(info.Initiator)
+	info.Owner = strings.TrimSpace(info.Owner)
+	info.Network = strings.TrimSpace(info.Network)
+	if info.Tokens != nil {
+		trimTokenInfos(info.Tokens.RBT)
+		trimTokenInfos(info.Tokens.NFT)
+		trimTokenInfos(info.Tokens.FT)
+		trimTokenInfos(info.Tokens.SmartContract)
+	}
+	trimTokenInfos(info.CommittedTokens)
+	for _, q := range info.Quorums {
+		if q == nil {
+			continue
+		}
+		q.Did = strings.TrimSpace(q.Did)
+		trimTokenInfos(q.Tokens)
+	}
+}
+
+// Normalize trims surrounding whitespace from the quorum DIDs in a signature.
+// Signature payloads themselves are left untouched.
+func (s *Signature) Normalize() {
+	if s == nil {
+		return
+	}
+	for i := range s.Quorums {
+		s.Quorums[i].Did = strings.TrimSpace(s.Quorums[i].Did)
+	}
+}
+
 // ParseInfo deserializes the raw Info bytes into a structured TransactionInfo.
 func (t *Transactions) ParseInfo() (*TransactionInfo, error) {
 	if t.Info == nil {
@@ -82,6 +135,7 @@ func (t *Transactions) ParseInfo() (*TransactionInfo, error) {
 	if err := json.Unmarshal(t.Info, &info); err != nil {
 		return nil, err
 	}
+	info.Normalize()
 	return &info, nil
 }
 
@@ -94,6 +148,7 @@ func (t *Transactions) ParseSignature() (*Signature, error) {
 	if err := json.Unmarshal(t.Signature, &sig); err != nil {
 		return nil, err
 	}
+	sig.Normalize()
 	return &sig, nil
 }
 
