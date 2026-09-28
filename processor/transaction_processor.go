@@ -207,6 +207,9 @@ func ProcessDBTransaction(newEvent *model.EventTransaction, workerID int) {
 var (
 	explorerNetworkMu sync.RWMutex
 	explorerNetwork   string
+	// True on a testnet whose swarm key isn't the Rubix one; mints are then
+	// checked against the custom-net allowlist instead of the testnet one.
+	explorerCustomNet bool
 )
 
 func SetExplorerNetwork(testnet bool) {
@@ -219,16 +222,29 @@ func SetExplorerNetwork(testnet bool) {
 	}
 }
 
+func SetExplorerCustomNetwork(custom bool) {
+	explorerNetworkMu.Lock()
+	defer explorerNetworkMu.Unlock()
+	explorerCustomNet = custom
+}
+
 func GetExplorerNetwork() string {
 	explorerNetworkMu.RLock()
 	defer explorerNetworkMu.RUnlock()
 	return explorerNetwork
 }
 
+func isExplorerCustomNetwork() bool {
+	explorerNetworkMu.RLock()
+	defer explorerNetworkMu.RUnlock()
+	return explorerCustomNet
+}
+
 func resetExplorerNetworkForTesting() {
 	explorerNetworkMu.Lock()
 	defer explorerNetworkMu.Unlock()
 	explorerNetwork = ""
+	explorerCustomNet = false
 }
 
 func networkMatches(infoNetwork, configured string) bool {
@@ -263,6 +279,9 @@ func ValidateAllowlist(info *model.TransactionInfo) (bool, string) {
 
 	isMint := isRBTMintTransaction(info)
 	network := util.NormalizeNetwork(info.Network)
+	if network == util.NetworkTestnet && isExplorerCustomNetwork() {
+		network = util.NetworkCustomTestnet
+	}
 
 	for _, t := range info.Tokens.RBT {
 		if t == nil {

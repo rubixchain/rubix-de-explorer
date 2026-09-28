@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"flag"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"explorer-server/config"
 	"explorer-server/database"
 	"explorer-server/database/models"
 	"explorer-server/database/operations"
@@ -26,6 +28,22 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/rs/cors"
 )
+
+// isCustomTestnet mirrors rubixgoplatform's resolveNetworkIdentity: a testnet
+// on a swarm key other than the Rubix testnet key is a custom network. Mainnet
+// keeps its built-in list whatever key it runs with, and an unreadable key
+// falls back to the built-in list too.
+func isCustomTestnet(testNet bool, swarmKeyPath string) bool {
+	if !testNet || swarmKeyPath == "" {
+		return false
+	}
+	key, err := os.ReadFile(swarmKeyPath)
+	if err != nil {
+		log.Printf("Failed to read swarm key, keeping the built-in minter allowlist: %v", err)
+		return false
+	}
+	return !bytes.Equal(bytes.TrimSpace(key), bytes.TrimSpace(config.TestNetSwarmKey))
+}
 
 func main() {
 	// 1. Setup Logging (Unique File per Restart + Console)
@@ -73,6 +91,10 @@ func main() {
 
 	// Allowlist filter uses this to reject cross-network leaks via shared IPFS pubsub.
 	processor.SetExplorerNetwork(*testNet)
+	if isCustomTestnet(*testNet, *swarmKeyPath) {
+		processor.SetExplorerCustomNetwork(true)
+		log.Println("Minter allowlist: custom testnet")
+	}
 
 	// Detect CPU cores
 	totalCores := runtime.NumCPU()

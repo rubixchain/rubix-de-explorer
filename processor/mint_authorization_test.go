@@ -17,7 +17,44 @@ const (
 	mainnetMinterRow1DID = "bafybmid35wgktknwpaddfxkgdrouq5z2cmcdz27gf2u4xvrh4pswmrnvpe"
 	mainnetMinterRow2DID = "bafybmifogacbfyny7wahapjuk7jpjl3ffylsakmtbrcqmdwckofnsg6rbu"
 	testnetMinterRow1DID = "bafybmiairxfiplfpwvzzgslubbx3dwqrutwhrgtypnzyb752rrjbthgrwm"
+	customNetMinter1DID  = "bafybmib5743qlxfoho35dmnk4b4nvte6e2yqrejhgtgzkwnh5woozlpdum"
 )
+
+func setCustomNetForTesting(t *testing.T) {
+	SetExplorerNetwork(true)
+	SetExplorerCustomNetwork(true)
+	t.Cleanup(resetExplorerNetworkForTesting)
+}
+
+func TestValidateAllowlist_CustomNetAuthorizedMint_Accepted(t *testing.T) {
+	setCustomNetForTesting(t)
+	ok, reason := ValidateAllowlist(mkInfo("testnet", customNetMinter1DID, "60001_100|"))
+	if !ok {
+		t.Errorf("authorized custom-net mint should be accepted, got %q", reason)
+	}
+}
+
+func TestValidateAllowlist_CustomNetRubixTestnetMinter_Rejected(t *testing.T) {
+	setCustomNetForTesting(t)
+	if ok, _ := ValidateAllowlist(mkInfo("testnet", testnetMinterRow1DID, "60001_100|")); ok {
+		t.Error("Rubix testnet minter should be rejected on custom testnet")
+	}
+}
+
+func TestValidateAllowlist_CustomNetTestnetLevel_Rejected(t *testing.T) {
+	setCustomNetForTesting(t)
+	if ok, _ := ValidateAllowlist(mkInfo("testnet", testnetMinterRow1DID, "50001_100|")); ok {
+		t.Error("level 50001 should be rejected on custom testnet")
+	}
+}
+
+func TestValidateAllowlist_RubixTestnetIgnoresCustomNetMinter(t *testing.T) {
+	SetExplorerNetwork(true)
+	defer resetExplorerNetworkForTesting()
+	if ok, _ := ValidateAllowlist(mkInfo("testnet", customNetMinter1DID, "60001_100|")); ok {
+		t.Error("custom-net mint should be rejected on Rubix testnet explorer")
+	}
+}
 
 // rbtSpec format: "tokenID|previous_transaction_id"; empty prev = mint.
 func mkInfo(network, initiator string, rbtSpecs ...string) *model.TransactionInfo {

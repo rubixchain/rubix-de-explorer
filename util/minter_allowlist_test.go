@@ -191,6 +191,42 @@ func TestIsAuthorizedMint_TestnetNumberOutOfRange(t *testing.T) {
 	}
 }
 
+func TestIsAuthorizedTokenRange_CustomNetLevel(t *testing.T) {
+	if !IsAuthorizedTokenRange(NetworkCustomTestnet, 60001, 100) {
+		t.Error("level 60001 should be allowed on custom testnet")
+	}
+	if IsAuthorizedTokenRange(NetworkCustomTestnet, 50001, 100) {
+		t.Error("Rubix testnet level should be rejected on custom testnet")
+	}
+	if IsAuthorizedTokenRange(NetworkTestnet, 60001, 100) {
+		t.Error("custom-net level should be rejected on Rubix testnet")
+	}
+}
+
+func TestIsAuthorizedMint_CustomNetDIDsAtBoundaries(t *testing.T) {
+	for _, e := range customNetAllowlist {
+		t.Run(e.DID[:16], func(t *testing.T) {
+			if !IsAuthorizedMint(NetworkCustomTestnet, e.DID, e.Level, e.StartTokenNumber) ||
+				!IsAuthorizedMint(NetworkCustomTestnet, e.DID, e.Level, e.EndTokenNumber) {
+				t.Errorf("DID %s should mint %d..%d", e.DID, e.StartTokenNumber, e.EndTokenNumber)
+			}
+			if IsAuthorizedMint(NetworkCustomTestnet, e.DID, e.Level, e.StartTokenNumber-1) ||
+				IsAuthorizedMint(NetworkCustomTestnet, e.DID, e.Level, e.EndTokenNumber+1) {
+				t.Errorf("DID %s should be rejected outside its range", e.DID)
+			}
+			if IsAuthorizedMint(NetworkTestnet, e.DID, e.Level, e.StartTokenNumber) {
+				t.Errorf("custom-net DID %s must not mint on Rubix testnet", e.DID)
+			}
+		})
+	}
+}
+
+func TestIsAuthorizedMint_CustomNetRejectsRubixTestnetMinter(t *testing.T) {
+	if IsAuthorizedMint(NetworkCustomTestnet, testnetAllowlist[0].DID, 60001, 100) {
+		t.Error("Rubix testnet minter must not mint on custom testnet")
+	}
+}
+
 func TestIsAuthorizedMint_UnknownNetwork(t *testing.T) {
 	if IsAuthorizedMint("localnet", "anyDID", 1, 100) {
 		t.Error("localnet should always be rejected")

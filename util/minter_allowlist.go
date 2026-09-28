@@ -43,9 +43,21 @@ var testnetAllowlist = []MintAccessRange{
 	{DID: "bafybmicbaadhaa76j7jlft6vxfqyzisehbekmnpa7r5g2jwqbn6dikfp4y", Level: 50001, StartTokenNumber: 3000001, EndTokenNumber: 4300000},
 }
 
+// Custom testnet = testnet on a swarm key Rubix doesn't operate. Mirrors
+// CustomNetAllowedMinters upstream (branch vaishnav/temp-custom-testnet).
+const customNetLevel = 60001
+
+var customNetAllowlist = []MintAccessRange{
+	{DID: "bafybmib5743qlxfoho35dmnk4b4nvte6e2yqrejhgtgzkwnh5woozlpdum", Level: 60001, StartTokenNumber: 1, EndTokenNumber: 2150000},
+	{DID: "bafybmidrq3arfhz5eigcnodusamddztsdbfln375bnw4adfvddwio4coyi", Level: 60001, StartTokenNumber: 2150001, EndTokenNumber: 4300000},
+}
+
 const (
 	NetworkMainnet = "mainnet"
 	NetworkTestnet = "testnet"
+	// Explorer-internal only: transactions on a custom testnet still carry
+	// network "testnet", so this never comes from NormalizeNetwork.
+	NetworkCustomTestnet = "customtestnet"
 )
 
 func IsAuthorizedTokenRange(network string, level, tokenNumber int) bool {
@@ -57,6 +69,8 @@ func IsAuthorizedTokenRange(network string, level, tokenNumber int) bool {
 		return level == mainnetLevel
 	case NetworkTestnet:
 		return level == testnetLevel
+	case NetworkCustomTestnet:
+		return level == customNetLevel
 	default:
 		return false
 	}
@@ -71,6 +85,8 @@ func IsAuthorizedMint(network, did string, level, tokenNumber int) bool {
 		table = mainnetAllowlist
 	case NetworkTestnet:
 		table = testnetAllowlist
+	case NetworkCustomTestnet:
+		table = customNetAllowlist
 	default:
 		return false
 	}
