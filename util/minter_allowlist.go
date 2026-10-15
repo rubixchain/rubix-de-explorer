@@ -48,8 +48,8 @@ var testnetAllowlist = []MintAccessRange{
 const customNetLevel = 60001
 
 var customNetAllowlist = []MintAccessRange{
-	{DID: "bafybmib5743qlxfoho35dmnk4b4nvte6e2yqrejhgtgzkwnh5woozlpdum", Level: 60001, StartTokenNumber: 1, EndTokenNumber: 2150000},
-	{DID: "bafybmidrq3arfhz5eigcnodusamddztsdbfln375bnw4adfvddwio4coyi", Level: 60001, StartTokenNumber: 2150001, EndTokenNumber: 4300000},
+	{DID: "bafybmih6fkweeuo32t6bsgzt4wo4xtccurw3m7hzz7eo6b5c5k5rmrj2ii", Level: 60001, StartTokenNumber: 1, EndTokenNumber: 2150000},
+	{DID: "bafybmihpujtqxdfvymlrwmlzi4lbzs4ikdqyemiwvju5trn3lczrzju4ke", Level: 60001, StartTokenNumber: 2150001, EndTokenNumber: 4300000},
 }
 
 const (

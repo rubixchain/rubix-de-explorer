@@ -17,7 +17,7 @@ const (
 	mainnetMinterRow1DID = "bafybmid35wgktknwpaddfxkgdrouq5z2cmcdz27gf2u4xvrh4pswmrnvpe"
 	mainnetMinterRow2DID = "bafybmifogacbfyny7wahapjuk7jpjl3ffylsakmtbrcqmdwckofnsg6rbu"
 	testnetMinterRow1DID = "bafybmiairxfiplfpwvzzgslubbx3dwqrutwhrgtypnzyb752rrjbthgrwm"
-	customNetMinter1DID  = "bafybmib5743qlxfoho35dmnk4b4nvte6e2yqrejhgtgzkwnh5woozlpdum"
+	customNetMinter1DID  = "bafybmih6fkweeuo32t6bsgzt4wo4xtccurw3m7hzz7eo6b5c5k5rmrj2ii"
 )
 
 func setCustomNetForTesting(t *testing.T) {
